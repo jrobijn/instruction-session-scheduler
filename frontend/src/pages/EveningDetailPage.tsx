@@ -6,7 +6,8 @@ import autoTable from 'jspdf-autotable';
 
 interface Instructor {
   id: number;
-  name: string;
+  first_name: string;
+  last_name: string;
 }
 
 interface Timeslot {
@@ -175,7 +176,7 @@ export default function EveningDetailPage() {
     doc.setFontSize(16);
     doc.text(`Schedule — ${dateStr}`, 14, 20);
 
-    const head = [['Time', ...evening.instructors.map(i => i.name)]];
+    const head = [['Time', ...evening.instructors.map(i => `${i.first_name} ${i.last_name}`)]];
     const body = evening.timeslots.map(ts => {
       const row: string[] = [ts.start_time];
       for (const instr of evening.instructors) {
@@ -223,7 +224,7 @@ export default function EveningDetailPage() {
             <select value={selectedInstructor} onChange={e => setSelectedInstructor(e.target.value)}>
               <option value="">Select instructor...</option>
               {availableInstructors.map(i => (
-                <option key={i.id} value={i.id}>{i.name}</option>
+                <option key={i.id} value={i.id}>{i.first_name} {i.last_name}</option>
               ))}
             </select>
             <button className="btn btn-primary" onClick={assignInstructor} disabled={!selectedInstructor}>Assign</button>
@@ -235,7 +236,7 @@ export default function EveningDetailPage() {
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {evening.instructors.map(i => (
               <span key={i.id} className="badge badge-confirmed" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem' }}>
-                {i.name}
+                {i.first_name} {i.last_name}
                 {evening.status === 'draft' && (
                   <button onClick={() => removeInstructor(i.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>
                 )}
@@ -323,7 +324,7 @@ export default function EveningDetailPage() {
               <tr>
                 <th>Time</th>
                 {evening.instructors.map(i => (
-                  <th key={i.id}>{i.name}</th>
+                  <th key={i.id}>{i.first_name} {i.last_name}</th>
                 ))}
               </tr>
             </thead>

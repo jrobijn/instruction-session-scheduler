@@ -3,7 +3,8 @@ import { api } from '../api';
 
 interface Instructor {
   id: number;
-  name: string;
+  first_name: string;
+  last_name: string;
   email: string;
   active: number;
 }
@@ -12,7 +13,7 @@ export default function InstructorsPage() {
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Instructor | null>(null);
-  const [form, setForm] = useState({ name: '', email: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', email: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -30,14 +31,14 @@ export default function InstructorsPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: '', email: '' });
+    setForm({ first_name: '', last_name: '', email: '' });
     setError('');
     setShowModal(true);
   };
 
   const openEdit = (instructor: Instructor) => {
     setEditing(instructor);
-    setForm({ name: instructor.name, email: instructor.email });
+    setForm({ first_name: instructor.first_name, last_name: instructor.last_name, email: instructor.email });
     setError('');
     setShowModal(true);
   };
@@ -95,7 +96,8 @@ export default function InstructorsPage() {
         <table>
           <thead>
             <tr>
-              <th>Name</th>
+              <th>First Name</th>
+              <th>Last Name</th>
               <th>Email</th>
               <th>Status</th>
               <th>Actions</th>
@@ -104,7 +106,8 @@ export default function InstructorsPage() {
           <tbody>
             {instructors.map(i => (
               <tr key={i.id}>
-                <td>{i.name}</td>
+                <td>{i.first_name}</td>
+                <td>{i.last_name}</td>
                 <td>{i.email}</td>
                 <td>
                   <span className={`badge ${i.active ? 'badge-confirmed' : 'badge-declined'}`}>
@@ -133,8 +136,12 @@ export default function InstructorsPage() {
             {error && <div className="alert alert-error">{error}</div>}
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label>Name</label>
-                <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+                <label>First Name</label>
+                <input value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>Last Name</label>
+                <input value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} required />
               </div>
               <div className="form-group">
                 <label>Email</label>

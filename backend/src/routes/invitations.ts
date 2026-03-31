@@ -8,7 +8,7 @@ const router = Router();
 // Get invitation details by token (public)
 router.get('/:token', (req: Request, res: Response) => {
   const invitation = db.prepare(`
-    SELECT inv.*, s.name AS student_name, s.email AS student_email,
+    SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
            te.date AS evening_date, te.notes AS evening_notes, te.status AS evening_status,
            ts.start_time AS timeslot_start_time
     FROM invitations inv
@@ -85,7 +85,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
         JOIN training_evenings te ON te.id = inv.evening_id
         WHERE te.date = ? AND inv.status != 'declined'
       )
-    ORDER BY attended_sessions ASC, name ASC
+    ORDER BY attended_sessions ASC, last_name ASC, first_name ASC
     LIMIT 1
   `).get(...alreadyInvited, invitation.evening_date) as any;
 
@@ -105,7 +105,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
 
       await sendInvitationEmail({
         to: nextStudent.email,
-        studentName: nextStudent.name,
+        studentName: nextStudent.first_name + ' ' + nextStudent.last_name,
         date: invitation.evening_date,
         token,
         clubName,
@@ -116,7 +116,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
       // Email sending failed, but invitation is still created
     }
 
-    replacement = { name: nextStudent.name, email: nextStudent.email };
+    replacement = { name: nextStudent.first_name + ' ' + nextStudent.last_name, email: nextStudent.email };
   }
 
   res.json({

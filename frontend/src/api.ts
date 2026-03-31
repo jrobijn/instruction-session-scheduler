@@ -35,14 +35,14 @@ export const api = {
   // Students
   getStudents: () => request('/students'),
   getStudent: (id: number) => request(`/students/${id}`),
-  createStudent: (data: { name: string; email: string }) => request('/students', { method: 'POST', body: JSON.stringify(data) }),
+  createStudent: (data: { first_name: string; last_name: string; email: string }) => request('/students', { method: 'POST', body: JSON.stringify(data) }),
   updateStudent: (id: number, data: Record<string, unknown>) => request(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteStudent: (id: number) => request(`/students/${id}`, { method: 'DELETE' }),
 
   // Instructors
   getInstructors: () => request('/instructors'),
   getInstructor: (id: number) => request(`/instructors/${id}`),
-  createInstructor: (data: { name: string; email: string }) => request('/instructors', { method: 'POST', body: JSON.stringify(data) }),
+  createInstructor: (data: { first_name: string; last_name: string; email: string }) => request('/instructors', { method: 'POST', body: JSON.stringify(data) }),
   updateInstructor: (id: number, data: Record<string, unknown>) => request(`/instructors/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteInstructor: (id: number) => request(`/instructors/${id}`, { method: 'DELETE' }),
 

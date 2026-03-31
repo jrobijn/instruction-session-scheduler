@@ -26,7 +26,7 @@ router.get('/:id', (req: Request, res: Response) => {
     SELECT i.* FROM instructors i
     JOIN evening_instructors ei ON ei.instructor_id = i.id
     WHERE ei.evening_id = ?
-    ORDER BY i.name
+    ORDER BY i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
   const timeslots = db.prepare(`
@@ -34,16 +34,16 @@ router.get('/:id', (req: Request, res: Response) => {
   `).all(req.params.id);
 
   const invitations = db.prepare(`
-    SELECT inv.*, s.name AS student_name, s.email AS student_email, s.attended_sessions,
+    SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.attended_sessions,
            d.name AS discipline_name, ts.start_time AS timeslot_start_time,
-           i.name AS instructor_name
+           i.first_name || ' ' || i.last_name AS instructor_name
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     JOIN timeslots ts ON ts.id = inv.timeslot_id
     JOIN instructors i ON i.id = inv.instructor_id
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
     WHERE inv.evening_id = ?
-    ORDER BY ts.start_time ASC, i.name ASC
+    ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
   res.json({ ...evening, instructors, timeslots, invitations });
@@ -187,7 +187,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
         JOIN training_evenings te ON te.id = inv.evening_id
         WHERE te.date = ? AND inv.status != 'declined'
       )
-    ORDER BY s.attended_sessions ASC, s.name ASC
+    ORDER BY s.attended_sessions ASC, s.last_name ASC, s.first_name ASC
   `).all(evening.date) as any[];
 
   const insertInvitation = db.prepare(`
@@ -199,7 +199,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     SELECT i.id FROM instructors i
     JOIN evening_instructors ei ON ei.instructor_id = i.id
     WHERE ei.evening_id = ?
-    ORDER BY i.name ASC
+    ORDER BY i.last_name ASC, i.first_name ASC
   `).all(req.params.id) as any[];
 
   const insertMany = db.transaction((studentsArr: any[], eveningId: string | string[], slots: any[]) => {
@@ -239,7 +239,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
   if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
 
   const invitations = db.prepare(`
-    SELECT inv.*, s.name AS student_name, s.email AS student_email
+    SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     WHERE inv.evening_id = ? AND inv.email_sent = 0 AND inv.status = 'invited'
