@@ -85,8 +85,7 @@ tr:hover td { background: #f1f5f9; }
 .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
 .badge-draft { background: #f1f5f9; color: var(--text-muted); }
 .badge-published { background: #dbeafe; color: #1d4ed8; }
-.badge-completed { background: #dcfce7; color: #16a34a; }
-.badge-invited { background: #fef3c7; color: #d97706; }
+.badge-pending { background: #fef3c7; color: #d97706; }
 .badge-confirmed { background: #dcfce7; color: #16a34a; }
 .badge-declined { background: #fee2e2; color: #dc2626; }
 

@@ -92,6 +92,7 @@ export default function EveningsPage() {
                     e.status === 'completed' ? 'badge-confirmed' :
                     e.status === 'invitations_sent' ? 'badge-pending' :
                     e.status === 'scheduled' ? 'badge-pending' :
+                    e.status === 'draft' ? 'badge-draft' :
                     'badge-declined'
                   }`}>
                     {e.status.replace(/_/g, ' ')}

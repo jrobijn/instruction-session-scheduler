@@ -211,6 +211,7 @@ export default function EveningDetailPage() {
           evening.status === 'completed' ? 'badge-confirmed' :
           evening.status === 'invitations_sent' ? 'badge-pending' :
           evening.status === 'scheduled' ? 'badge-pending' :
+          evening.status === 'draft' ? 'badge-draft' :
           'badge-declined'
         }`}>
           {evening.status.replace(/_/g, ' ')}
