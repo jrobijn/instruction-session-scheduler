@@ -111,7 +111,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
         clubName,
         subject,
       });
-      db.prepare('UPDATE invitations SET email_sent = 1 WHERE token = ?').run(token);
+      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE token = ?").run(token);
     } catch {
       // Email sending failed, but invitation is still created
     }

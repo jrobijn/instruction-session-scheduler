@@ -156,7 +156,8 @@ export default function EveningDetailPage() {
 
   const confirmed = evening.invitations.filter(i => i.status === 'confirmed').length;
   const declined = evening.invitations.filter(i => i.status === 'declined').length;
-  const pending = evening.invitations.filter(i => i.status === 'invited').length;
+  const invited = evening.invitations.filter(i => i.status === 'invited').length;
+  const scheduled = evening.invitations.filter(i => i.status === 'scheduled').length;
 
   // Build schedule grid: timeslots as rows, instructors as columns
   const scheduleGrid: Record<number, Record<number, Invitation | undefined>> = {};
@@ -344,6 +345,7 @@ export default function EveningDetailPage() {
                             <span className={`badge ${
                               inv.status === 'confirmed' ? 'badge-confirmed' :
                               inv.status === 'declined' ? 'badge-declined' :
+                              inv.status === 'scheduled' ? 'badge-draft' :
                               'badge-pending'
                             }`} style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
                               {inv.status}
@@ -366,7 +368,8 @@ export default function EveningDetailPage() {
           <h2>Invitations ({evening.invitations.length})</h2>
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
             <span className="badge badge-confirmed">Confirmed: {confirmed}</span>
-            <span className="badge badge-pending">Pending: {pending}</span>
+            <span className="badge badge-pending">Invited: {invited}</span>
+            {scheduled > 0 && <span className="badge badge-draft">Scheduled: {scheduled}</span>}
             <span className="badge badge-declined">Declined: {declined}</span>
           </div>
           <table>
@@ -388,6 +391,7 @@ export default function EveningDetailPage() {
                     <span className={`badge ${
                       inv.status === 'confirmed' ? 'badge-confirmed' :
                       inv.status === 'declined' ? 'badge-declined' :
+                      inv.status === 'scheduled' ? 'badge-draft' :
                       'badge-pending'
                     }`}>
                       {inv.status}

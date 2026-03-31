@@ -242,7 +242,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
     SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
-    WHERE inv.evening_id = ? AND inv.email_sent = 0 AND inv.status = 'invited'
+    WHERE inv.evening_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'
   `).all(req.params.id) as any[];
 
   if (invitations.length === 0) {
@@ -267,7 +267,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
         clubName,
         subject,
       });
-      db.prepare('UPDATE invitations SET email_sent = 1 WHERE id = ?').run(inv.id);
+      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE id = ?").run(inv.id);
       sent++;
     } catch (err: any) {
       errors.push({ student: inv.student_name, error: err.message });

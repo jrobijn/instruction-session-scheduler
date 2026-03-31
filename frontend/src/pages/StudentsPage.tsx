@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, useRef, FormEvent } from 'react';
 import { api } from '../api';
 
 interface Student {
@@ -17,6 +17,8 @@ export default function StudentsPage() {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     try {
@@ -79,14 +81,60 @@ export default function StudentsPage() {
     }
   };
 
+  const handleExport = async () => {
+    try {
+      const csv = await api.exportStudentsCsv();
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'students.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const csv = await file.text();
+      const result = await api.importStudentsCsv(csv);
+      setImportResult(result);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   if (loading) return <div className="page"><p>Loading...</p></div>;
 
   return (
     <div className="page">
       <div className="page-header">
         <h1>Students ({students.length})</h1>
-        <button className="btn btn-primary" onClick={openCreate}>+ Add Student</button>
+        <div className="btn-group">
+          <button className="btn btn-outline" onClick={handleExport}>Export CSV</button>
+          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>Import CSV</button>
+          <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
+          <button className="btn btn-primary" onClick={openCreate}>+ Add Student</button>
+        </div>
       </div>
+
+      {importResult && (
+        <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
+          Imported: {importResult.imported}, Skipped: {importResult.skipped}
+          {importResult.errors.length > 0 && (
+            <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.5rem' }}>
+              {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          )}
+          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>Dismiss</button>
+        </div>
+      )}
 
       {students.length === 0 ? (
         <div className="empty-state">

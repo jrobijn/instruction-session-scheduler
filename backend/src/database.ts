@@ -68,7 +68,7 @@ export function initializeDatabase(): void {
       timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
       instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
-      status TEXT NOT NULL DEFAULT 'invited' CHECK(status IN ('invited','confirmed','declined')),
+      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined')),
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
       invited_at TEXT NOT NULL DEFAULT (datetime('now')),

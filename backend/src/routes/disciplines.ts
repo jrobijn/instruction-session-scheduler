@@ -3,10 +3,98 @@ import db from '../database.js';
 
 const router = Router();
 
+function escapeCsvField(value: string | number | null | undefined): string {
+  const str = String(value ?? '');
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
 // List all disciplines
 router.get('/', (_req: Request, res: Response) => {
   const disciplines = db.prepare('SELECT * FROM disciplines ORDER BY name ASC').all();
   res.json(disciplines);
+});
+
+// Export disciplines as CSV
+router.get('/export', (_req: Request, res: Response) => {
+  const disciplines = db.prepare('SELECT name, active FROM disciplines ORDER BY name ASC').all() as { name: string; active: number }[];
+  const header = 'name,active';
+  const rows = disciplines.map(d => [d.name, d.active].map(escapeCsvField).join(','));
+  const csv = [header, ...rows].join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="disciplines.csv"');
+  res.send(csv);
+});
+
+// Import disciplines from CSV
+router.post('/import', (req: Request, res: Response) => {
+  const { csv } = req.body;
+  if (!csv || typeof csv !== 'string') { res.status(400).json({ error: 'CSV data is required' }); return; }
+
+  const lines = csv.split(/\r?\n/).filter(line => line.trim());
+  if (lines.length < 2) { res.status(400).json({ error: 'CSV must have a header row and at least one data row' }); return; }
+
+  const header = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  const nameIdx = header.indexOf('name');
+
+  if (nameIdx === -1) {
+    res.status(400).json({ error: 'CSV must contain a name column' }); return;
+  }
+
+  const parseCsvLine = (line: string): string[] => {
+    const fields: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+        else if (ch === '"') { inQuotes = false; }
+        else { current += ch; }
+      } else {
+        if (ch === '"') { inQuotes = true; }
+        else if (ch === ',') { fields.push(current.trim()); current = ''; }
+        else { current += ch; }
+      }
+    }
+    fields.push(current.trim());
+    return fields;
+  };
+
+  let imported = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  const insertOrUpdate = db.transaction(() => {
+    for (let i = 1; i < lines.length; i++) {
+      const fields = parseCsvLine(lines[i]);
+      const name = fields[nameIdx]?.trim();
+
+      if (!name) {
+        errors.push(`Row ${i + 1}: missing name`);
+        skipped++;
+        continue;
+      }
+
+      try {
+        const existing = db.prepare('SELECT id FROM disciplines WHERE name = ?').get(name) as { id: number } | undefined;
+        if (existing) {
+          skipped++;
+        } else {
+          db.prepare('INSERT INTO disciplines (name) VALUES (?)').run(name);
+          imported++;
+        }
+      } catch (err: any) {
+        errors.push(`Row ${i + 1}: ${err.message}`);
+        skipped++;
+      }
+    }
+  });
+
+  insertOrUpdate();
+  res.json({ imported, skipped, errors });
 });
 
 // Get single discipline

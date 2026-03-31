@@ -3,10 +3,102 @@ import db from '../database.js';
 
 const router = Router();
 
+function escapeCsvField(value: string | number | null | undefined): string {
+  const str = String(value ?? '');
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
 // List all instructors
 router.get('/', (_req: Request, res: Response) => {
   const instructors = db.prepare('SELECT * FROM instructors ORDER BY last_name ASC, first_name ASC').all();
   res.json(instructors);
+});
+
+// Export instructors as CSV
+router.get('/export', (_req: Request, res: Response) => {
+  const instructors = db.prepare('SELECT first_name, last_name, email, active FROM instructors ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; active: number }[];
+  const header = 'first_name,last_name,email,active';
+  const rows = instructors.map(i => [i.first_name, i.last_name, i.email, i.active].map(escapeCsvField).join(','));
+  const csv = [header, ...rows].join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="instructors.csv"');
+  res.send(csv);
+});
+
+// Import instructors from CSV
+router.post('/import', (req: Request, res: Response) => {
+  const { csv } = req.body;
+  if (!csv || typeof csv !== 'string') { res.status(400).json({ error: 'CSV data is required' }); return; }
+
+  const lines = csv.split(/\r?\n/).filter(line => line.trim());
+  if (lines.length < 2) { res.status(400).json({ error: 'CSV must have a header row and at least one data row' }); return; }
+
+  const header = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  const firstNameIdx = header.indexOf('first_name');
+  const lastNameIdx = header.indexOf('last_name');
+  const emailIdx = header.indexOf('email');
+
+  if (firstNameIdx === -1 || lastNameIdx === -1 || emailIdx === -1) {
+    res.status(400).json({ error: 'CSV must contain first_name, last_name, and email columns' }); return;
+  }
+
+  const parseCsvLine = (line: string): string[] => {
+    const fields: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+        else if (ch === '"') { inQuotes = false; }
+        else { current += ch; }
+      } else {
+        if (ch === '"') { inQuotes = true; }
+        else if (ch === ',') { fields.push(current.trim()); current = ''; }
+        else { current += ch; }
+      }
+    }
+    fields.push(current.trim());
+    return fields;
+  };
+
+  let imported = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  const insertOrUpdate = db.transaction(() => {
+    for (let i = 1; i < lines.length; i++) {
+      const fields = parseCsvLine(lines[i]);
+      const first_name = fields[firstNameIdx]?.trim();
+      const last_name = fields[lastNameIdx]?.trim();
+      const email = fields[emailIdx]?.trim();
+
+      if (!first_name || !last_name || !email) {
+        errors.push(`Row ${i + 1}: missing required fields`);
+        skipped++;
+        continue;
+      }
+
+      try {
+        const existing = db.prepare('SELECT id FROM instructors WHERE email = ?').get(email) as { id: number } | undefined;
+        if (existing) {
+          db.prepare('UPDATE instructors SET first_name = ?, last_name = ? WHERE id = ?').run(first_name, last_name, existing.id);
+        } else {
+          db.prepare('INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)').run(first_name, last_name, email);
+        }
+        imported++;
+      } catch (err: any) {
+        errors.push(`Row ${i + 1}: ${err.message}`);
+        skipped++;
+      }
+    }
+  });
+
+  insertOrUpdate();
+  res.json({ imported, skipped, errors });
 });
 
 // Get single instructor
