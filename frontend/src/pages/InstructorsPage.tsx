@@ -18,6 +18,23 @@ export default function InstructorsPage() {
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sortCol, setSortCol] = useState<keyof Instructor>('last_name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const toggleSort = (col: keyof Instructor) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sortedInstructors = [...instructors].sort((a, b) => {
+    const av = a[sortCol], bv = b[sortCol];
+    let cmp: number;
+    if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv));
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const sortIcon = (col: keyof Instructor) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
   const load = async () => {
     try {
@@ -144,15 +161,15 @@ export default function InstructorsPage() {
         <table>
           <thead>
             <tr>
-              <th>First Name</th>
-              <th>Last Name</th>
-              <th>Email</th>
-              <th>Status</th>
+              <th className="sortable" onClick={() => toggleSort('first_name')}>First Name{sortIcon('first_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('last_name')}>Last Name{sortIcon('last_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('email')}>Email{sortIcon('email')}</th>
+              <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {instructors.map(i => (
+            {sortedInstructors.map(i => (
               <tr key={i.id}>
                 <td>{i.first_name}</td>
                 <td>{i.last_name}</td>

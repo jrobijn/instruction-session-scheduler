@@ -16,6 +16,23 @@ export default function DisciplinesPage() {
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sortCol, setSortCol] = useState<keyof Discipline>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const toggleSort = (col: keyof Discipline) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sortedDisciplines = [...disciplines].sort((a, b) => {
+    const av = a[sortCol], bv = b[sortCol];
+    let cmp: number;
+    if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv));
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const sortIcon = (col: keyof Discipline) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
   const load = async () => {
     try {
@@ -142,13 +159,13 @@ export default function DisciplinesPage() {
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Status</th>
+              <th className="sortable" onClick={() => toggleSort('name')}>Name{sortIcon('name')}</th>
+              <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {disciplines.map(d => (
+            {sortedDisciplines.map(d => (
               <tr key={d.id}>
                 <td>{d.name}</td>
                 <td>

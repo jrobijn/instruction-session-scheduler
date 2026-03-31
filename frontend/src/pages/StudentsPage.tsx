@@ -19,6 +19,23 @@ export default function StudentsPage() {
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sortCol, setSortCol] = useState<keyof Student>('last_name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const toggleSort = (col: keyof Student) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sortedStudents = [...students].sort((a, b) => {
+    const av = a[sortCol], bv = b[sortCol];
+    let cmp: number;
+    if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv));
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const sortIcon = (col: keyof Student) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
   const load = async () => {
     try {
@@ -145,16 +162,16 @@ export default function StudentsPage() {
         <table>
           <thead>
             <tr>
-              <th>First Name</th>
-              <th>Last Name</th>
-              <th>Email</th>
-              <th>Sessions Attended</th>
-              <th>Status</th>
+              <th className="sortable" onClick={() => toggleSort('first_name')}>First Name{sortIcon('first_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('last_name')}>Last Name{sortIcon('last_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('email')}>Email{sortIcon('email')}</th>
+              <th className="sortable" onClick={() => toggleSort('attended_sessions')}>Sessions Attended{sortIcon('attended_sessions')}</th>
+              <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {students.map(s => (
+            {sortedStudents.map(s => (
               <tr key={s.id}>
                 <td>{s.first_name}</td>
                 <td>{s.last_name}</td>
