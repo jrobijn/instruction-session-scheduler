@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
-import { isAuthenticated, clearToken } from './api.js';
-import LoginPage from './pages/LoginPage.jsx';
-import StudentsPage from './pages/StudentsPage.jsx';
-import InstructorsPage from './pages/InstructorsPage.jsx';
-import EveningsPage from './pages/EveningsPage.jsx';
-import EveningDetailPage from './pages/EveningDetailPage.jsx';
-import SettingsPage from './pages/SettingsPage.jsx';
-import DisciplinesPage from './pages/DisciplinesPage.jsx';
-import InvitationPage from './pages/InvitationPage.jsx';
+import { isAuthenticated, clearToken } from './api';
+import LoginPage from './pages/LoginPage';
+import StudentsPage from './pages/StudentsPage';
+import InstructorsPage from './pages/InstructorsPage';
+import EveningsPage from './pages/EveningsPage';
+import EveningDetailPage from './pages/EveningDetailPage';
+import SettingsPage from './pages/SettingsPage';
+import DisciplinesPage from './pages/DisciplinesPage';
+import InvitationPage from './pages/InvitationPage';
 
 function AdminLayout() {
   const navigate = useNavigate();

@@ -1,0 +1,255 @@
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { api } from '../api';
+
+interface Instructor {
+  id: number;
+  name: string;
+}
+
+interface Invitation {
+  id: number;
+  student_name: string;
+  student_email: string;
+  instructor_name: string;
+  discipline_name: string | null;
+  status: string;
+  token: string;
+}
+
+interface EveningDetail {
+  id: number;
+  date: string;
+  status: string;
+  instructors: Instructor[];
+  invitations: Invitation[];
+}
+
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+export default function EveningDetailPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [evening, setEvening] = useState<EveningDetail | null>(null);
+  const [allInstructors, setAllInstructors] = useState<Instructor[]>([]);
+  const [selectedInstructor, setSelectedInstructor] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState('');
+
+  const load = async () => {
+    try {
+      const [ev, instr] = await Promise.all([
+        api.getEvening(Number(id)),
+        api.getInstructors()
+      ]);
+      setEvening(ev);
+      setAllInstructors(instr);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [id]);
+
+  const assignInstructor = async () => {
+    if (!selectedInstructor) return;
+    try {
+      await api.assignInstructor(Number(id), Number(selectedInstructor));
+      setSelectedInstructor('');
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const removeInstructor = async (instructorId: number) => {
+    try {
+      await api.removeInstructor(Number(id), instructorId);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const generateSchedule = async () => {
+    setActionLoading('generating');
+    try {
+      await api.generateSchedule(Number(id));
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const sendInvitations = async () => {
+    setActionLoading('sending');
+    try {
+      await api.sendInvitations(Number(id));
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const completeEvening = async () => {
+    if (!confirm('Mark this evening as completed? This will update attendance counts.')) return;
+    setActionLoading('completing');
+    try {
+      await api.completeEvening(Number(id));
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (!evening) return <div className="page"><p>Evening not found</p></div>;
+
+  const assignedIds = new Set(evening.instructors.map(i => i.id));
+  const availableInstructors = allInstructors.filter(i => !assignedIds.has(i.id));
+
+  const confirmed = evening.invitations.filter(i => i.status === 'confirmed').length;
+  const declined = evening.invitations.filter(i => i.status === 'declined').length;
+  const pending = evening.invitations.filter(i => i.status === 'pending').length;
+
+  return (
+    <div className="page">
+      <button className="btn btn-outline" onClick={() => navigate('/evenings')} style={{ marginBottom: '1rem' }}>
+        ← Back to Evenings
+      </button>
+
+      {error && <div className="alert alert-error">{error}</div>}
+
+      <div className="page-header">
+        <h1>{formatDate(evening.date)}</h1>
+        <span className={`badge ${
+          evening.status === 'completed' ? 'badge-confirmed' :
+          evening.status === 'invitations_sent' ? 'badge-pending' :
+          'badge-declined'
+        }`}>
+          {evening.status.replace(/_/g, ' ')}
+        </span>
+      </div>
+
+      {/* Instructors Section */}
+      <div className="card" style={{ marginBottom: '2rem' }}>
+        <h2>Instructors ({evening.instructors.length})</h2>
+        {evening.status === 'draft' && (
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <select value={selectedInstructor} onChange={e => setSelectedInstructor(e.target.value)}>
+              <option value="">Select instructor...</option>
+              {availableInstructors.map(i => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+            <button className="btn btn-primary" onClick={assignInstructor} disabled={!selectedInstructor}>Assign</button>
+          </div>
+        )}
+        {evening.instructors.length === 0 ? (
+          <p style={{ color: '#6b7280' }}>No instructors assigned yet.</p>
+        ) : (
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {evening.instructors.map(i => (
+              <span key={i.id} className="badge badge-confirmed" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem' }}>
+                {i.name}
+                {evening.status === 'draft' && (
+                  <button onClick={() => removeInstructor(i.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      {evening.status === 'draft' && evening.instructors.length > 0 && (
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <h2>Actions</h2>
+          <div className="btn-group">
+            <button className="btn btn-primary" onClick={generateSchedule} disabled={actionLoading === 'generating'}>
+              {actionLoading === 'generating' ? 'Generating...' : 'Generate Schedule'}
+            </button>
+          </div>
+          <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
+            This will select students with the fewest attended sessions and create invitations.
+          </p>
+        </div>
+      )}
+
+      {evening.status === 'scheduled' && (
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <h2>Actions</h2>
+          <div className="btn-group">
+            <button className="btn btn-primary" onClick={sendInvitations} disabled={actionLoading === 'sending'}>
+              {actionLoading === 'sending' ? 'Sending...' : 'Send Invitations'}
+            </button>
+            <button className="btn btn-outline" onClick={generateSchedule} disabled={actionLoading === 'generating'}>
+              {actionLoading === 'generating' ? 'Regenerating...' : 'Regenerate Schedule'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {evening.status === 'invitations_sent' && (
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <h2>Actions</h2>
+          <button className="btn btn-primary" onClick={completeEvening} disabled={actionLoading === 'completing'}>
+            {actionLoading === 'completing' ? 'Completing...' : 'Mark as Completed'}
+          </button>
+        </div>
+      )}
+
+      {/* Invitations */}
+      {evening.invitations.length > 0 && (
+        <div>
+          <h2>Invitations ({evening.invitations.length})</h2>
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+            <span className="badge badge-confirmed">Confirmed: {confirmed}</span>
+            <span className="badge badge-pending">Pending: {pending}</span>
+            <span className="badge badge-declined">Declined: {declined}</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Instructor</th>
+                <th>Discipline</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {evening.invitations.map(inv => (
+                <tr key={inv.id}>
+                  <td>{inv.student_name}</td>
+                  <td>{inv.instructor_name}</td>
+                  <td>{inv.discipline_name || '—'}</td>
+                  <td>
+                    <span className={`badge ${
+                      inv.status === 'confirmed' ? 'badge-confirmed' :
+                      inv.status === 'declined' ? 'badge-declined' :
+                      'badge-pending'
+                    }`}>
+                      {inv.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

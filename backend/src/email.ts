@@ -1,8 +1,9 @@
 import nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 
-let transporter = null;
+let transporter: Transporter | null = null;
 
-export function initializeMailer() {
+export function initializeMailer(): void {
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || '587');
   const secure = process.env.SMTP_SECURE === 'true';
@@ -22,7 +23,16 @@ export function initializeMailer() {
   });
 }
 
-export async function sendInvitationEmail({ to, studentName, date, token, clubName, subject }) {
+interface InvitationEmailParams {
+  to: string;
+  studentName: string;
+  date: string;
+  token: string;
+  clubName: string;
+  subject: string;
+}
+
+export async function sendInvitationEmail({ to, studentName, date, token, clubName, subject }: InvitationEmailParams): Promise<void> {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const invitationUrl = `${frontendUrl}/invitation/${token}`;
 
@@ -61,7 +71,7 @@ export async function sendInvitationEmail({ to, studentName, date, token, clubNa
   });
 }
 
-function escapeHtml(str) {
+function escapeHtml(str: string): string {
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

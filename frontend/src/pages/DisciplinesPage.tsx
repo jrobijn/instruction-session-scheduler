@@ -1,10 +1,16 @@
-import { useState, useEffect } from 'react';
-import { api } from '../api.js';
+import { useState, useEffect, FormEvent } from 'react';
+import { api } from '../api';
+
+interface Discipline {
+  id: number;
+  name: string;
+  active: number;
+}
 
 export default function DisciplinesPage() {
-  const [disciplines, setDisciplines] = useState([]);
+  const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState(null);
+  const [editing, setEditing] = useState<Discipline | null>(null);
   const [form, setForm] = useState({ name: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -12,7 +18,7 @@ export default function DisciplinesPage() {
   const load = async () => {
     try {
       setDisciplines(await api.getDisciplines());
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
@@ -28,14 +34,14 @@ export default function DisciplinesPage() {
     setShowModal(true);
   };
 
-  const openEdit = (discipline) => {
+  const openEdit = (discipline: Discipline) => {
     setEditing(discipline);
     setForm({ name: discipline.name });
     setError('');
     setShowModal(true);
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     try {
@@ -46,26 +52,26 @@ export default function DisciplinesPage() {
       }
       setShowModal(false);
       load();
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message);
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: number) => {
     if (!confirm('Are you sure you want to delete this discipline?')) return;
     try {
       await api.deleteDiscipline(id);
       load();
-    } catch (err) {
+    } catch (err: any) {
       alert(err.message);
     }
   };
 
-  const toggleActive = async (discipline) => {
+  const toggleActive = async (discipline: Discipline) => {
     try {
       await api.updateDiscipline(discipline.id, { active: discipline.active ? 0 : 1 });
       load();
-    } catch (err) {
+    } catch (err: any) {
       alert(err.message);
     }
   };

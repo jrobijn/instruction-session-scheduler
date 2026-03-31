@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, setToken, isAuthenticated } from '../api.js';
+import { api, setToken, isAuthenticated } from '../api';
 
 export default function LoginPage() {
   const [password, setPassword] = useState('');
@@ -13,7 +13,7 @@ export default function LoginPage() {
     return null;
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -21,7 +21,7 @@ export default function LoginPage() {
       const data = await api.login(password);
       setToken(data.token);
       navigate('/evenings');
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { initializeDatabase } from './database.js';
 import db from './database.js';
@@ -19,20 +19,22 @@ app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
 app.use(express.json());
 
 // Simple admin auth middleware
-function requireAdmin(req, res, next) {
+function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Authentication required' });
+    res.status(401).json({ error: 'Authentication required' });
+    return;
   }
   const token = authHeader.slice(7);
   if (token !== process.env.ADMIN_PASSWORD) {
-    return res.status(403).json({ error: 'Invalid credentials' });
+    res.status(403).json({ error: 'Invalid credentials' });
+    return;
   }
   next();
 }
 
 // Auth endpoint
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', (req: Request, res: Response) => {
   const { password } = req.body;
   if (password === process.env.ADMIN_PASSWORD) {
     res.json({ success: true, token: process.env.ADMIN_PASSWORD });
@@ -50,13 +52,13 @@ app.use('/api/disciplines', requireAdmin, disciplinesRouter);
 
 // Public routes
 app.use('/api/invitations', invitationsRouter);
-app.get('/api/public/disciplines', (req, res) => {
+app.get('/api/public/disciplines', (_req: Request, res: Response) => {
   const disciplines = db.prepare('SELECT id, name FROM disciplines WHERE active = 1 ORDER BY name ASC').all();
   res.json(disciplines);
 });
 
 // Health check
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/health', (_req: Request, res: Response) => res.json({ status: 'ok' }));
 
 // Initialize and start
 initializeDatabase();
