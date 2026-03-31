@@ -221,8 +221,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   const invited = insertMany(students, req.params.id, timeslots);
 
-  // Update evening status to published
-  db.prepare("UPDATE training_evenings SET status = 'published' WHERE id = ?").run(req.params.id);
+  // Update evening status to scheduled
+  db.prepare("UPDATE training_evenings SET status = 'scheduled' WHERE id = ?").run(req.params.id);
 
   res.json({
     evening_id: req.params.id,
@@ -272,6 +272,11 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
     } catch (err: any) {
       errors.push({ student: inv.student_name, error: err.message });
     }
+  }
+
+  // Update evening status to invitations_sent
+  if (sent > 0) {
+    db.prepare("UPDATE training_evenings SET status = 'invitations_sent' WHERE id = ?").run(req.params.id);
   }
 
   res.json({ sent, errors });

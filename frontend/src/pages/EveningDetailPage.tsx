@@ -156,7 +156,7 @@ export default function EveningDetailPage() {
 
   const confirmed = evening.invitations.filter(i => i.status === 'confirmed').length;
   const declined = evening.invitations.filter(i => i.status === 'declined').length;
-  const pending = evening.invitations.filter(i => i.status === 'pending').length;
+  const pending = evening.invitations.filter(i => i.status === 'invited').length;
 
   // Build schedule grid: timeslots as rows, instructors as columns
   const scheduleGrid: Record<number, Record<number, Invitation | undefined>> = {};
@@ -210,6 +210,7 @@ export default function EveningDetailPage() {
         <span className={`badge ${
           evening.status === 'completed' ? 'badge-confirmed' :
           evening.status === 'invitations_sent' ? 'badge-pending' :
+          evening.status === 'scheduled' ? 'badge-pending' :
           'badge-declined'
         }`}>
           {evening.status.replace(/_/g, ' ')}

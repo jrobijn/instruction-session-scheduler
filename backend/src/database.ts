@@ -35,7 +35,7 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS training_evenings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL UNIQUE,
-      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','completed')),
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','invitations_sent','completed')),
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );

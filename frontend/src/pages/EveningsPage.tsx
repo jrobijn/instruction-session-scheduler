@@ -91,6 +91,7 @@ export default function EveningsPage() {
                   <span className={`badge ${
                     e.status === 'completed' ? 'badge-confirmed' :
                     e.status === 'invitations_sent' ? 'badge-pending' :
+                    e.status === 'scheduled' ? 'badge-pending' :
                     'badge-declined'
                   }`}>
                     {e.status.replace(/_/g, ' ')}

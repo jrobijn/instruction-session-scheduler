@@ -105,7 +105,7 @@ export default function InvitationPage() {
           </div>
         )}
 
-        {invitation.status === 'pending' && !actionDone && (
+        {invitation.status === 'invited' && !actionDone && (
           <>
             {disciplines.length > 0 && (
               <div className="form-group" style={{ marginBottom: '1.5rem' }}>
