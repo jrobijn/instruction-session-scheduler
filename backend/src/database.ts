@@ -52,13 +52,20 @@ export function initializeDatabase(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS timeslots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      evening_id INTEGER NOT NULL REFERENCES training_evenings(id) ON DELETE CASCADE,
+      start_time TEXT NOT NULL,
+      UNIQUE(evening_id, start_time)
+    );
+
     CREATE TABLE IF NOT EXISTS invitations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       evening_id INTEGER NOT NULL REFERENCES training_evenings(id) ON DELETE CASCADE,
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
       status TEXT NOT NULL DEFAULT 'invited' CHECK(status IN ('invited','confirmed','declined')),
-      slot_number INTEGER NOT NULL,
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
       invited_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -71,7 +78,6 @@ export function initializeDatabase(): void {
     );
 
     -- Default settings
-    INSERT OR IGNORE INTO settings (key, value) VALUES ('sessions_per_instructor', '3');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('club_name', 'Sports Club');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_email_subject', 'You are invited to a coaching session!');
   `);

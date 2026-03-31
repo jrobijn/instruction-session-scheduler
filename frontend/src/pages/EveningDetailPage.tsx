@@ -7,14 +7,20 @@ interface Instructor {
   name: string;
 }
 
+interface Timeslot {
+  id: number;
+  evening_id: number;
+  start_time: string;
+}
+
 interface Invitation {
   id: number;
   student_name: string;
   student_email: string;
-  instructor_name: string;
   discipline_name: string | null;
   status: string;
   token: string;
+  timeslot_start_time: string;
 }
 
 interface EveningDetail {
@@ -22,6 +28,7 @@ interface EveningDetail {
   date: string;
   status: string;
   instructors: Instructor[];
+  timeslots: Timeslot[];
   invitations: Invitation[];
 }
 
@@ -36,6 +43,7 @@ export default function EveningDetailPage() {
   const [evening, setEvening] = useState<EveningDetail | null>(null);
   const [allInstructors, setAllInstructors] = useState<Instructor[]>([]);
   const [selectedInstructor, setSelectedInstructor] = useState('');
+  const [newTimeslotTime, setNewTimeslotTime] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
@@ -71,6 +79,26 @@ export default function EveningDetailPage() {
   const removeInstructor = async (instructorId: number) => {
     try {
       await api.removeInstructor(Number(id), instructorId);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const addTimeslot = async () => {
+    if (!newTimeslotTime) return;
+    try {
+      await api.addTimeslot(Number(id), newTimeslotTime);
+      setNewTimeslotTime('');
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const deleteTimeslot = async (timeslotId: number) => {
+    try {
+      await api.deleteTimeslot(Number(id), timeslotId);
       load();
     } catch (err: any) {
       alert(err.message);
@@ -173,8 +201,36 @@ export default function EveningDetailPage() {
         )}
       </div>
 
+      {/* Timeslots Section */}
+      <div className="card" style={{ marginBottom: '2rem' }}>
+        <h2>Timeslots ({evening.timeslots.length})</h2>
+        {evening.status === 'draft' && (
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <input type="time" value={newTimeslotTime} onChange={e => setNewTimeslotTime(e.target.value)} />
+            <button className="btn btn-primary" onClick={addTimeslot} disabled={!newTimeslotTime}>Add Timeslot</button>
+          </div>
+        )}
+        {evening.timeslots.length === 0 ? (
+          <p style={{ color: '#6b7280' }}>No timeslots defined yet.</p>
+        ) : (
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {evening.timeslots.map(ts => (
+              <span key={ts.id} className="badge badge-pending" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem' }}>
+                {ts.start_time}
+                {evening.status === 'draft' && (
+                  <button onClick={() => deleteTimeslot(ts.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
+          Each timeslot has space for one student per instructor ({evening.timeslots.length * evening.instructors.length} total slots).
+        </p>
+      </div>
+
       {/* Actions */}
-      {evening.status === 'draft' && evening.instructors.length > 0 && (
+      {evening.status === 'draft' && evening.instructors.length > 0 && evening.timeslots.length > 0 && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h2>Actions</h2>
           <div className="btn-group">
@@ -223,8 +279,8 @@ export default function EveningDetailPage() {
           <table>
             <thead>
               <tr>
+                <th>Timeslot</th>
                 <th>Student</th>
-                <th>Instructor</th>
                 <th>Discipline</th>
                 <th>Status</th>
               </tr>
@@ -232,8 +288,8 @@ export default function EveningDetailPage() {
             <tbody>
               {evening.invitations.map(inv => (
                 <tr key={inv.id}>
+                  <td>{inv.timeslot_start_time}</td>
                   <td>{inv.student_name}</td>
-                  <td>{inv.instructor_name}</td>
                   <td>{inv.discipline_name || '—'}</td>
                   <td>
                     <span className={`badge ${

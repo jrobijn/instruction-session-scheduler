@@ -35,7 +35,6 @@ export default function SettingsPage() {
   if (loading) return <div className="page"><p>Loading...</p></div>;
 
   const settingsConfig = [
-    { key: 'sessions_per_instructor', label: 'Sessions per Instructor', type: 'number', description: 'Number of students to schedule per instructor per evening.' },
     { key: 'club_name', label: 'Club Name', type: 'text', description: 'Name of the sports club, used in emails.' },
     { key: 'invitation_email_subject', label: 'Invitation Email Subject', type: 'text', description: 'Subject line for invitation emails sent to students.' },
   ];

@@ -9,10 +9,12 @@ const router = Router();
 router.get('/:token', (req: Request, res: Response) => {
   const invitation = db.prepare(`
     SELECT inv.*, s.name AS student_name, s.email AS student_email,
-           te.date AS evening_date, te.notes AS evening_notes, te.status AS evening_status
+           te.date AS evening_date, te.notes AS evening_notes, te.status AS evening_status,
+           ts.start_time AS timeslot_start_time
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     JOIN training_evenings te ON te.id = inv.evening_id
+    JOIN timeslots ts ON ts.id = inv.timeslot_id
     WHERE inv.token = ?
   `).get(req.params.token) as any;
 
@@ -23,6 +25,7 @@ router.get('/:token', (req: Request, res: Response) => {
   res.json({
     student_name: invitation.student_name,
     date: invitation.evening_date,
+    start_time: invitation.timeslot_start_time,
     notes: invitation.evening_notes,
     status: invitation.status,
     evening_status: invitation.evening_status,
@@ -89,11 +92,10 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
   let replacement: { name: string; email: string } | null = null;
   if (nextStudent) {
     const token = crypto.randomUUID();
-    const maxSlot = (db.prepare('SELECT MAX(slot_number) AS max_slot FROM invitations WHERE evening_id = ?')
-      .get(invitation.evening_id) as any).max_slot || 0;
 
-    db.prepare('INSERT INTO invitations (evening_id, student_id, token, slot_number) VALUES (?, ?, ?, ?)')
-      .run(invitation.evening_id, nextStudent.id, token, maxSlot + 1);
+    // Assign replacement to the same timeslot as the declined invitation
+    db.prepare('INSERT INTO invitations (evening_id, student_id, timeslot_id, token) VALUES (?, ?, ?, ?)')
+      .run(invitation.evening_id, nextStudent.id, invitation.timeslot_id, token);
 
     // Try to send email to replacement
     try {

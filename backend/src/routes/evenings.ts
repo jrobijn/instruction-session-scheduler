@@ -29,17 +29,22 @@ router.get('/:id', (req: Request, res: Response) => {
     ORDER BY i.name
   `).all(req.params.id);
 
-  const invitations = db.prepare(`
-    SELECT inv.*, s.name AS student_name, s.email AS student_email, s.attended_sessions,
-           d.name AS discipline_name
-    FROM invitations inv
-    JOIN students s ON s.id = inv.student_id
-    LEFT JOIN disciplines d ON d.id = inv.discipline_id
-    WHERE inv.evening_id = ?
-    ORDER BY inv.slot_number ASC
+  const timeslots = db.prepare(`
+    SELECT * FROM timeslots WHERE evening_id = ? ORDER BY start_time ASC
   `).all(req.params.id);
 
-  res.json({ ...evening, instructors, invitations });
+  const invitations = db.prepare(`
+    SELECT inv.*, s.name AS student_name, s.email AS student_email, s.attended_sessions,
+           d.name AS discipline_name, ts.start_time AS timeslot_start_time
+    FROM invitations inv
+    JOIN students s ON s.id = inv.student_id
+    JOIN timeslots ts ON ts.id = inv.timeslot_id
+    LEFT JOIN disciplines d ON d.id = inv.discipline_id
+    WHERE inv.evening_id = ?
+    ORDER BY ts.start_time ASC, s.name ASC
+  `).all(req.params.id);
+
+  res.json({ ...evening, instructors, timeslots, invitations });
 });
 
 // Create training evening
@@ -119,6 +124,37 @@ router.delete('/:id/instructors/:instructorId', (req: Request, res: Response) =>
   res.json({ success: true });
 });
 
+// ===== Timeslot Management =====
+
+// Add a timeslot to an evening
+router.post('/:id/timeslots', (req: Request, res: Response) => {
+  const { start_time } = req.body;
+  if (!start_time) { res.status(400).json({ error: 'start_time is required' }); return; }
+
+  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id);
+  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
+
+  try {
+    const result = db.prepare('INSERT INTO timeslots (evening_id, start_time) VALUES (?, ?)').run(req.params.id, start_time);
+    const timeslot = db.prepare('SELECT * FROM timeslots WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(timeslot);
+  } catch (err: any) {
+    if (err.message.includes('UNIQUE constraint')) {
+      res.status(409).json({ error: 'A timeslot with this start time already exists for this evening' });
+      return;
+    }
+    throw err;
+  }
+});
+
+// Delete a timeslot from an evening
+router.delete('/:id/timeslots/:timeslotId', (req: Request, res: Response) => {
+  const result = db.prepare('DELETE FROM timeslots WHERE id = ? AND evening_id = ?')
+    .run(req.params.timeslotId, req.params.id);
+  if (result.changes === 0) { res.status(404).json({ error: 'Timeslot not found' }); return; }
+  res.json({ success: true });
+});
+
 // ===== Schedule Generation =====
 
 // Generate schedule for an evening: allocate students with lowest attended sessions
@@ -130,10 +166,12 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     .get(req.params.id) as any).cnt;
   if (instructorCount === 0) { res.status(400).json({ error: 'No instructors assigned for this evening' }); return; }
 
-  const sessionsPerInstructor = parseInt(
-    (db.prepare("SELECT value FROM settings WHERE key = 'sessions_per_instructor'").get() as any)?.value || '3'
-  );
-  const totalSlots = instructorCount * sessionsPerInstructor;
+  const timeslots = db.prepare('SELECT * FROM timeslots WHERE evening_id = ? ORDER BY start_time ASC')
+    .all(req.params.id) as any[];
+  if (timeslots.length === 0) { res.status(400).json({ error: 'No timeslots defined for this evening' }); return; }
+
+  // Each timeslot has one spot per instructor
+  const totalSlots = timeslots.length * instructorCount;
 
   // Remove existing invitations for this evening
   db.prepare('DELETE FROM invitations WHERE evening_id = ?').run(req.params.id);
@@ -151,21 +189,28 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   `).all(evening.date) as any[];
 
   const insertInvitation = db.prepare(`
-    INSERT INTO invitations (evening_id, student_id, token, slot_number)
+    INSERT INTO invitations (evening_id, student_id, timeslot_id, token)
     VALUES (?, ?, ?, ?)
   `);
 
-  const insertMany = db.transaction((studentsArr: any[], eveningId: string | string[], slots: number) => {
+  const insertMany = db.transaction((studentsArr: any[], eveningId: string | string[], slots: any[]) => {
     const invited: any[] = [];
-    for (let i = 0; i < Math.min(slots, studentsArr.length); i++) {
-      const token = crypto.randomUUID();
-      insertInvitation.run(eveningId, studentsArr[i].id, token, i + 1);
-      invited.push({ ...studentsArr[i], token, slot_number: i + 1 });
+    let studentIdx = 0;
+    // Fill timeslots: for each timeslot, assign one student per instructor
+    for (const timeslot of slots) {
+      for (let i = 0; i < instructorCount; i++) {
+        if (studentIdx >= studentsArr.length) break;
+        const token = crypto.randomUUID();
+        insertInvitation.run(eveningId, studentsArr[studentIdx].id, timeslot.id, token);
+        invited.push({ ...studentsArr[studentIdx], token, timeslot_id: timeslot.id, start_time: timeslot.start_time });
+        studentIdx++;
+      }
+      if (studentIdx >= studentsArr.length) break;
     }
     return invited;
   });
 
-  const invited = insertMany(students, req.params.id, totalSlots);
+  const invited = insertMany(students, req.params.id, timeslots);
 
   // Update evening status to published
   db.prepare("UPDATE training_evenings SET status = 'published' WHERE id = ?").run(req.params.id);

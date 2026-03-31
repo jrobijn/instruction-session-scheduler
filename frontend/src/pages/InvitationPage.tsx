@@ -5,8 +5,8 @@ import { api } from '../api';
 interface Invitation {
   id: number;
   student_name: string;
-  instructor_name: string;
-  evening_date: string;
+  date: string;
+  start_time: string;
   status: string;
   discipline_id: number | null;
 }
@@ -70,7 +70,7 @@ export default function InvitationPage() {
   if (error) return <div className="invitation-page"><div className="alert alert-error">{error}</div></div>;
   if (!invitation) return <div className="invitation-page"><p>Invitation not found.</p></div>;
 
-  const dateStr = new Date(invitation.evening_date + 'T00:00:00')
+  const dateStr = new Date(invitation.date + 'T00:00:00')
     .toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   return (
@@ -80,8 +80,8 @@ export default function InvitationPage() {
 
         <div style={{ marginBottom: '1.5rem' }}>
           <p><strong>Student:</strong> {invitation.student_name}</p>
-          <p><strong>Instructor:</strong> {invitation.instructor_name}</p>
           <p><strong>Date:</strong> {dateStr}</p>
+          <p><strong>Time:</strong> {invitation.start_time}</p>
           <p><strong>Status:</strong>{' '}
             <span className={`badge ${
               invitation.status === 'confirmed' ? 'badge-confirmed' :
