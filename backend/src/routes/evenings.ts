@@ -35,13 +35,15 @@ router.get('/:id', (req: Request, res: Response) => {
 
   const invitations = db.prepare(`
     SELECT inv.*, s.name AS student_name, s.email AS student_email, s.attended_sessions,
-           d.name AS discipline_name, ts.start_time AS timeslot_start_time
+           d.name AS discipline_name, ts.start_time AS timeslot_start_time,
+           i.name AS instructor_name
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     JOIN timeslots ts ON ts.id = inv.timeslot_id
+    JOIN instructors i ON i.id = inv.instructor_id
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
     WHERE inv.evening_id = ?
-    ORDER BY ts.start_time ASC, s.name ASC
+    ORDER BY ts.start_time ASC, i.name ASC
   `).all(req.params.id);
 
   res.json({ ...evening, instructors, timeslots, invitations });
@@ -189,20 +191,27 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   `).all(evening.date) as any[];
 
   const insertInvitation = db.prepare(`
-    INSERT INTO invitations (evening_id, student_id, timeslot_id, token)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO invitations (evening_id, student_id, timeslot_id, instructor_id, token)
+    VALUES (?, ?, ?, ?, ?)
   `);
+
+  const instructors = db.prepare(`
+    SELECT i.id FROM instructors i
+    JOIN evening_instructors ei ON ei.instructor_id = i.id
+    WHERE ei.evening_id = ?
+    ORDER BY i.name ASC
+  `).all(req.params.id) as any[];
 
   const insertMany = db.transaction((studentsArr: any[], eveningId: string | string[], slots: any[]) => {
     const invited: any[] = [];
     let studentIdx = 0;
     // Fill timeslots: for each timeslot, assign one student per instructor
     for (const timeslot of slots) {
-      for (let i = 0; i < instructorCount; i++) {
+      for (const instructor of instructors) {
         if (studentIdx >= studentsArr.length) break;
         const token = crypto.randomUUID();
-        insertInvitation.run(eveningId, studentsArr[studentIdx].id, timeslot.id, token);
-        invited.push({ ...studentsArr[studentIdx], token, timeslot_id: timeslot.id, start_time: timeslot.start_time });
+        insertInvitation.run(eveningId, studentsArr[studentIdx].id, timeslot.id, instructor.id, token);
+        invited.push({ ...studentsArr[studentIdx], token, timeslot_id: timeslot.id, instructor_id: instructor.id, start_time: timeslot.start_time });
         studentIdx++;
       }
       if (studentIdx >= studentsArr.length) break;

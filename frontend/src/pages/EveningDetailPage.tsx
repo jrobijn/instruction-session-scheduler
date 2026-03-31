@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Instructor {
   id: number;
@@ -17,9 +19,12 @@ interface Invitation {
   id: number;
   student_name: string;
   student_email: string;
+  instructor_id: number;
+  instructor_name: string;
   discipline_name: string | null;
   status: string;
   token: string;
+  timeslot_id: number;
   timeslot_start_time: string;
 }
 
@@ -152,6 +157,45 @@ export default function EveningDetailPage() {
   const declined = evening.invitations.filter(i => i.status === 'declined').length;
   const pending = evening.invitations.filter(i => i.status === 'pending').length;
 
+  // Build schedule grid: timeslots as rows, instructors as columns
+  const scheduleGrid: Record<number, Record<number, Invitation | undefined>> = {};
+  for (const ts of evening.timeslots) {
+    scheduleGrid[ts.id] = {};
+  }
+  for (const inv of evening.invitations) {
+    if (inv.status !== 'declined') {
+      scheduleGrid[inv.timeslot_id] ??= {};
+      scheduleGrid[inv.timeslot_id][inv.instructor_id] = inv;
+    }
+  }
+
+  const exportPdf = () => {
+    const doc = new jsPDF();
+    const dateStr = formatDate(evening.date);
+    doc.setFontSize(16);
+    doc.text(`Schedule — ${dateStr}`, 14, 20);
+
+    const head = [['Time', ...evening.instructors.map(i => i.name)]];
+    const body = evening.timeslots.map(ts => {
+      const row: string[] = [ts.start_time];
+      for (const instr of evening.instructors) {
+        const inv = scheduleGrid[ts.id]?.[instr.id];
+        row.push(inv ? inv.student_name : '');
+      }
+      return row;
+    });
+
+    autoTable(doc, {
+      startY: 28,
+      head,
+      body,
+      styles: { fontSize: 10 },
+      headStyles: { fillColor: [37, 99, 235] },
+    });
+
+    doc.save(`schedule-${evening.date}.pdf`);
+  };
+
   return (
     <div className="page">
       <button className="btn btn-outline" onClick={() => navigate('/evenings')} style={{ marginBottom: '1rem' }}>
@@ -264,6 +308,52 @@ export default function EveningDetailPage() {
           <button className="btn btn-primary" onClick={completeEvening} disabled={actionLoading === 'completing'}>
             {actionLoading === 'completing' ? 'Completing...' : 'Mark as Completed'}
           </button>
+        </div>
+      )}
+
+      {/* Schedule Grid: Instructors × Timeslots */}
+      {evening.invitations.length > 0 && evening.instructors.length > 0 && evening.timeslots.length > 0 && (
+        <div style={{ marginBottom: '2rem' }}>
+          <div className="page-header">
+            <h2>Schedule Overview</h2>
+            <button className="btn btn-outline" onClick={exportPdf}>Export PDF</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                {evening.instructors.map(i => (
+                  <th key={i.id}>{i.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {evening.timeslots.map(ts => (
+                <tr key={ts.id}>
+                  <td><strong>{ts.start_time}</strong></td>
+                  {evening.instructors.map(instr => {
+                    const inv = scheduleGrid[ts.id]?.[instr.id];
+                    return (
+                      <td key={instr.id}>
+                        {inv ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {inv.student_name}
+                            <span className={`badge ${
+                              inv.status === 'confirmed' ? 'badge-confirmed' :
+                              inv.status === 'declined' ? 'badge-declined' :
+                              'badge-pending'
+                            }`} style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+                              {inv.status}
+                            </span>
+                          </span>
+                        ) : '—'}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

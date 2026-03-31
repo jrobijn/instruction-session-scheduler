@@ -93,9 +93,9 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
   if (nextStudent) {
     const token = crypto.randomUUID();
 
-    // Assign replacement to the same timeslot as the declined invitation
-    db.prepare('INSERT INTO invitations (evening_id, student_id, timeslot_id, token) VALUES (?, ?, ?, ?)')
-      .run(invitation.evening_id, nextStudent.id, invitation.timeslot_id, token);
+    // Assign replacement to the same timeslot and instructor as the declined invitation
+    db.prepare('INSERT INTO invitations (evening_id, student_id, timeslot_id, instructor_id, token) VALUES (?, ?, ?, ?, ?)')
+      .run(invitation.evening_id, nextStudent.id, invitation.timeslot_id, invitation.instructor_id, token);
 
     // Try to send email to replacement
     try {
