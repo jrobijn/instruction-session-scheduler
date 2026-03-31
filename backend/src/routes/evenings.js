@@ -30,9 +30,11 @@ router.get('/:id', (req, res) => {
   `).all(req.params.id);
 
   const invitations = db.prepare(`
-    SELECT inv.*, s.name AS student_name, s.email AS student_email, s.attended_sessions
+    SELECT inv.*, s.name AS student_name, s.email AS student_email, s.attended_sessions,
+           d.name AS discipline_name
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
+    LEFT JOIN disciplines d ON d.id = inv.discipline_id
     WHERE inv.evening_id = ?
     ORDER BY inv.slot_number ASC
   `).all(req.params.id);

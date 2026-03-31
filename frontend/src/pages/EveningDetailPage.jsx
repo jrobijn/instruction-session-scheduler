@@ -215,6 +215,7 @@ export default function EveningDetailPage() {
                 <th>Student</th>
                 <th>Email</th>
                 <th>Sessions Attended</th>
+                <th>Discipline</th>
                 <th>Status</th>
                 <th>Email Sent</th>
               </tr>
@@ -226,6 +227,7 @@ export default function EveningDetailPage() {
                   <td>{inv.student_name}</td>
                   <td>{inv.student_email}</td>
                   <td>{inv.attended_sessions}</td>
+                  <td>{inv.discipline_name || '—'}</td>
                   <td><span className={`badge badge-${inv.status}`}>{inv.status}</span></td>
                   <td>{inv.email_sent ? '✓' : '—'}</td>
                 </tr>

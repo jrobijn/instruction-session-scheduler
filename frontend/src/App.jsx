@@ -7,6 +7,7 @@ import InstructorsPage from './pages/InstructorsPage.jsx';
 import EveningsPage from './pages/EveningsPage.jsx';
 import EveningDetailPage from './pages/EveningDetailPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
+import DisciplinesPage from './pages/DisciplinesPage.jsx';
 import InvitationPage from './pages/InvitationPage.jsx';
 
 function AdminLayout() {
@@ -28,6 +29,7 @@ function AdminLayout() {
         <NavLink to="/evenings">Schedule</NavLink>
         <NavLink to="/students">Students</NavLink>
         <NavLink to="/instructors">Instructors</NavLink>
+        <NavLink to="/disciplines">Disciplines</NavLink>
         <NavLink to="/settings">Settings</NavLink>
         <div className="spacer" />
         <button className="logout-btn" onClick={handleLogout}>Logout</button>
@@ -35,6 +37,7 @@ function AdminLayout() {
       <Routes>
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/instructors" element={<InstructorsPage />} />
+        <Route path="/disciplines" element={<DisciplinesPage />} />
         <Route path="/evenings" element={<EveningsPage />} />
         <Route path="/evenings/:id" element={<EveningDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />

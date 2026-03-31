@@ -2,12 +2,14 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { initializeDatabase } from './database.js';
+import db from './database.js';
 import { initializeMailer } from './email.js';
 import studentsRouter from './routes/students.js';
 import instructorsRouter from './routes/instructors.js';
 import eveningsRouter from './routes/evenings.js';
 import invitationsRouter from './routes/invitations.js';
 import settingsRouter from './routes/settings.js';
+import disciplinesRouter from './routes/disciplines.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -44,9 +46,14 @@ app.use('/api/students', requireAdmin, studentsRouter);
 app.use('/api/instructors', requireAdmin, instructorsRouter);
 app.use('/api/evenings', requireAdmin, eveningsRouter);
 app.use('/api/settings', requireAdmin, settingsRouter);
+app.use('/api/disciplines', requireAdmin, disciplinesRouter);
 
-// Public invitation routes
+// Public routes
 app.use('/api/invitations', invitationsRouter);
+app.get('/api/public/disciplines', (req, res) => {
+  const disciplines = db.prepare('SELECT id, name FROM disciplines WHERE active = 1 ORDER BY name ASC').all();
+  res.json(disciplines);
+});
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));

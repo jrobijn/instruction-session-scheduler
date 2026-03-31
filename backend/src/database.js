@@ -45,6 +45,13 @@ export function initializeDatabase() {
       UNIQUE(evening_id, instructor_id)
     );
 
+    CREATE TABLE IF NOT EXISTS disciplines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS invitations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       evening_id INTEGER NOT NULL REFERENCES training_evenings(id) ON DELETE CASCADE,
@@ -52,6 +59,7 @@ export function initializeDatabase() {
       token TEXT NOT NULL UNIQUE,
       status TEXT NOT NULL DEFAULT 'invited' CHECK(status IN ('invited','confirmed','declined')),
       slot_number INTEGER NOT NULL,
+      discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
       invited_at TEXT NOT NULL DEFAULT (datetime('now')),
       responded_at TEXT

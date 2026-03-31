@@ -32,6 +32,7 @@ router.get('/:token', (req, res) => {
 
 // Confirm attendance (public)
 router.post('/:token/confirm', (req, res) => {
+  const { discipline_id } = req.body || {};
   const invitation = db.prepare(`
     SELECT inv.*, te.status AS evening_status
     FROM invitations inv
@@ -44,8 +45,8 @@ router.post('/:token/confirm', (req, res) => {
   if (invitation.status !== 'invited') return res.status(400).json({ error: `Invitation already ${invitation.status}` });
 
   db.prepare(`
-    UPDATE invitations SET status = 'confirmed', responded_at = datetime('now') WHERE id = ?
-  `).run(invitation.id);
+    UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?
+  `).run(discipline_id || null, invitation.id);
 
   res.json({ success: true, message: 'Your attendance has been confirmed!' });
 });

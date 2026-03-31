@@ -62,8 +62,17 @@ export const api = {
   getSettings: () => request('/settings'),
   updateSetting: (key, value) => request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
 
+  // Disciplines
+  getDisciplines: () => request('/disciplines'),
+  createDiscipline: (data) => request('/disciplines', { method: 'POST', body: JSON.stringify(data) }),
+  updateDiscipline: (id, data) => request(`/disciplines/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteDiscipline: (id) => request(`/disciplines/${id}`, { method: 'DELETE' }),
+
   // Public invitation
   getInvitation: (token) => request(`/invitations/${token}`),
-  confirmInvitation: (token) => request(`/invitations/${token}/confirm`, { method: 'POST' }),
+  confirmInvitation: (token, disciplineId) => request(`/invitations/${token}/confirm`, { method: 'POST', body: JSON.stringify({ discipline_id: disciplineId }) }),
   declineInvitation: (token) => request(`/invitations/${token}/decline`, { method: 'POST' }),
+
+  // Public disciplines (no auth)
+  getPublicDisciplines: () => request('/public/disciplines'),
 };
