@@ -1,0 +1,70 @@
+import nodemailer from 'nodemailer';
+
+let transporter = null;
+
+export function initializeMailer() {
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || '587');
+  const secure = process.env.SMTP_SECURE === 'true';
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+
+  if (!host || !user) {
+    console.warn('⚠ SMTP not configured — emails will be logged to console instead of sent.');
+    return;
+  }
+
+  transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+  });
+}
+
+export async function sendInvitationEmail({ to, studentName, date, token, clubName, subject }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const invitationUrl = `${frontendUrl}/invitation/${token}`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2>Hi ${escapeHtml(studentName)},</h2>
+      <p>You have been invited to a coaching session at <strong>${escapeHtml(clubName)}</strong> on <strong>${escapeHtml(date)}</strong>.</p>
+      <p>Please click the link below to confirm or decline your attendance:</p>
+      <p style="margin: 24px 0;">
+        <a href="${escapeHtml(invitationUrl)}"
+           style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          Respond to Invitation
+        </a>
+      </p>
+      <p style="color: #666; font-size: 14px;">
+        Or copy this link: ${escapeHtml(invitationUrl)}
+      </p>
+      <p>Best regards,<br/>${escapeHtml(clubName)}</p>
+    </div>
+  `;
+
+  const text = `Hi ${studentName},\n\nYou have been invited to a coaching session at ${clubName} on ${date}.\n\nPlease visit the following link to respond:\n${invitationUrl}\n\nBest regards,\n${clubName}`;
+
+  if (!transporter) {
+    console.log(`📧 [Email Preview] To: ${to} | Subject: ${subject}`);
+    console.log(`   Link: ${invitationUrl}`);
+    return;
+  }
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    text,
+    html,
+  });
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
