@@ -5,32 +5,32 @@ import { sendInvitationEmail } from '../email.js';
 
 const router = Router();
 
-// List all training evenings
+// List all training sessions
 router.get('/', (_req: Request, res: Response) => {
-  const evenings = db.prepare(`
-    SELECT te.*,
-      (SELECT COUNT(*) FROM evening_instructors WHERE evening_id = te.id) AS instructor_count,
-      (SELECT COUNT(*) FROM invitations WHERE evening_id = te.id) AS invitation_count
-    FROM training_evenings te
-    ORDER BY te.date DESC
+  const sessions = db.prepare(`
+    SELECT ts.*,
+      (SELECT COUNT(*) FROM session_instructors WHERE session_id = ts.id) AS instructor_count,
+      (SELECT COUNT(*) FROM invitations WHERE session_id = ts.id) AS invitation_count
+    FROM training_sessions ts
+    ORDER BY ts.date DESC
   `).all();
-  res.json(evenings);
+  res.json(sessions);
 });
 
-// Get single training evening with details
+// Get single training session with details
 router.get('/:id', (req: Request, res: Response) => {
-  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id) as any;
-  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
 
   const instructors = db.prepare(`
     SELECT i.* FROM instructors i
-    JOIN evening_instructors ei ON ei.instructor_id = i.id
-    WHERE ei.evening_id = ?
+    JOIN session_instructors si ON si.instructor_id = i.id
+    WHERE si.session_id = ?
     ORDER BY i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
   const timeslots = db.prepare(`
-    SELECT * FROM timeslots WHERE evening_id = ? ORDER BY start_time ASC
+    SELECT * FROM timeslots WHERE session_id = ? ORDER BY start_time ASC
   `).all(req.params.id);
 
   const invitations = db.prepare(`
@@ -42,72 +42,72 @@ router.get('/:id', (req: Request, res: Response) => {
     JOIN timeslots ts ON ts.id = inv.timeslot_id
     JOIN instructors i ON i.id = inv.instructor_id
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
-    WHERE inv.evening_id = ?
+    WHERE inv.session_id = ?
     ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
-  res.json({ ...evening, instructors, timeslots, invitations });
+  res.json({ ...session, instructors, timeslots, invitations });
 });
 
-// Create training evening
+// Create training session
 router.post('/', (req: Request, res: Response) => {
   const { date, notes } = req.body;
   if (!date) { res.status(400).json({ error: 'Date is required' }); return; }
 
   try {
-    const result = db.prepare('INSERT INTO training_evenings (date, notes) VALUES (?, ?)').run(date, notes || null);
-    const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(result.lastInsertRowid);
-    res.status(201).json(evening);
+    const result = db.prepare('INSERT INTO training_sessions (date, notes) VALUES (?, ?)').run(date, notes || null);
+    const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(session);
   } catch (err: any) {
     if (err.message.includes('UNIQUE constraint')) {
-      res.status(409).json({ error: 'A training evening already exists for this date' });
+      res.status(409).json({ error: 'A training session already exists for this date' });
       return;
     }
     throw err;
   }
 });
 
-// Update training evening
+// Update training session
 router.put('/:id', (req: Request, res: Response) => {
   const { date, notes, status } = req.body;
-  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id);
-  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id);
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
 
   db.prepare(`
-    UPDATE training_evenings SET
+    UPDATE training_sessions SET
       date = COALESCE(?, date),
       notes = COALESCE(?, notes),
       status = COALESCE(?, status)
     WHERE id = ?
   `).run(date ?? null, notes ?? null, status ?? null, req.params.id);
 
-  const updated = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id);
+  const updated = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id);
   res.json(updated);
 });
 
-// Delete training evening
+// Delete training session
 router.delete('/:id', (req: Request, res: Response) => {
-  const result = db.prepare('DELETE FROM training_evenings WHERE id = ?').run(req.params.id);
-  if (result.changes === 0) { res.status(404).json({ error: 'Training evening not found' }); return; }
+  const result = db.prepare('DELETE FROM training_sessions WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) { res.status(404).json({ error: 'Training session not found' }); return; }
   res.json({ success: true });
 });
 
 // ===== Instructor Assignment =====
 
-// Assign instructor to evening
+// Assign instructor to session
 router.post('/:id/instructors', (req: Request, res: Response) => {
   const { instructor_id } = req.body;
   if (!instructor_id) { res.status(400).json({ error: 'instructor_id is required' }); return; }
 
-  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id);
-  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id);
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
 
   try {
-    db.prepare('INSERT INTO evening_instructors (evening_id, instructor_id) VALUES (?, ?)').run(req.params.id, instructor_id);
+    db.prepare('INSERT INTO session_instructors (session_id, instructor_id) VALUES (?, ?)').run(req.params.id, instructor_id);
     res.status(201).json({ success: true });
   } catch (err: any) {
     if (err.message.includes('UNIQUE constraint')) {
-      res.status(409).json({ error: 'Instructor already assigned to this evening' });
+      res.status(409).json({ error: 'Instructor already assigned to this session' });
       return;
     }
     if (err.message.includes('FOREIGN KEY')) {
@@ -118,9 +118,9 @@ router.post('/:id/instructors', (req: Request, res: Response) => {
   }
 });
 
-// Remove instructor from evening
+// Remove instructor from session
 router.delete('/:id/instructors/:instructorId', (req: Request, res: Response) => {
-  const result = db.prepare('DELETE FROM evening_instructors WHERE evening_id = ? AND instructor_id = ?')
+  const result = db.prepare('DELETE FROM session_instructors WHERE session_id = ? AND instructor_id = ?')
     .run(req.params.id, req.params.instructorId);
   if (result.changes === 0) { res.status(404).json({ error: 'Assignment not found' }); return; }
   res.json({ success: true });
@@ -128,30 +128,30 @@ router.delete('/:id/instructors/:instructorId', (req: Request, res: Response) =>
 
 // ===== Timeslot Management =====
 
-// Add a timeslot to an evening
+// Add a timeslot to a session
 router.post('/:id/timeslots', (req: Request, res: Response) => {
   const { start_time } = req.body;
   if (!start_time) { res.status(400).json({ error: 'start_time is required' }); return; }
 
-  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id);
-  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id);
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
 
   try {
-    const result = db.prepare('INSERT INTO timeslots (evening_id, start_time) VALUES (?, ?)').run(req.params.id, start_time);
+    const result = db.prepare('INSERT INTO timeslots (session_id, start_time) VALUES (?, ?)').run(req.params.id, start_time);
     const timeslot = db.prepare('SELECT * FROM timeslots WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(timeslot);
   } catch (err: any) {
     if (err.message.includes('UNIQUE constraint')) {
-      res.status(409).json({ error: 'A timeslot with this start time already exists for this evening' });
+      res.status(409).json({ error: 'A timeslot with this start time already exists for this session' });
       return;
     }
     throw err;
   }
 });
 
-// Delete a timeslot from an evening
+// Delete a timeslot from a session
 router.delete('/:id/timeslots/:timeslotId', (req: Request, res: Response) => {
-  const result = db.prepare('DELETE FROM timeslots WHERE id = ? AND evening_id = ?')
+  const result = db.prepare('DELETE FROM timeslots WHERE id = ? AND session_id = ?')
     .run(req.params.timeslotId, req.params.id);
   if (result.changes === 0) { res.status(404).json({ error: 'Timeslot not found' }); return; }
   res.json({ success: true });
@@ -159,24 +159,24 @@ router.delete('/:id/timeslots/:timeslotId', (req: Request, res: Response) => {
 
 // ===== Schedule Generation =====
 
-// Generate schedule for an evening: allocate students with lowest attended sessions
+// Generate schedule for a session: allocate students with lowest attended sessions
 router.post('/:id/generate-schedule', (req: Request, res: Response) => {
-  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id) as any;
-  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
 
-  const instructorCount = (db.prepare('SELECT COUNT(*) AS cnt FROM evening_instructors WHERE evening_id = ?')
+  const instructorCount = (db.prepare('SELECT COUNT(*) AS cnt FROM session_instructors WHERE session_id = ?')
     .get(req.params.id) as any).cnt;
-  if (instructorCount === 0) { res.status(400).json({ error: 'No instructors assigned for this evening' }); return; }
+  if (instructorCount === 0) { res.status(400).json({ error: 'No instructors assigned for this session' }); return; }
 
-  const timeslots = db.prepare('SELECT * FROM timeslots WHERE evening_id = ? ORDER BY start_time ASC')
+  const timeslots = db.prepare('SELECT * FROM timeslots WHERE session_id = ? ORDER BY start_time ASC')
     .all(req.params.id) as any[];
-  if (timeslots.length === 0) { res.status(400).json({ error: 'No timeslots defined for this evening' }); return; }
+  if (timeslots.length === 0) { res.status(400).json({ error: 'No timeslots defined for this session' }); return; }
 
   // Each timeslot has one spot per instructor
   const totalSlots = timeslots.length * instructorCount;
 
-  // Remove existing invitations for this evening
-  db.prepare('DELETE FROM invitations WHERE evening_id = ?').run(req.params.id);
+  // Remove existing invitations for this session
+  db.prepare('DELETE FROM invitations WHERE session_id = ?').run(req.params.id);
 
   // Get active students ordered by attended sessions (lowest first), then by name
   const students = db.prepare(`
@@ -184,25 +184,25 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     WHERE s.active = 1
       AND s.id NOT IN (
         SELECT inv.student_id FROM invitations inv
-        JOIN training_evenings te ON te.id = inv.evening_id
-        WHERE te.date = ? AND inv.status != 'declined'
+        JOIN training_sessions ts ON ts.id = inv.session_id
+        WHERE ts.date = ? AND inv.status != 'declined'
       )
     ORDER BY s.attended_sessions ASC, s.last_name ASC, s.first_name ASC
-  `).all(evening.date) as any[];
+  `).all(session.date) as any[];
 
   const insertInvitation = db.prepare(`
-    INSERT INTO invitations (evening_id, student_id, timeslot_id, instructor_id, token)
+    INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token)
     VALUES (?, ?, ?, ?, ?)
   `);
 
   const instructors = db.prepare(`
     SELECT i.id FROM instructors i
-    JOIN evening_instructors ei ON ei.instructor_id = i.id
-    WHERE ei.evening_id = ?
+    JOIN session_instructors si ON si.instructor_id = i.id
+    WHERE si.session_id = ?
     ORDER BY i.last_name ASC, i.first_name ASC
   `).all(req.params.id) as any[];
 
-  const insertMany = db.transaction((studentsArr: any[], eveningId: string | string[], slots: any[]) => {
+  const insertMany = db.transaction((studentsArr: any[], sessionId: string | string[], slots: any[]) => {
     const invited: any[] = [];
     let studentIdx = 0;
     // Fill timeslots: for each timeslot, assign one student per instructor
@@ -210,7 +210,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
       for (const instructor of instructors) {
         if (studentIdx >= studentsArr.length) break;
         const token = crypto.randomUUID();
-        insertInvitation.run(eveningId, studentsArr[studentIdx].id, timeslot.id, instructor.id, token);
+        insertInvitation.run(sessionId, studentsArr[studentIdx].id, timeslot.id, instructor.id, token);
         invited.push({ ...studentsArr[studentIdx], token, timeslot_id: timeslot.id, instructor_id: instructor.id, start_time: timeslot.start_time });
         studentIdx++;
       }
@@ -221,11 +221,11 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   const invited = insertMany(students, req.params.id, timeslots);
 
-  // Update evening status to scheduled
-  db.prepare("UPDATE training_evenings SET status = 'scheduled' WHERE id = ?").run(req.params.id);
+  // Update session status to scheduled
+  db.prepare("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?").run(req.params.id);
 
   res.json({
-    evening_id: req.params.id,
+    session_id: req.params.id,
     total_slots: totalSlots,
     students_invited: invited.length,
     invitations: invited,
@@ -235,14 +235,14 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 // ===== Send Invitation Emails =====
 
 router.post('/:id/send-invitations', async (req: Request, res: Response) => {
-  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id) as any;
-  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
 
   const invitations = db.prepare(`
     SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
-    WHERE inv.evening_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'
+    WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'
   `).all(req.params.id) as any[];
 
   if (invitations.length === 0) {
@@ -262,7 +262,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
       await sendInvitationEmail({
         to: inv.student_email,
         studentName: inv.student_name,
-        date: evening.date,
+        date: session.date,
         token: inv.token,
         clubName,
         subject,
@@ -274,9 +274,9 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
     }
   }
 
-  // Update evening status to invitations_sent
+  // Update session status to invitations_sent
   if (sent > 0) {
-    db.prepare("UPDATE training_evenings SET status = 'invitations_sent' WHERE id = ?").run(req.params.id);
+    db.prepare("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?").run(req.params.id);
   }
 
   res.json({ sent, errors });
@@ -285,11 +285,11 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
 // ===== Toggle no-show for an invitation =====
 
 router.post('/:id/invitations/:invitationId/toggle-no-show', (req: Request, res: Response) => {
-  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id) as any;
-  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
-  if (evening.status === 'completed') { res.status(400).json({ error: 'Evening already completed' }); return; }
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
+  if (session.status === 'completed') { res.status(400).json({ error: 'Session already completed' }); return; }
 
-  const invitation = db.prepare('SELECT * FROM invitations WHERE id = ? AND evening_id = ?').get(req.params.invitationId, req.params.id) as any;
+  const invitation = db.prepare('SELECT * FROM invitations WHERE id = ? AND session_id = ?').get(req.params.invitationId, req.params.id) as any;
   if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
   if (invitation.status !== 'confirmed') { res.status(400).json({ error: 'Only confirmed invitations can be toggled' }); return; }
 
@@ -298,16 +298,16 @@ router.post('/:id/invitations/:invitationId/toggle-no-show', (req: Request, res:
   res.json({ success: true, no_show: newValue });
 });
 
-// ===== Mark evening as completed and increment attended_sessions =====
+// ===== Mark session as completed and increment attended_sessions =====
 
 router.post('/:id/complete', (req: Request, res: Response) => {
-  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id) as any;
-  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
-  if (evening.status === 'completed') { res.status(400).json({ error: 'Evening already completed' }); return; }
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
+  if (session.status === 'completed') { res.status(400).json({ error: 'Session already completed' }); return; }
 
   const confirmedStudents = db.prepare(`
     SELECT student_id, no_show FROM invitations
-    WHERE evening_id = ? AND status = 'confirmed'
+    WHERE session_id = ? AND status = 'confirmed'
   `).all(req.params.id) as Array<{ student_id: number; no_show: number }>;
 
   const updateAttended = db.prepare('UPDATE students SET attended_sessions = attended_sessions + 1 WHERE id = ?');
@@ -320,7 +320,7 @@ router.post('/:id/complete', (req: Request, res: Response) => {
         updateAttended.run(student_id);
       }
     }
-    db.prepare("UPDATE training_evenings SET status = 'completed' WHERE id = ?").run(req.params.id);
+    db.prepare("UPDATE training_sessions SET status = 'completed' WHERE id = ?").run(req.params.id);
   });
 
   completeTransaction();

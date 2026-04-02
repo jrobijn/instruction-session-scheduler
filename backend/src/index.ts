@@ -6,7 +6,7 @@ import db from './database.js';
 import { initializeMailer } from './email.js';
 import studentsRouter from './routes/students.js';
 import instructorsRouter from './routes/instructors.js';
-import eveningsRouter from './routes/evenings.js';
+import sessionsRouter from './routes/sessions.js';
 import invitationsRouter from './routes/invitations.js';
 import settingsRouter from './routes/settings.js';
 import disciplinesRouter from './routes/disciplines.js';
@@ -46,7 +46,7 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 // Protected admin routes
 app.use('/api/students', requireAdmin, studentsRouter);
 app.use('/api/instructors', requireAdmin, instructorsRouter);
-app.use('/api/evenings', requireAdmin, eveningsRouter);
+app.use('/api/sessions', requireAdmin, sessionsRouter);
 app.use('/api/settings', requireAdmin, settingsRouter);
 app.use('/api/disciplines', requireAdmin, disciplinesRouter);
 

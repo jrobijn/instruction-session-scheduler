@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 
-interface Evening {
+interface Session {
   id: number;
   date: string;
   status: string;
@@ -15,8 +15,8 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-export default function EveningsPage() {
-  const [evenings, setEvenings] = useState<Evening[]>([]);
+export default function SessionsPage() {
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [date, setDate] = useState('');
   const [error, setError] = useState('');
@@ -25,7 +25,7 @@ export default function EveningsPage() {
 
   const load = async () => {
     try {
-      setEvenings(await api.getEvenings());
+      setSessions(await api.getSessions());
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -39,19 +39,19 @@ export default function EveningsPage() {
     if (!date) return;
     setError('');
     try {
-      const evening = await api.createEvening({ date });
+      const session = await api.createSession({ date });
       setShowModal(false);
       setDate('');
-      navigate(`/evenings/${evening.id}`);
+      navigate(`/sessions/${session.id}`);
     } catch (err: any) {
       setError(err.message);
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this evening?')) return;
+    if (!confirm('Are you sure you want to delete this session?')) return;
     try {
-      await api.deleteEvening(id);
+      await api.deleteSession(id);
       load();
     } catch (err: any) {
       alert(err.message);
@@ -63,14 +63,14 @@ export default function EveningsPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Training Evenings ({evenings.length})</h1>
-        <button className="btn btn-primary" onClick={() => { setError(''); setShowModal(true); }}>+ New Evening</button>
+        <h1>Training Sessions ({sessions.length})</h1>
+        <button className="btn btn-primary" onClick={() => { setError(''); setShowModal(true); }}>+ New Session</button>
       </div>
 
-      {evenings.length === 0 ? (
+      {sessions.length === 0 ? (
         <div className="empty-state">
-          <h3>No training evenings yet</h3>
-          <p>Create your first training evening to get started.</p>
+          <h3>No training sessions yet</h3>
+          <p>Create your first training session to get started.</p>
         </div>
       ) : (
         <table>
@@ -84,27 +84,27 @@ export default function EveningsPage() {
             </tr>
           </thead>
           <tbody>
-            {evenings.map(e => (
-              <tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/evenings/${e.id}`)}>
-                <td>{formatDate(e.date)}</td>
+            {sessions.map(s => (
+              <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/sessions/${s.id}`)}>
+                <td>{formatDate(s.date)}</td>
                 <td>
                   <span className={`badge ${
-                    e.status === 'completed' ? 'badge-confirmed' :
-                    e.status === 'invitations_sent' ? 'badge-pending' :
-                    e.status === 'scheduled' ? 'badge-pending' :
-                    e.status === 'draft' ? 'badge-draft' :
+                    s.status === 'completed' ? 'badge-confirmed' :
+                    s.status === 'invitations_sent' ? 'badge-pending' :
+                    s.status === 'scheduled' ? 'badge-pending' :
+                    s.status === 'draft' ? 'badge-draft' :
                     'badge-declined'
                   }`}>
-                    {e.status.replace(/_/g, ' ')}
+                    {s.status.replace(/_/g, ' ')}
                   </span>
                 </td>
-                <td>{e.instructor_count}</td>
-                <td>{e.invitation_count}</td>
+                <td>{s.instructor_count}</td>
+                <td>{s.invitation_count}</td>
                 <td>
                   <div className="btn-group">
-                    <button className="btn btn-outline btn-sm" onClick={(ev) => { ev.stopPropagation(); navigate(`/evenings/${e.id}`); }}>View</button>
-                    {e.status === 'draft' && (
-                      <button className="btn btn-danger btn-sm" onClick={(ev) => { ev.stopPropagation(); handleDelete(e.id); }}>Delete</button>
+                    <button className="btn btn-outline btn-sm" onClick={(ev) => { ev.stopPropagation(); navigate(`/sessions/${s.id}`); }}>View</button>
+                    {s.status === 'draft' && (
+                      <button className="btn btn-danger btn-sm" onClick={(ev) => { ev.stopPropagation(); handleDelete(s.id); }}>Delete</button>
                     )}
                   </div>
                 </td>
@@ -117,7 +117,7 @@ export default function EveningsPage() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>New Training Evening</h2>
+            <h2>New Training Session</h2>
             {error && <div className="alert alert-error">{error}</div>}
             <div className="form-group">
               <label>Date</label>

@@ -9,7 +9,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
 
   if (isAuthenticated()) {
-    navigate('/evenings');
+    navigate('/sessions');
     return null;
   }
 
@@ -20,7 +20,7 @@ export default function LoginPage() {
     try {
       const data = await api.login(password);
       setToken(data.token);
-      navigate('/evenings');
+      navigate('/sessions');
     } catch (err: any) {
       setError(err.message);
     } finally {

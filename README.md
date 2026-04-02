@@ -1,17 +1,17 @@
 # Coaching Session Scheduler
 
-A web application for scheduling coaching sessions at a sports club. Features an admin panel for managing students, instructors, and training evenings — with automated scheduling that prioritizes students with the fewest attended sessions.
+A web application for scheduling coaching sessions at a sports club. Features an admin panel for managing students, instructors, and training sessions — with automated scheduling that prioritizes students with the fewest attended sessions.
 
 ## Features
 
 - **Student Management**: Add, edit, activate/deactivate students
 - **Instructor Management**: Add, edit, activate/deactivate instructors  
-- **Training Evening Scheduling**: Create training evenings, assign instructors
+- **Training Session Scheduling**: Create training sessions, assign instructors
 - **Automatic Schedule Generation**: Allocates students with the lowest attended sessions first. Number of invitations = instructors × configurable sessions per instructor.
 - **Email Invitations**: Sends invitation emails with personal links
 - **Student RSVP**: Students can confirm or decline via a personal link
 - **Auto-Replacement**: When a student declines, the next eligible student is automatically invited
-- **Session Tracking**: Completing an evening increments attended sessions for confirmed students
+- **Session Tracking**: Completing a session increments attended sessions for confirmed students
 
 ## Quick Start
 
@@ -54,19 +54,19 @@ Edit `backend/.env`:
 
 In-app settings (via Settings page):
 - **Club Name**: Shown in emails and invitation page
-- **Sessions per Instructor**: How many students each instructor coaches per evening
+- **Sessions per Instructor**: How many students each instructor coaches per session
 - **Invitation Email Subject**: Email subject line
 
 ## How It Works
 
 1. **Setup**: Add students and instructors via the admin panel
-2. **Create Evening**: Create a training evening for a specific date
-3. **Assign Instructors**: Select which instructors are available that evening
+2. **Create Session**: Create a training session for a specific date
+3. **Assign Instructors**: Select which instructors are available for that session
 4. **Generate Schedule**: Click "Generate Schedule" — the system selects students with the fewest attended sessions. The number of slots = instructors × sessions per instructor.
 5. **Send Invitations**: Click "Send Invitation Emails" to email students with personal RSVP links
 6. **Students Respond**: Students click their link to confirm or decline
 7. **Auto-Replacement**: If a student declines, the next eligible student is automatically invited and emailed
-8. **Complete Evening**: After the evening, click "Mark as Completed" to credit confirmed students
+8. **Complete Session**: After the session, click "Mark as Completed" to credit confirmed students
 
 ## Tech Stack
 

@@ -33,7 +33,7 @@ export function initializeDatabase(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS training_evenings (
+    CREATE TABLE IF NOT EXISTS training_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL UNIQUE,
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','invitations_sent','completed')),
@@ -41,11 +41,11 @@ export function initializeDatabase(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS evening_instructors (
+    CREATE TABLE IF NOT EXISTS session_instructors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      evening_id INTEGER NOT NULL REFERENCES training_evenings(id) ON DELETE CASCADE,
+      session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
       instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
-      UNIQUE(evening_id, instructor_id)
+      UNIQUE(session_id, instructor_id)
     );
 
     CREATE TABLE IF NOT EXISTS disciplines (
@@ -57,14 +57,14 @@ export function initializeDatabase(): void {
 
     CREATE TABLE IF NOT EXISTS timeslots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      evening_id INTEGER NOT NULL REFERENCES training_evenings(id) ON DELETE CASCADE,
+      session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
       start_time TEXT NOT NULL,
-      UNIQUE(evening_id, start_time)
+      UNIQUE(session_id, start_time)
     );
 
     CREATE TABLE IF NOT EXISTS invitations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      evening_id INTEGER NOT NULL REFERENCES training_evenings(id) ON DELETE CASCADE,
+      session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
       instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
@@ -88,6 +88,29 @@ export function initializeDatabase(): void {
   `);
 
   // Migrations for existing databases
+
+  // Rename evenings -> sessions tables and columns
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+  if (tables.some(t => t.name === 'training_evenings')) {
+    db.exec('ALTER TABLE training_evenings RENAME TO training_sessions');
+  }
+  if (tables.some(t => t.name === 'evening_instructors')) {
+    db.exec('ALTER TABLE evening_instructors RENAME TO session_instructors');
+  }
+  // Rename evening_id columns
+  const sessionInstrCols = db.prepare("PRAGMA table_info(session_instructors)").all() as Array<{ name: string }>;
+  if (sessionInstrCols.some(c => c.name === 'evening_id')) {
+    db.exec('ALTER TABLE session_instructors RENAME COLUMN evening_id TO session_id');
+  }
+  const timeslotCols = db.prepare("PRAGMA table_info(timeslots)").all() as Array<{ name: string }>;
+  if (timeslotCols.some(c => c.name === 'evening_id')) {
+    db.exec('ALTER TABLE timeslots RENAME COLUMN evening_id TO session_id');
+  }
+  const invitationCols2 = db.prepare("PRAGMA table_info(invitations)").all() as Array<{ name: string }>;
+  if (invitationCols2.some(c => c.name === 'evening_id')) {
+    db.exec('ALTER TABLE invitations RENAME COLUMN evening_id TO session_id');
+  }
+
   const studentCols = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
   if (!studentCols.some(c => c.name === 'no_show_count')) {
     db.exec('ALTER TABLE students ADD COLUMN no_show_count INTEGER NOT NULL DEFAULT 0');
