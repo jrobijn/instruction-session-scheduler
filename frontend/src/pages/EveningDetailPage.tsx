@@ -27,6 +27,7 @@ interface Invitation {
   token: string;
   timeslot_id: number;
   timeslot_start_time: string;
+  no_show: number;
 }
 
 interface EveningDetail {
@@ -132,6 +133,15 @@ export default function EveningDetailPage() {
       alert(err.message);
     } finally {
       setActionLoading('');
+    }
+  };
+
+  const toggleNoShow = async (invitationId: number) => {
+    try {
+      await api.toggleNoShow(Number(id), invitationId);
+      load();
+    } catch (err: any) {
+      alert(err.message);
     }
   };
 
@@ -396,6 +406,23 @@ export default function EveningDetailPage() {
                     }`}>
                       {inv.status}
                     </span>
+                    {inv.status === 'confirmed' && evening.status !== 'completed' && (
+                      <span
+                        className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
+                        style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
+                        onClick={() => toggleNoShow(inv.id)}
+                      >
+                        {inv.no_show ? 'no-show' : 'show'}
+                      </span>
+                    )}
+                    {inv.status === 'confirmed' && evening.status === 'completed' && (
+                      <span
+                        className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
+                        style={{ marginLeft: '0.5rem' }}
+                      >
+                        {inv.no_show ? 'no-show' : 'show'}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -7,6 +7,7 @@ interface Student {
   last_name: string;
   email: string;
   attended_sessions: number;
+  no_show_count: number;
   active: number;
 }
 
@@ -166,6 +167,7 @@ export default function StudentsPage() {
               <th className="sortable" onClick={() => toggleSort('last_name')}>Last Name{sortIcon('last_name')}</th>
               <th className="sortable" onClick={() => toggleSort('email')}>Email{sortIcon('email')}</th>
               <th className="sortable" onClick={() => toggleSort('attended_sessions')}>Sessions Attended{sortIcon('attended_sessions')}</th>
+              <th className="sortable" onClick={() => toggleSort('no_show_count')}>No-shows{sortIcon('no_show_count')}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
               <th>Actions</th>
             </tr>
@@ -177,6 +179,7 @@ export default function StudentsPage() {
                 <td>{s.last_name}</td>
                 <td>{s.email}</td>
                 <td>{s.attended_sessions}</td>
+                <td>{s.no_show_count}</td>
                 <td>
                   <span className={`badge ${s.active ? 'badge-confirmed' : 'badge-declined'}`}>
                     {s.active ? 'Active' : 'Inactive'}

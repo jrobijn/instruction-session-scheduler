@@ -77,6 +77,7 @@ export const api = {
   generateSchedule: (eveningId: string) => request(`/evenings/${eveningId}/generate-schedule`, { method: 'POST' }),
   sendInvitations: (eveningId: string) => request(`/evenings/${eveningId}/send-invitations`, { method: 'POST' }),
   completeEvening: (eveningId: string) => request(`/evenings/${eveningId}/complete`, { method: 'POST' }),
+  toggleNoShow: (eveningId: number, invitationId: number) => request(`/evenings/${eveningId}/invitations/${invitationId}/toggle-no-show`, { method: 'POST' }),
 
   // Settings
   getSettings: () => request('/settings'),

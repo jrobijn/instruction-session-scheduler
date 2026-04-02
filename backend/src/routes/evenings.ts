@@ -34,7 +34,7 @@ router.get('/:id', (req: Request, res: Response) => {
   `).all(req.params.id);
 
   const invitations = db.prepare(`
-    SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.attended_sessions,
+    SELECT inv.*, inv.no_show, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.attended_sessions,
            d.name AS discipline_name, ts.start_time AS timeslot_start_time,
            i.first_name || ' ' || i.last_name AS instructor_name
     FROM invitations inv
@@ -282,6 +282,22 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
   res.json({ sent, errors });
 });
 
+// ===== Toggle no-show for an invitation =====
+
+router.post('/:id/invitations/:invitationId/toggle-no-show', (req: Request, res: Response) => {
+  const evening = db.prepare('SELECT * FROM training_evenings WHERE id = ?').get(req.params.id) as any;
+  if (!evening) { res.status(404).json({ error: 'Training evening not found' }); return; }
+  if (evening.status === 'completed') { res.status(400).json({ error: 'Evening already completed' }); return; }
+
+  const invitation = db.prepare('SELECT * FROM invitations WHERE id = ? AND evening_id = ?').get(req.params.invitationId, req.params.id) as any;
+  if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
+  if (invitation.status !== 'confirmed') { res.status(400).json({ error: 'Only confirmed invitations can be toggled' }); return; }
+
+  const newValue = invitation.no_show ? 0 : 1;
+  db.prepare('UPDATE invitations SET no_show = ? WHERE id = ?').run(newValue, invitation.id);
+  res.json({ success: true, no_show: newValue });
+});
+
 // ===== Mark evening as completed and increment attended_sessions =====
 
 router.post('/:id/complete', (req: Request, res: Response) => {
@@ -290,14 +306,19 @@ router.post('/:id/complete', (req: Request, res: Response) => {
   if (evening.status === 'completed') { res.status(400).json({ error: 'Evening already completed' }); return; }
 
   const confirmedStudents = db.prepare(`
-    SELECT student_id FROM invitations
+    SELECT student_id, no_show FROM invitations
     WHERE evening_id = ? AND status = 'confirmed'
-  `).all(req.params.id) as Array<{ student_id: number }>;
+  `).all(req.params.id) as Array<{ student_id: number; no_show: number }>;
 
   const updateAttended = db.prepare('UPDATE students SET attended_sessions = attended_sessions + 1 WHERE id = ?');
+  const updateNoShow = db.prepare('UPDATE students SET no_show_count = no_show_count + 1 WHERE id = ?');
   const completeTransaction = db.transaction(() => {
-    for (const { student_id } of confirmedStudents) {
-      updateAttended.run(student_id);
+    for (const { student_id, no_show } of confirmedStudents) {
+      if (no_show) {
+        updateNoShow.run(student_id);
+      } else {
+        updateAttended.run(student_id);
+      }
     }
     db.prepare("UPDATE training_evenings SET status = 'completed' WHERE id = ?").run(req.params.id);
   });

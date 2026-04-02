@@ -19,6 +19,7 @@ export function initializeDatabase(): void {
       last_name TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
       attended_sessions INTEGER NOT NULL DEFAULT 0,
+      no_show_count INTEGER NOT NULL DEFAULT 0,
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -71,6 +72,7 @@ export function initializeDatabase(): void {
       status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined')),
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
+      no_show INTEGER NOT NULL DEFAULT 0,
       invited_at TEXT NOT NULL DEFAULT (datetime('now')),
       responded_at TEXT
     );
@@ -84,6 +86,17 @@ export function initializeDatabase(): void {
     INSERT OR IGNORE INTO settings (key, value) VALUES ('club_name', 'Sports Club');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_email_subject', 'You are invited to a coaching session!');
   `);
+
+  // Migrations for existing databases
+  const studentCols = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
+  if (!studentCols.some(c => c.name === 'no_show_count')) {
+    db.exec('ALTER TABLE students ADD COLUMN no_show_count INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const invitationCols = db.prepare("PRAGMA table_info(invitations)").all() as Array<{ name: string }>;
+  if (!invitationCols.some(c => c.name === 'no_show')) {
+    db.exec('ALTER TABLE invitations ADD COLUMN no_show INTEGER NOT NULL DEFAULT 0');
+  }
 }
 
 export default db;
