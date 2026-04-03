@@ -12,6 +12,14 @@ interface Student {
   active: number;
 }
 
+interface Timetable {
+  id: number;
+  name: string;
+  status: string;
+  active: number;
+  timeslots?: Array<{ id: number; start_time: string }>;
+}
+
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function StudentsPage() {
@@ -23,6 +31,8 @@ export default function StudentsPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
+  const [timetables, setTimetables] = useState<Timetable[]>([]);
+  const [timeslotPrefs, setTimeslotPrefs] = useState<Record<number, number[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sortCol, setSortCol] = useState<keyof Student>('last_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -57,17 +67,39 @@ export default function StudentsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const openCreate = () => {
+  const loadTimetables = async () => {
+    try {
+      const allTimetables = await api.getTimetables();
+      const active = allTimetables.filter((t: Timetable) => t.active && t.status === 'saved');
+      // Load timeslots for each active timetable
+      const withTimeslots = await Promise.all(active.map(async (t: Timetable) => {
+        const detail = await api.getTimetable(t.id);
+        return { ...t, timeslots: detail.timeslots };
+      }));
+      setTimetables(withTimeslots);
+    } catch { /* ignore */ }
+  };
+
+  const openCreate = async () => {
     setEditing(null);
     setForm({ first_name: '', last_name: '', email: '', preferred_days: '0|1|2|3|4|5|6' });
+    setTimeslotPrefs({});
     setError('');
+    await loadTimetables();
     setShowModal(true);
   };
 
-  const openEdit = (student: Student) => {
+  const openEdit = async (student: Student) => {
     setEditing(student);
     setForm({ first_name: student.first_name, last_name: student.last_name, email: student.email, preferred_days: student.preferred_days });
     setError('');
+    await loadTimetables();
+    try {
+      const prefs = await api.getStudentPreferredTimeslots(student.id);
+      setTimeslotPrefs(prefs);
+    } catch {
+      setTimeslotPrefs({});
+    }
     setShowModal(true);
   };
 
@@ -75,10 +107,20 @@ export default function StudentsPage() {
     e.preventDefault();
     setError('');
     try {
+      let studentId: number;
       if (editing) {
         await api.updateStudent(editing.id, form);
+        studentId = editing.id;
       } else {
-        await api.createStudent(form);
+        const created = await api.createStudent(form);
+        studentId = created.id;
+      }
+      // Save timeslot preferences for each timetable that has custom prefs
+      for (const tt of timetables) {
+        const tsIds = timeslotPrefs[tt.id];
+        if (tsIds !== undefined) {
+          await api.setStudentPreferredTimeslots(studentId, tt.id, tsIds);
+        }
       }
       setShowModal(false);
       load();
@@ -175,7 +217,6 @@ export default function StudentsPage() {
               <th className="sortable" onClick={() => toggleSort('email')}>Email{sortIcon('email')}</th>
               <th className="sortable" onClick={() => toggleSort('attended_sessions')}>Sessions Attended{sortIcon('attended_sessions')}</th>
               <th className="sortable" onClick={() => toggleSort('no_show_count')}>No-shows{sortIcon('no_show_count')}</th>
-              <th>Preferred Days</th>
               <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
               <th>Actions</th>
             </tr>
@@ -188,15 +229,6 @@ export default function StudentsPage() {
                 <td>{s.email}</td>
                 <td>{s.attended_sessions}</td>
                 <td>{s.no_show_count}</td>
-                <td style={{ fontSize: '0.85rem' }}>
-                  {(() => {
-                    const studentDays = s.preferred_days ? s.preferred_days.split('|').map(Number) : [];
-                    const visibleDays = studentDays.filter(d => clubDays.includes(d));
-                    if (visibleDays.length === clubDays.length) return 'All';
-                    if (visibleDays.length === 0) return 'None';
-                    return visibleDays.map(d => DAY_LABELS[d]).join(', ');
-                  })()}
-                </td>
                 <td>
                   <span className={`badge ${s.active ? 'badge-confirmed' : 'badge-declined'}`}>
                     {s.active ? 'Active' : 'Inactive'}
@@ -261,6 +293,72 @@ export default function StudentsPage() {
                   })}
                 </div>
               </div>
+              {timetables.length > 0 && (
+                <div className="form-group">
+                  <label>Preferred Timeslots</label>
+                  {timetables.map(tt => {
+                    const slots = tt.timeslots || [];
+                    const allSlotIds = slots.map(s => s.id);
+                    // If no stored prefs for this timetable, all are selected (default)
+                    const selectedIds = timeslotPrefs[tt.id] !== undefined
+                      ? timeslotPrefs[tt.id]
+                      : allSlotIds;
+                    const allSelected = selectedIds.length === allSlotIds.length || timeslotPrefs[tt.id] === undefined;
+                    return (
+                      <div key={tt.id} style={{ marginBottom: '0.75rem' }}>
+                        <div style={{ fontWeight: 500, fontSize: '0.85rem', marginBottom: '0.25rem' }}>{tt.name}</div>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer', fontSize: '0.85rem', fontStyle: 'italic', marginRight: '0.25rem' }}>
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={() => {
+                                if (allSelected) {
+                                  // Uncheck all — set empty array
+                                  setTimeslotPrefs({ ...timeslotPrefs, [tt.id]: [] });
+                                } else {
+                                  // Check all — remove entry (back to default)
+                                  const next = { ...timeslotPrefs };
+                                  delete next[tt.id];
+                                  setTimeslotPrefs(next);
+                                }
+                              }}
+                            />
+                            All
+                          </label>
+                          {slots.map(slot => {
+                            const checked = allSelected || selectedIds.includes(slot.id);
+                            return (
+                              <label key={slot.id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    // When toggling individual, ensure we have an explicit list
+                                    const current = allSelected ? [...allSlotIds] : [...selectedIds];
+                                    const newIds = checked
+                                      ? current.filter(id => id !== slot.id)
+                                      : [...current, slot.id];
+                                    // If all are now selected, remove entry (back to default)
+                                    if (newIds.length >= allSlotIds.length) {
+                                      const next = { ...timeslotPrefs };
+                                      delete next[tt.id];
+                                      setTimeslotPrefs(next);
+                                    } else {
+                                      setTimeslotPrefs({ ...timeslotPrefs, [tt.id]: newIds });
+                                    }
+                                  }}
+                                />
+                                {slot.start_time}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">{editing ? 'Save' : 'Add Student'}</button>

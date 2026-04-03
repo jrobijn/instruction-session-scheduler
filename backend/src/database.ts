@@ -89,6 +89,13 @@ export function initializeDatabase(): void {
       responded_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS student_preferred_timeslots (
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
+      timetable_id INTEGER NOT NULL REFERENCES timetables(id) ON DELETE CASCADE,
+      PRIMARY KEY(student_id, timeslot_id)
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
