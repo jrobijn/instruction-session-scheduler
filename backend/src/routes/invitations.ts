@@ -79,6 +79,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
   const nextStudent = db.prepare(`
     SELECT * FROM students
     WHERE active = 1
+      AND ('|' || preferred_days || '|') LIKE '%|' || ? || '|%'
       AND id NOT IN (${alreadyInvited.map(() => '?').join(',')})
       AND id NOT IN (
         SELECT inv.student_id FROM invitations inv
@@ -87,7 +88,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
       )
     ORDER BY attended_sessions ASC, last_name ASC, first_name ASC
     LIMIT 1
-  `).get(...alreadyInvited, invitation.session_date) as any;
+  `).get(String(new Date(invitation.session_date + 'T00:00:00').getDay()), ...alreadyInvited, invitation.session_date) as any;
 
   let replacement: { name: string; email: string } | null = null;
   if (nextStudent) {

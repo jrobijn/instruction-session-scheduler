@@ -5,6 +5,8 @@ interface Settings {
   [key: string]: string;
 }
 
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({});
   const [loading, setLoading] = useState(true);
@@ -56,6 +58,37 @@ export default function SettingsPage() {
             {saved === key && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>✓ Saved</small>}
           </div>
         ))}
+
+        <div className="form-group">
+          <label>Club Days</label>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {DAY_LABELS.map((label, idx) => {
+              const days = (settings.club_days || '0|1|2|3|4|5|6').split('|').filter(Boolean);
+              const checked = days.includes(String(idx));
+              const isLastChecked = checked && days.length <= 1;
+              return (
+                <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: isLastChecked ? 'not-allowed' : 'pointer', opacity: isLastChecked ? 0.5 : 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={isLastChecked}
+                    onChange={() => {
+                      const newDays = checked
+                        ? days.filter(d => d !== String(idx))
+                        : [...days, String(idx)].sort();
+                      const newValue = newDays.join('|');
+                      setSettings({ ...settings, club_days: newValue });
+                      saveSetting('club_days', newValue);
+                    }}
+                  />
+                  {label}
+                </label>
+              );
+            })}
+          </div>
+          <small style={{ color: '#6b7280' }}>Days of the week the club operates. At least one must be selected.</small>
+          {saved === 'club_days' && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>✓ Saved</small>}
+        </div>
       </div>
     </div>
   );

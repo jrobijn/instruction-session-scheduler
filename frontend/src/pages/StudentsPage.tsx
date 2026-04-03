@@ -8,14 +8,18 @@ interface Student {
   email: string;
   attended_sessions: number;
   no_show_count: number;
+  preferred_days: string;
   active: number;
 }
 
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
+  const [clubDays, setClubDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
-  const [form, setForm] = useState({ first_name: '', last_name: '', email: '' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', preferred_days: '0|1|2|3|4|5|6' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
@@ -40,7 +44,10 @@ export default function StudentsPage() {
 
   const load = async () => {
     try {
-      setStudents(await api.getStudents());
+      const [studentsData, settingsData] = await Promise.all([api.getStudents(), api.getSettings()]);
+      setStudents(studentsData);
+      const cd = (settingsData.club_days || '0|1|2|3|4|5|6').split('|').map(Number);
+      setClubDays(cd);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -52,14 +59,14 @@ export default function StudentsPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ first_name: '', last_name: '', email: '' });
+    setForm({ first_name: '', last_name: '', email: '', preferred_days: '0|1|2|3|4|5|6' });
     setError('');
     setShowModal(true);
   };
 
   const openEdit = (student: Student) => {
     setEditing(student);
-    setForm({ first_name: student.first_name, last_name: student.last_name, email: student.email });
+    setForm({ first_name: student.first_name, last_name: student.last_name, email: student.email, preferred_days: student.preferred_days });
     setError('');
     setShowModal(true);
   };
@@ -168,6 +175,7 @@ export default function StudentsPage() {
               <th className="sortable" onClick={() => toggleSort('email')}>Email{sortIcon('email')}</th>
               <th className="sortable" onClick={() => toggleSort('attended_sessions')}>Sessions Attended{sortIcon('attended_sessions')}</th>
               <th className="sortable" onClick={() => toggleSort('no_show_count')}>No-shows{sortIcon('no_show_count')}</th>
+              <th>Preferred Days</th>
               <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
               <th>Actions</th>
             </tr>
@@ -180,6 +188,15 @@ export default function StudentsPage() {
                 <td>{s.email}</td>
                 <td>{s.attended_sessions}</td>
                 <td>{s.no_show_count}</td>
+                <td style={{ fontSize: '0.85rem' }}>
+                  {(() => {
+                    const studentDays = s.preferred_days ? s.preferred_days.split('|').map(Number) : [];
+                    const visibleDays = studentDays.filter(d => clubDays.includes(d));
+                    if (visibleDays.length === clubDays.length) return 'All';
+                    if (visibleDays.length === 0) return 'None';
+                    return visibleDays.map(d => DAY_LABELS[d]).join(', ');
+                  })()}
+                </td>
                 <td>
                   <span className={`badge ${s.active ? 'badge-confirmed' : 'badge-declined'}`}>
                     {s.active ? 'Active' : 'Inactive'}
@@ -217,6 +234,32 @@ export default function StudentsPage() {
               <div className="form-group">
                 <label>Email</label>
                 <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>Preferred Days</label>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {DAY_LABELS.map((label, idx) => {
+                    const days = form.preferred_days ? form.preferred_days.split('|').filter(Boolean) : [];
+                    const checked = days.includes(String(idx));
+                    const isClubDay = clubDays.includes(idx);
+                    return (
+                      <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: isClubDay ? 'pointer' : 'not-allowed', opacity: isClubDay ? 1 : 0.4 }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!isClubDay}
+                          onChange={() => {
+                            const newDays = checked
+                              ? days.filter(d => d !== String(idx))
+                              : [...days, String(idx)].sort();
+                            setForm({ ...form, preferred_days: newDays.join('|') });
+                          }}
+                        />
+                        {label}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>

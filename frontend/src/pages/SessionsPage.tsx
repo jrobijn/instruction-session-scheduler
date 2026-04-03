@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import DatePicker from 'react-datepicker';
 import { api } from '../api';
 
 interface Session {
@@ -26,8 +27,9 @@ function formatDate(dateStr: string) {
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [timetables, setTimetables] = useState<Timetable[]>([]);
+  const [clubDays, setClubDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [showModal, setShowModal] = useState(false);
-  const [date, setDate] = useState('');
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTimetable, setSelectedTimetable] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -35,11 +37,12 @@ export default function SessionsPage() {
 
   const load = async () => {
     try {
-      const [sess, tts] = await Promise.all([api.getSessions(), api.getTimetables()]);
+      const [sess, tts, settingsData] = await Promise.all([api.getSessions(), api.getTimetables(), api.getSettings()]);
       setSessions(sess);
-      // Only show saved + active timetables for selection
       const available = tts.filter((t: any) => t.status === 'saved' && t.active);
       setTimetables(available);
+      const cd = (settingsData.club_days || '0|1|2|3|4|5|6').split('|').map(Number);
+      setClubDays(cd);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -49,24 +52,27 @@ export default function SessionsPage() {
 
   useEffect(() => { load(); }, []);
 
+  const isClubDay = (d: Date) => clubDays.includes(d.getDay());
+
   const openCreateModal = () => {
     setError('');
-    setDate('');
+    setSelectedDate(null);
     const defaultTt = timetables.find(t => t.is_default);
     setSelectedTimetable(defaultTt ? String(defaultTt.id) : '');
     setShowModal(true);
   };
 
   const handleCreate = async () => {
-    if (!date) return;
+    if (!selectedDate) return;
     setError('');
+    const dateStr = selectedDate.getFullYear() + '-' + String(selectedDate.getMonth() + 1).padStart(2, '0') + '-' + String(selectedDate.getDate()).padStart(2, '0');
     try {
       const session = await api.createSession({
-        date,
+        date: dateStr,
         timetable_id: selectedTimetable ? Number(selectedTimetable) : undefined,
       });
       setShowModal(false);
-      setDate('');
+      setSelectedDate(null);
       navigate(`/sessions/${session.id}`);
     } catch (err: any) {
       setError(err.message);
@@ -148,7 +154,14 @@ export default function SessionsPage() {
             {error && <div className="alert alert-error">{error}</div>}
             <div className="form-group">
               <label>Date</label>
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
+              <DatePicker
+                selected={selectedDate}
+                onChange={(d: Date | null) => setSelectedDate(d)}
+                filterDate={isClubDay}
+                dateFormat="yyyy-MM-dd"
+                placeholderText="Select a date..."
+                className="datepicker-input"
+              />
             </div>
             <div className="form-group">
               <label>Timetable</label>
@@ -161,7 +174,7 @@ export default function SessionsPage() {
             </div>
             <div className="modal-actions">
               <button className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleCreate}>Create</button>
+              <button className="btn btn-primary" onClick={handleCreate} disabled={!selectedDate}>Create</button>
             </div>
           </div>
         </div>

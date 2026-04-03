@@ -20,6 +20,7 @@ export function initializeDatabase(): void {
       email TEXT NOT NULL UNIQUE,
       attended_sessions INTEGER NOT NULL DEFAULT 0,
       no_show_count INTEGER NOT NULL DEFAULT 0,
+      preferred_days TEXT NOT NULL DEFAULT '0|1|2|3|4|5|6',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -45,6 +46,7 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS training_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL UNIQUE,
+      day_of_week INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','invitations_sent','completed')),
       timetable_id INTEGER REFERENCES timetables(id) ON DELETE SET NULL,
       notes TEXT,
@@ -95,6 +97,7 @@ export function initializeDatabase(): void {
     -- Default settings
     INSERT OR IGNORE INTO settings (key, value) VALUES ('club_name', 'Sports Club');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_email_subject', 'You are invited to a coaching session!');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('club_days', '0|1|2|3|4|5|6');
   `);
 
   // Migrations for existing databases
@@ -161,6 +164,35 @@ export function initializeDatabase(): void {
   const sessCols = db.prepare("PRAGMA table_info(training_sessions)").all() as Array<{ name: string }>;
   if (!sessCols.some(c => c.name === 'timetable_id')) {
     db.exec('ALTER TABLE training_sessions ADD COLUMN timetable_id INTEGER REFERENCES timetables(id) ON DELETE SET NULL');
+  }
+
+  // Add preferred_days to students if missing
+  const studentCols2 = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
+  if (!studentCols2.some(c => c.name === 'preferred_days')) {
+    db.exec("ALTER TABLE students ADD COLUMN preferred_days TEXT NOT NULL DEFAULT '0|1|2|3|4|5|6'");
+  }
+
+  // Migrate preferred_days and club_days from comma to pipe delimiter
+  const sampleStudent = db.prepare("SELECT preferred_days FROM students LIMIT 1").get() as { preferred_days: string } | undefined;
+  if (sampleStudent && sampleStudent.preferred_days.includes(',')) {
+    db.exec("UPDATE students SET preferred_days = REPLACE(preferred_days, ',', '|')");
+  }
+  const clubDaysSetting = db.prepare("SELECT value FROM settings WHERE key = 'club_days'").get() as { value: string } | undefined;
+  if (clubDaysSetting && clubDaysSetting.value.includes(',')) {
+    db.exec("UPDATE settings SET value = REPLACE(value, ',', '|') WHERE key = 'club_days'");
+  }
+
+  // Add day_of_week to training_sessions if missing
+  const sessCols2 = db.prepare("PRAGMA table_info(training_sessions)").all() as Array<{ name: string }>;
+  if (!sessCols2.some(c => c.name === 'day_of_week')) {
+    db.exec('ALTER TABLE training_sessions ADD COLUMN day_of_week INTEGER NOT NULL DEFAULT 0');
+    // Backfill day_of_week from existing dates
+    const sessions = db.prepare('SELECT id, date FROM training_sessions').all() as Array<{ id: number; date: string }>;
+    const updateDow = db.prepare('UPDATE training_sessions SET day_of_week = ? WHERE id = ?');
+    for (const s of sessions) {
+      const dow = new Date(s.date + 'T00:00:00').getDay();
+      updateDow.run(dow, s.id);
+    }
   }
 }
 

@@ -68,7 +68,8 @@ router.post('/', (req: Request, res: Response) => {
   }
 
   try {
-    const result = db.prepare('INSERT INTO training_sessions (date, notes, timetable_id) VALUES (?, ?, ?)').run(date, notes || null, ttId);
+    const dayOfWeek = new Date(date + 'T00:00:00').getDay();
+    const result = db.prepare('INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?)').run(date, dayOfWeek, notes || null, ttId);
     const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(session);
   } catch (err: any) {
@@ -178,16 +179,19 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   db.prepare('DELETE FROM invitations WHERE session_id = ?').run(req.params.id);
 
   // Get active students ordered by attended sessions (lowest first), then by name
+  // Filter by preferred_days matching the session's day of week
+  const sessionDow = String(new Date(session.date + 'T00:00:00').getDay());
   const students = db.prepare(`
     SELECT s.* FROM students s
     WHERE s.active = 1
+      AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
       AND s.id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
         WHERE ts.date = ? AND inv.status != 'declined'
       )
     ORDER BY s.attended_sessions ASC, s.last_name ASC, s.first_name ASC
-  `).all(session.date) as any[];
+  `).all(sessionDow, session.date) as any[];
 
   const insertInvitation = db.prepare(`
     INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token)
