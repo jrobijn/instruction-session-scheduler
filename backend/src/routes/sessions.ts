@@ -10,8 +10,10 @@ router.get('/', (_req: Request, res: Response) => {
   const sessions = db.prepare(`
     SELECT ts.*,
       (SELECT COUNT(*) FROM session_instructors WHERE session_id = ts.id) AS instructor_count,
-      (SELECT COUNT(*) FROM invitations WHERE session_id = ts.id) AS invitation_count
+      (SELECT COUNT(*) FROM invitations WHERE session_id = ts.id) AS invitation_count,
+      tt.name AS timetable_name
     FROM training_sessions ts
+    LEFT JOIN timetables tt ON tt.id = ts.timetable_id
     ORDER BY ts.date DESC
   `).all();
   res.json(sessions);
@@ -29,9 +31,13 @@ router.get('/:id', (req: Request, res: Response) => {
     ORDER BY i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
-  const timeslots = db.prepare(`
-    SELECT * FROM timeslots WHERE session_id = ? ORDER BY start_time ASC
-  `).all(req.params.id);
+  // Get timeslots from the attached timetable
+  let timeslots: any[] = [];
+  let timetable = null;
+  if (session.timetable_id) {
+    timetable = db.prepare('SELECT * FROM timetables WHERE id = ?').get(session.timetable_id);
+    timeslots = db.prepare('SELECT * FROM timeslots WHERE timetable_id = ? ORDER BY start_time ASC').all(session.timetable_id);
+  }
 
   const invitations = db.prepare(`
     SELECT inv.*, inv.no_show, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.attended_sessions,
@@ -46,16 +52,23 @@ router.get('/:id', (req: Request, res: Response) => {
     ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
-  res.json({ ...session, instructors, timeslots, invitations });
+  res.json({ ...session, instructors, timeslots, invitations, timetable });
 });
 
 // Create training session
 router.post('/', (req: Request, res: Response) => {
-  const { date, notes } = req.body;
+  const { date, notes, timetable_id } = req.body;
   if (!date) { res.status(400).json({ error: 'Date is required' }); return; }
 
+  // Use provided timetable_id or fall back to the default timetable
+  let ttId = timetable_id;
+  if (!ttId) {
+    const defaultTt = db.prepare("SELECT id FROM timetables WHERE is_default = 1 AND active = 1 AND status = 'saved'").get() as any;
+    ttId = defaultTt?.id || null;
+  }
+
   try {
-    const result = db.prepare('INSERT INTO training_sessions (date, notes) VALUES (?, ?)').run(date, notes || null);
+    const result = db.prepare('INSERT INTO training_sessions (date, notes, timetable_id) VALUES (?, ?, ?)').run(date, notes || null, ttId);
     const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(session);
   } catch (err: any) {
@@ -69,17 +82,31 @@ router.post('/', (req: Request, res: Response) => {
 
 // Update training session
 router.put('/:id', (req: Request, res: Response) => {
-  const { date, notes, status } = req.body;
-  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id);
+  const { date, notes, status, timetable_id } = req.body;
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
+
+  // Handle timetable change
+  if (timetable_id !== undefined && timetable_id !== session.timetable_id) {
+    if (session.status === 'invitations_sent' || session.status === 'completed') {
+      res.status(400).json({ error: 'Cannot change timetable after invitations have been sent' });
+      return;
+    }
+    if (session.status === 'scheduled') {
+      // Clear schedule and reset to draft
+      db.prepare('DELETE FROM invitations WHERE session_id = ?').run(req.params.id);
+      db.prepare("UPDATE training_sessions SET status = 'draft' WHERE id = ?").run(req.params.id);
+    }
+  }
 
   db.prepare(`
     UPDATE training_sessions SET
       date = COALESCE(?, date),
       notes = COALESCE(?, notes),
-      status = COALESCE(?, status)
+      status = COALESCE(?, status),
+      timetable_id = COALESCE(?, timetable_id)
     WHERE id = ?
-  `).run(date ?? null, notes ?? null, status ?? null, req.params.id);
+  `).run(date ?? null, notes ?? null, status ?? null, timetable_id ?? null, req.params.id);
 
   const updated = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id);
   res.json(updated);
@@ -126,37 +153,6 @@ router.delete('/:id/instructors/:instructorId', (req: Request, res: Response) =>
   res.json({ success: true });
 });
 
-// ===== Timeslot Management =====
-
-// Add a timeslot to a session
-router.post('/:id/timeslots', (req: Request, res: Response) => {
-  const { start_time } = req.body;
-  if (!start_time) { res.status(400).json({ error: 'start_time is required' }); return; }
-
-  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id);
-  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
-
-  try {
-    const result = db.prepare('INSERT INTO timeslots (session_id, start_time) VALUES (?, ?)').run(req.params.id, start_time);
-    const timeslot = db.prepare('SELECT * FROM timeslots WHERE id = ?').get(result.lastInsertRowid);
-    res.status(201).json(timeslot);
-  } catch (err: any) {
-    if (err.message.includes('UNIQUE constraint')) {
-      res.status(409).json({ error: 'A timeslot with this start time already exists for this session' });
-      return;
-    }
-    throw err;
-  }
-});
-
-// Delete a timeslot from a session
-router.delete('/:id/timeslots/:timeslotId', (req: Request, res: Response) => {
-  const result = db.prepare('DELETE FROM timeslots WHERE id = ? AND session_id = ?')
-    .run(req.params.timeslotId, req.params.id);
-  if (result.changes === 0) { res.status(404).json({ error: 'Timeslot not found' }); return; }
-  res.json({ success: true });
-});
-
 // ===== Schedule Generation =====
 
 // Generate schedule for a session: allocate students with lowest attended sessions
@@ -164,13 +160,16 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
 
+  if (!session.timetable_id) { res.status(400).json({ error: 'No timetable attached to this session' }); return; }
+
   const instructorCount = (db.prepare('SELECT COUNT(*) AS cnt FROM session_instructors WHERE session_id = ?')
     .get(req.params.id) as any).cnt;
   if (instructorCount === 0) { res.status(400).json({ error: 'No instructors assigned for this session' }); return; }
 
-  const timeslots = db.prepare('SELECT * FROM timeslots WHERE session_id = ? ORDER BY start_time ASC')
-    .all(req.params.id) as any[];
-  if (timeslots.length === 0) { res.status(400).json({ error: 'No timeslots defined for this session' }); return; }
+  // Use timeslots from the attached timetable
+  const timeslots = db.prepare('SELECT * FROM timeslots WHERE timetable_id = ? ORDER BY start_time ASC')
+    .all(session.timetable_id) as any[];
+  if (timeslots.length === 0) { res.status(400).json({ error: 'No timeslots defined in the attached timetable' }); return; }
 
   // Each timeslot has one spot per instructor
   const totalSlots = timeslots.length * instructorCount;

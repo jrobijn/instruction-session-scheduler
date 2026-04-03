@@ -67,17 +67,27 @@ export const api = {
   // Sessions
   getSessions: () => request('/sessions'),
   getSession: (id: string) => request(`/sessions/${id}`),
-  createSession: (data: { date: string; notes?: string }) => request('/sessions', { method: 'POST', body: JSON.stringify(data) }),
+  createSession: (data: { date: string; notes?: string; timetable_id?: number }) => request('/sessions', { method: 'POST', body: JSON.stringify(data) }),
   updateSession: (id: string, data: Record<string, unknown>) => request(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSession: (id: number) => request(`/sessions/${id}`, { method: 'DELETE' }),
   assignInstructor: (sessionId: string, instructorId: string) => request(`/sessions/${sessionId}/instructors`, { method: 'POST', body: JSON.stringify({ instructor_id: instructorId }) }),
   removeInstructor: (sessionId: string, instructorId: number) => request(`/sessions/${sessionId}/instructors/${instructorId}`, { method: 'DELETE' }),
-  addTimeslot: (sessionId: number, startTime: string) => request(`/sessions/${sessionId}/timeslots`, { method: 'POST', body: JSON.stringify({ start_time: startTime }) }),
-  deleteTimeslot: (sessionId: number, timeslotId: number) => request(`/sessions/${sessionId}/timeslots/${timeslotId}`, { method: 'DELETE' }),
   generateSchedule: (sessionId: string) => request(`/sessions/${sessionId}/generate-schedule`, { method: 'POST' }),
   sendInvitations: (sessionId: string) => request(`/sessions/${sessionId}/send-invitations`, { method: 'POST' }),
   completeSession: (sessionId: string) => request(`/sessions/${sessionId}/complete`, { method: 'POST' }),
   toggleNoShow: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}/toggle-no-show`, { method: 'POST' }),
+
+  // Timetables
+  getTimetables: () => request('/timetables'),
+  getTimetable: (id: number) => request(`/timetables/${id}`),
+  createTimetable: (data: { name: string }) => request('/timetables', { method: 'POST', body: JSON.stringify(data) }),
+  updateTimetable: (id: number, data: Record<string, unknown>) => request(`/timetables/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  saveTimetable: (id: number) => request(`/timetables/${id}/save`, { method: 'POST' }),
+  setDefaultTimetable: (id: number) => request(`/timetables/${id}/set-default`, { method: 'POST' }),
+  toggleTimetableActive: (id: number) => request(`/timetables/${id}/toggle-active`, { method: 'POST' }),
+  deleteTimetable: (id: number) => request(`/timetables/${id}`, { method: 'DELETE' }),
+  addTimetableTimeslot: (timetableId: number, startTime: string) => request(`/timetables/${timetableId}/timeslots`, { method: 'POST', body: JSON.stringify({ start_time: startTime }) }),
+  deleteTimetableTimeslot: (timetableId: number, timeslotId: number) => request(`/timetables/${timetableId}/timeslots/${timeslotId}`, { method: 'DELETE' }),
 
   // Settings
   getSettings: () => request('/settings'),

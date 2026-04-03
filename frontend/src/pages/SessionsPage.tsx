@@ -6,8 +6,16 @@ interface Session {
   id: number;
   date: string;
   status: string;
+  timetable_id: number | null;
+  timetable_name: string | null;
   instructor_count: number;
   invitation_count: number;
+}
+
+interface Timetable {
+  id: number;
+  name: string;
+  is_default: number;
 }
 
 function formatDate(dateStr: string) {
@@ -17,15 +25,21 @@ function formatDate(dateStr: string) {
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [date, setDate] = useState('');
+  const [selectedTimetable, setSelectedTimetable] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   const load = async () => {
     try {
-      setSessions(await api.getSessions());
+      const [sess, tts] = await Promise.all([api.getSessions(), api.getTimetables()]);
+      setSessions(sess);
+      // Only show saved + active timetables for selection
+      const available = tts.filter((t: any) => t.status === 'saved' && t.active);
+      setTimetables(available);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -35,11 +49,22 @@ export default function SessionsPage() {
 
   useEffect(() => { load(); }, []);
 
+  const openCreateModal = () => {
+    setError('');
+    setDate('');
+    const defaultTt = timetables.find(t => t.is_default);
+    setSelectedTimetable(defaultTt ? String(defaultTt.id) : '');
+    setShowModal(true);
+  };
+
   const handleCreate = async () => {
     if (!date) return;
     setError('');
     try {
-      const session = await api.createSession({ date });
+      const session = await api.createSession({
+        date,
+        timetable_id: selectedTimetable ? Number(selectedTimetable) : undefined,
+      });
       setShowModal(false);
       setDate('');
       navigate(`/sessions/${session.id}`);
@@ -64,7 +89,7 @@ export default function SessionsPage() {
     <div className="page">
       <div className="page-header">
         <h1>Training Sessions ({sessions.length})</h1>
-        <button className="btn btn-primary" onClick={() => { setError(''); setShowModal(true); }}>+ New Session</button>
+        <button className="btn btn-primary" onClick={openCreateModal}>+ New Session</button>
       </div>
 
       {sessions.length === 0 ? (
@@ -78,6 +103,7 @@ export default function SessionsPage() {
             <tr>
               <th>Date</th>
               <th>Status</th>
+              <th>Timetable</th>
               <th>Instructors</th>
               <th>Invitations</th>
               <th>Actions</th>
@@ -98,6 +124,7 @@ export default function SessionsPage() {
                     {s.status.replace(/_/g, ' ')}
                   </span>
                 </td>
+                <td>{s.timetable_name || '—'}</td>
                 <td>{s.instructor_count}</td>
                 <td>{s.invitation_count}</td>
                 <td>
@@ -122,6 +149,15 @@ export default function SessionsPage() {
             <div className="form-group">
               <label>Date</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
+            </div>
+            <div className="form-group">
+              <label>Timetable</label>
+              <select value={selectedTimetable} onChange={e => setSelectedTimetable(e.target.value)}>
+                <option value="">No timetable</option>
+                {timetables.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</option>
+                ))}
+              </select>
             </div>
             <div className="modal-actions">
               <button className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>

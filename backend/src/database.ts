@@ -33,10 +33,20 @@ export function initializeDatabase(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS timetables (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','saved')),
+      is_default INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS training_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL UNIQUE,
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','invitations_sent','completed')),
+      timetable_id INTEGER REFERENCES timetables(id) ON DELETE SET NULL,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -57,9 +67,9 @@ export function initializeDatabase(): void {
 
     CREATE TABLE IF NOT EXISTS timeslots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
+      timetable_id INTEGER NOT NULL REFERENCES timetables(id) ON DELETE CASCADE,
       start_time TEXT NOT NULL,
-      UNIQUE(session_id, start_time)
+      UNIQUE(timetable_id, start_time)
     );
 
     CREATE TABLE IF NOT EXISTS invitations (
@@ -119,6 +129,38 @@ export function initializeDatabase(): void {
   const invitationCols = db.prepare("PRAGMA table_info(invitations)").all() as Array<{ name: string }>;
   if (!invitationCols.some(c => c.name === 'no_show')) {
     db.exec('ALTER TABLE invitations ADD COLUMN no_show INTEGER NOT NULL DEFAULT 0');
+  }
+
+  // Migrate timeslots from session-based to timetable-based
+  const tsCols = db.prepare("PRAGMA table_info(timeslots)").all() as Array<{ name: string }>;
+  if (tsCols.some(c => c.name === 'session_id')) {
+    if (!tsCols.some(c => c.name === 'timetable_id')) {
+      db.exec('ALTER TABLE timeslots ADD COLUMN timetable_id INTEGER REFERENCES timetables(id) ON DELETE CASCADE');
+    }
+
+    const sessionsWithTimeslots = db.prepare(
+      'SELECT DISTINCT t.session_id, ts.date FROM timeslots t JOIN training_sessions ts ON ts.id = t.session_id WHERE t.session_id IS NOT NULL AND t.timetable_id IS NULL'
+    ).all() as Array<{ session_id: number; date: string }>;
+
+    for (const { session_id, date } of sessionsWithTimeslots) {
+      const result = db.prepare(
+        "INSERT INTO timetables (name, status, is_default, active) VALUES (?, 'saved', 0, 1)"
+      ).run(`Session ${date}`);
+      const timetableId = result.lastInsertRowid;
+      db.prepare('UPDATE timeslots SET timetable_id = ? WHERE session_id = ?').run(timetableId, session_id);
+      db.prepare('UPDATE training_sessions SET timetable_id = ? WHERE id = ?').run(timetableId, session_id);
+    }
+
+    const first = db.prepare('SELECT id FROM timetables WHERE active = 1 ORDER BY id ASC LIMIT 1').get() as any;
+    if (first) {
+      db.prepare('UPDATE timetables SET is_default = 1 WHERE id = ?').run(first.id);
+    }
+  }
+
+  // Add timetable_id to training_sessions if missing
+  const sessCols = db.prepare("PRAGMA table_info(training_sessions)").all() as Array<{ name: string }>;
+  if (!sessCols.some(c => c.name === 'timetable_id')) {
+    db.exec('ALTER TABLE training_sessions ADD COLUMN timetable_id INTEGER REFERENCES timetables(id) ON DELETE SET NULL');
   }
 }
 

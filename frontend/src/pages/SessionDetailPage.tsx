@@ -12,8 +12,15 @@ interface Instructor {
 
 interface Timeslot {
   id: number;
-  session_id: number;
+  timetable_id: number;
   start_time: string;
+}
+
+interface TimetableInfo {
+  id: number;
+  name: string;
+  status: string;
+  active: number;
 }
 
 interface Invitation {
@@ -34,6 +41,8 @@ interface SessionDetail {
   id: number;
   date: string;
   status: string;
+  timetable_id: number | null;
+  timetable: TimetableInfo | null;
   instructors: Instructor[];
   timeslots: Timeslot[];
   invitations: Invitation[];
@@ -49,20 +58,23 @@ export default function SessionDetailPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [allInstructors, setAllInstructors] = useState<Instructor[]>([]);
+  const [allTimetables, setAllTimetables] = useState<TimetableInfo[]>([]);
   const [selectedInstructor, setSelectedInstructor] = useState('');
-  const [newTimeslotTime, setNewTimeslotTime] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
 
   const load = async () => {
     try {
-      const [sess, instr] = await Promise.all([
+      const [sess, instr, tts] = await Promise.all([
         api.getSession(Number(id)),
-        api.getInstructors()
+        api.getInstructors(),
+        api.getTimetables()
       ]);
       setSession(sess);
       setAllInstructors(instr);
+      // Only saved + active timetables for selection
+      setAllTimetables(tts.filter((t: any) => t.status === 'saved' && t.active));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -92,20 +104,13 @@ export default function SessionDetailPage() {
     }
   };
 
-  const addTimeslot = async () => {
-    if (!newTimeslotTime) return;
-    try {
-      await api.addTimeslot(Number(id), newTimeslotTime);
-      setNewTimeslotTime('');
-      load();
-    } catch (err: any) {
-      alert(err.message);
+  const changeTimetable = async (timetableId: string) => {
+    const newTtId = timetableId ? Number(timetableId) : null;
+    if (session?.status === 'scheduled') {
+      if (!confirm('Changing the timetable will clear the generated schedule and reset the session to draft. Continue?')) return;
     }
-  };
-
-  const deleteTimeslot = async (timeslotId: number) => {
     try {
-      await api.deleteTimeslot(Number(id), timeslotId);
+      await api.updateSession(String(id), { timetable_id: newTtId });
       load();
     } catch (err: any) {
       alert(err.message);
@@ -259,25 +264,37 @@ export default function SessionDetailPage() {
         )}
       </div>
 
-      {/* Timeslots Section */}
+      {/* Timetable Section */}
       <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>Timeslots ({session.timeslots.length})</h2>
-        {session.status === 'draft' && (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-            <input type="time" value={newTimeslotTime} onChange={e => setNewTimeslotTime(e.target.value)} />
-            <button className="btn btn-primary" onClick={addTimeslot} disabled={!newTimeslotTime}>Add Timeslot</button>
+        <h2>Timetable</h2>
+        {(session.status === 'draft' || session.status === 'scheduled') ? (
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', alignItems: 'center' }}>
+            <select
+              value={session.timetable_id ?? ''}
+              onChange={e => changeTimetable(e.target.value)}
+            >
+              <option value="">No timetable</option>
+              {allTimetables.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+              {/* Show current timetable even if not in the active list */}
+              {session.timetable && !allTimetables.some(t => t.id === session.timetable!.id) && (
+                <option value={session.timetable.id}>{session.timetable.name} (inactive)</option>
+              )}
+            </select>
           </div>
+        ) : (
+          <p style={{ marginBottom: '0.5rem' }}>
+            {session.timetable ? session.timetable.name : 'No timetable attached'}
+          </p>
         )}
         {session.timeslots.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>No timeslots defined yet.</p>
+          <p style={{ color: '#6b7280' }}>No timeslots{session.timetable_id ? ' in the attached timetable' : ' — attach a timetable first'}.</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {session.timeslots.map(ts => (
               <span key={ts.id} className="badge badge-pending" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem' }}>
                 {ts.start_time}
-                {session.status === 'draft' && (
-                  <button onClick={() => deleteTimeslot(ts.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>
-                )}
               </span>
             ))}
           </div>
@@ -288,7 +305,7 @@ export default function SessionDetailPage() {
       </div>
 
       {/* Actions */}
-      {session.status === 'draft' && session.instructors.length > 0 && session.timeslots.length > 0 && (
+      {session.status === 'draft' && session.instructors.length > 0 && session.timetable_id && session.timeslots.length > 0 && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h2>Actions</h2>
           <div className="btn-group">

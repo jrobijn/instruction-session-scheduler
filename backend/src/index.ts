@@ -7,6 +7,7 @@ import { initializeMailer } from './email.js';
 import studentsRouter from './routes/students.js';
 import instructorsRouter from './routes/instructors.js';
 import sessionsRouter from './routes/sessions.js';
+import timetablesRouter from './routes/timetables.js';
 import invitationsRouter from './routes/invitations.js';
 import settingsRouter from './routes/settings.js';
 import disciplinesRouter from './routes/disciplines.js';
@@ -47,6 +48,7 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
 app.use('/api/students', requireAdmin, studentsRouter);
 app.use('/api/instructors', requireAdmin, instructorsRouter);
 app.use('/api/sessions', requireAdmin, sessionsRouter);
+app.use('/api/timetables', requireAdmin, timetablesRouter);
 app.use('/api/settings', requireAdmin, settingsRouter);
 app.use('/api/disciplines', requireAdmin, disciplinesRouter);
 
