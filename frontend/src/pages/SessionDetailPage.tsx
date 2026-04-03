@@ -12,8 +12,15 @@ interface Instructor {
 
 interface Timeslot {
   id: number;
-  evening_id: number;
+  timetable_id: number;
   start_time: string;
+}
+
+interface TimetableInfo {
+  id: number;
+  name: string;
+  status: string;
+  active: number;
 }
 
 interface Invitation {
@@ -30,10 +37,12 @@ interface Invitation {
   no_show: number;
 }
 
-interface EveningDetail {
+interface SessionDetail {
   id: number;
   date: string;
   status: string;
+  timetable_id: number | null;
+  timetable: TimetableInfo | null;
   instructors: Instructor[];
   timeslots: Timeslot[];
   invitations: Invitation[];
@@ -44,25 +53,28 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-export default function EveningDetailPage() {
+export default function SessionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [evening, setEvening] = useState<EveningDetail | null>(null);
+  const [session, setSession] = useState<SessionDetail | null>(null);
   const [allInstructors, setAllInstructors] = useState<Instructor[]>([]);
+  const [allTimetables, setAllTimetables] = useState<TimetableInfo[]>([]);
   const [selectedInstructor, setSelectedInstructor] = useState('');
-  const [newTimeslotTime, setNewTimeslotTime] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
 
   const load = async () => {
     try {
-      const [ev, instr] = await Promise.all([
-        api.getEvening(Number(id)),
-        api.getInstructors()
+      const [sess, instr, tts] = await Promise.all([
+        api.getSession(Number(id)),
+        api.getInstructors(),
+        api.getTimetables()
       ]);
-      setEvening(ev);
+      setSession(sess);
       setAllInstructors(instr);
+      // Only saved + active timetables for selection
+      setAllTimetables(tts.filter((t: any) => t.status === 'saved' && t.active));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -92,20 +104,13 @@ export default function EveningDetailPage() {
     }
   };
 
-  const addTimeslot = async () => {
-    if (!newTimeslotTime) return;
-    try {
-      await api.addTimeslot(Number(id), newTimeslotTime);
-      setNewTimeslotTime('');
-      load();
-    } catch (err: any) {
-      alert(err.message);
+  const changeTimetable = async (timetableId: string) => {
+    const newTtId = timetableId ? Number(timetableId) : null;
+    if (session?.status === 'scheduled') {
+      if (!confirm('Changing the timetable will clear the generated schedule and reset the session to draft. Continue?')) return;
     }
-  };
-
-  const deleteTimeslot = async (timeslotId: number) => {
     try {
-      await api.deleteTimeslot(Number(id), timeslotId);
+      await api.updateSession(String(id), { timetable_id: newTtId });
       load();
     } catch (err: any) {
       alert(err.message);
@@ -145,11 +150,11 @@ export default function EveningDetailPage() {
     }
   };
 
-  const completeEvening = async () => {
-    if (!confirm('Mark this evening as completed? This will update attendance counts.')) return;
+  const completeSession = async () => {
+    if (!confirm('Mark this session as completed? This will update attendance counts.')) return;
     setActionLoading('completing');
     try {
-      await api.completeEvening(Number(id));
+      await api.completeSession(Number(id));
       load();
     } catch (err: any) {
       alert(err.message);
@@ -159,22 +164,22 @@ export default function EveningDetailPage() {
   };
 
   if (loading) return <div className="page"><p>Loading...</p></div>;
-  if (!evening) return <div className="page"><p>Evening not found</p></div>;
+  if (!session) return <div className="page"><p>Session not found</p></div>;
 
-  const assignedIds = new Set(evening.instructors.map(i => i.id));
+  const assignedIds = new Set(session.instructors.map(i => i.id));
   const availableInstructors = allInstructors.filter(i => !assignedIds.has(i.id));
 
-  const confirmed = evening.invitations.filter(i => i.status === 'confirmed').length;
-  const declined = evening.invitations.filter(i => i.status === 'declined').length;
-  const invited = evening.invitations.filter(i => i.status === 'invited').length;
-  const scheduled = evening.invitations.filter(i => i.status === 'scheduled').length;
+  const confirmed = session.invitations.filter(i => i.status === 'confirmed').length;
+  const declined = session.invitations.filter(i => i.status === 'declined').length;
+  const invited = session.invitations.filter(i => i.status === 'invited').length;
+  const scheduled = session.invitations.filter(i => i.status === 'scheduled').length;
 
   // Build schedule grid: timeslots as rows, instructors as columns
   const scheduleGrid: Record<number, Record<number, Invitation | undefined>> = {};
-  for (const ts of evening.timeslots) {
+  for (const ts of session.timeslots) {
     scheduleGrid[ts.id] = {};
   }
-  for (const inv of evening.invitations) {
+  for (const inv of session.invitations) {
     if (inv.status !== 'declined') {
       scheduleGrid[inv.timeslot_id] ??= {};
       scheduleGrid[inv.timeslot_id][inv.instructor_id] = inv;
@@ -183,14 +188,14 @@ export default function EveningDetailPage() {
 
   const exportPdf = () => {
     const doc = new jsPDF();
-    const dateStr = formatDate(evening.date);
+    const dateStr = formatDate(session.date);
     doc.setFontSize(16);
     doc.text(`Schedule — ${dateStr}`, 14, 20);
 
-    const head = [['Time', ...evening.instructors.map(i => `${i.first_name} ${i.last_name}`)]];
-    const body = evening.timeslots.map(ts => {
+    const head = [['Time', ...session.instructors.map(i => `${i.first_name} ${i.last_name}`)]];
+    const body = session.timeslots.map(ts => {
       const row: string[] = [ts.start_time];
-      for (const instr of evening.instructors) {
+      for (const instr of session.instructors) {
         const inv = scheduleGrid[ts.id]?.[instr.id];
         row.push(inv ? inv.student_name : '');
       }
@@ -205,34 +210,34 @@ export default function EveningDetailPage() {
       headStyles: { fillColor: [37, 99, 235] },
     });
 
-    doc.save(`schedule-${evening.date}.pdf`);
+    doc.save(`schedule-${session.date}.pdf`);
   };
 
   return (
     <div className="page">
-      <button className="btn btn-outline" onClick={() => navigate('/evenings')} style={{ marginBottom: '1rem' }}>
-        ← Back to Evenings
+      <button className="btn btn-outline" onClick={() => navigate('/sessions')} style={{ marginBottom: '1rem' }}>
+        ← Back to Sessions
       </button>
 
       {error && <div className="alert alert-error">{error}</div>}
 
       <div className="page-header">
-        <h1>{formatDate(evening.date)}</h1>
+        <h1>{formatDate(session.date)}</h1>
         <span className={`badge ${
-          evening.status === 'completed' ? 'badge-confirmed' :
-          evening.status === 'invitations_sent' ? 'badge-pending' :
-          evening.status === 'scheduled' ? 'badge-pending' :
-          evening.status === 'draft' ? 'badge-draft' :
+          session.status === 'completed' ? 'badge-confirmed' :
+          session.status === 'invitations_sent' ? 'badge-pending' :
+          session.status === 'scheduled' ? 'badge-pending' :
+          session.status === 'draft' ? 'badge-draft' :
           'badge-declined'
         }`}>
-          {evening.status.replace(/_/g, ' ')}
+          {session.status.replace(/_/g, ' ')}
         </span>
       </div>
 
       {/* Instructors Section */}
       <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>Instructors ({evening.instructors.length})</h2>
-        {evening.status === 'draft' && (
+        <h2>Instructors ({session.instructors.length})</h2>
+        {session.status === 'draft' && (
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
             <select value={selectedInstructor} onChange={e => setSelectedInstructor(e.target.value)}>
               <option value="">Select instructor...</option>
@@ -243,14 +248,14 @@ export default function EveningDetailPage() {
             <button className="btn btn-primary" onClick={assignInstructor} disabled={!selectedInstructor}>Assign</button>
           </div>
         )}
-        {evening.instructors.length === 0 ? (
+        {session.instructors.length === 0 ? (
           <p style={{ color: '#6b7280' }}>No instructors assigned yet.</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {evening.instructors.map(i => (
+            {session.instructors.map(i => (
               <span key={i.id} className="badge badge-confirmed" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem' }}>
                 {i.first_name} {i.last_name}
-                {evening.status === 'draft' && (
+                {session.status === 'draft' && (
                   <button onClick={() => removeInstructor(i.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>
                 )}
               </span>
@@ -259,36 +264,48 @@ export default function EveningDetailPage() {
         )}
       </div>
 
-      {/* Timeslots Section */}
+      {/* Timetable Section */}
       <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>Timeslots ({evening.timeslots.length})</h2>
-        {evening.status === 'draft' && (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-            <input type="time" value={newTimeslotTime} onChange={e => setNewTimeslotTime(e.target.value)} />
-            <button className="btn btn-primary" onClick={addTimeslot} disabled={!newTimeslotTime}>Add Timeslot</button>
+        <h2>Timetable</h2>
+        {(session.status === 'draft' || session.status === 'scheduled') ? (
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', alignItems: 'center' }}>
+            <select
+              value={session.timetable_id ?? ''}
+              onChange={e => changeTimetable(e.target.value)}
+            >
+              <option value="">No timetable</option>
+              {allTimetables.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+              {/* Show current timetable even if not in the active list */}
+              {session.timetable && !allTimetables.some(t => t.id === session.timetable!.id) && (
+                <option value={session.timetable.id}>{session.timetable.name} (inactive)</option>
+              )}
+            </select>
           </div>
+        ) : (
+          <p style={{ marginBottom: '0.5rem' }}>
+            {session.timetable ? session.timetable.name : 'No timetable attached'}
+          </p>
         )}
-        {evening.timeslots.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>No timeslots defined yet.</p>
+        {session.timeslots.length === 0 ? (
+          <p style={{ color: '#6b7280' }}>No timeslots{session.timetable_id ? ' in the attached timetable' : ' — attach a timetable first'}.</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {evening.timeslots.map(ts => (
+            {session.timeslots.map(ts => (
               <span key={ts.id} className="badge badge-pending" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem' }}>
                 {ts.start_time}
-                {evening.status === 'draft' && (
-                  <button onClick={() => deleteTimeslot(ts.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>
-                )}
               </span>
             ))}
           </div>
         )}
         <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-          Each timeslot has space for one student per instructor ({evening.timeslots.length * evening.instructors.length} total slots).
+          Each timeslot has space for one student per instructor ({session.timeslots.length * session.instructors.length} total slots).
         </p>
       </div>
 
       {/* Actions */}
-      {evening.status === 'draft' && evening.instructors.length > 0 && evening.timeslots.length > 0 && (
+      {session.status === 'draft' && session.instructors.length > 0 && session.timetable_id && session.timeslots.length > 0 && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h2>Actions</h2>
           <div className="btn-group">
@@ -302,7 +319,7 @@ export default function EveningDetailPage() {
         </div>
       )}
 
-      {evening.status === 'scheduled' && (
+      {session.status === 'scheduled' && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h2>Actions</h2>
           <div className="btn-group">
@@ -316,17 +333,17 @@ export default function EveningDetailPage() {
         </div>
       )}
 
-      {evening.status === 'invitations_sent' && (
+      {session.status === 'invitations_sent' && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h2>Actions</h2>
-          <button className="btn btn-primary" onClick={completeEvening} disabled={actionLoading === 'completing'}>
+          <button className="btn btn-primary" onClick={completeSession} disabled={actionLoading === 'completing'}>
             {actionLoading === 'completing' ? 'Completing...' : 'Mark as Completed'}
           </button>
         </div>
       )}
 
       {/* Schedule Grid: Instructors × Timeslots */}
-      {evening.invitations.length > 0 && evening.instructors.length > 0 && evening.timeslots.length > 0 && (
+      {session.invitations.length > 0 && session.instructors.length > 0 && session.timeslots.length > 0 && (
         <div style={{ marginBottom: '2rem' }}>
           <div className="page-header">
             <h2>Schedule Overview</h2>
@@ -336,16 +353,16 @@ export default function EveningDetailPage() {
             <thead>
               <tr>
                 <th>Time</th>
-                {evening.instructors.map(i => (
+                {session.instructors.map(i => (
                   <th key={i.id}>{i.first_name} {i.last_name}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {evening.timeslots.map(ts => (
+              {session.timeslots.map(ts => (
                 <tr key={ts.id}>
                   <td><strong>{ts.start_time}</strong></td>
-                  {evening.instructors.map(instr => {
+                  {session.instructors.map(instr => {
                     const inv = scheduleGrid[ts.id]?.[instr.id];
                     return (
                       <td key={instr.id}>
@@ -373,9 +390,9 @@ export default function EveningDetailPage() {
       )}
 
       {/* Invitations */}
-      {evening.invitations.length > 0 && (
+      {session.invitations.length > 0 && (
         <div>
-          <h2>Invitations ({evening.invitations.length})</h2>
+          <h2>Invitations ({session.invitations.length})</h2>
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
             <span className="badge badge-confirmed">Confirmed: {confirmed}</span>
             <span className="badge badge-pending">Invited: {invited}</span>
@@ -392,7 +409,7 @@ export default function EveningDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {evening.invitations.map(inv => (
+              {session.invitations.map(inv => (
                 <tr key={inv.id}>
                   <td>{inv.timeslot_start_time}</td>
                   <td>{inv.student_name}</td>
@@ -406,7 +423,7 @@ export default function EveningDetailPage() {
                     }`}>
                       {inv.status}
                     </span>
-                    {inv.status === 'confirmed' && evening.status !== 'completed' && (
+                    {inv.status === 'confirmed' && session.status !== 'completed' && (
                       <span
                         className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
                         style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
@@ -415,7 +432,7 @@ export default function EveningDetailPage() {
                         {inv.no_show ? 'no-show' : 'show'}
                       </span>
                     )}
-                    {inv.status === 'confirmed' && evening.status === 'completed' && (
+                    {inv.status === 'confirmed' && session.status === 'completed' && (
                       <span
                         className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
                         style={{ marginLeft: '0.5rem' }}

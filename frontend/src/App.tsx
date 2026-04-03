@@ -4,8 +4,10 @@ import { isAuthenticated, clearToken } from './api';
 import LoginPage from './pages/LoginPage';
 import StudentsPage from './pages/StudentsPage';
 import InstructorsPage from './pages/InstructorsPage';
-import EveningsPage from './pages/EveningsPage';
-import EveningDetailPage from './pages/EveningDetailPage';
+import SessionsPage from './pages/SessionsPage';
+import SessionDetailPage from './pages/SessionDetailPage';
+import TimetablesPage from './pages/TimetablesPage';
+import TimetableDetailPage from './pages/TimetableDetailPage';
 import SettingsPage from './pages/SettingsPage';
 import DisciplinesPage from './pages/DisciplinesPage';
 import InvitationPage from './pages/InvitationPage';
@@ -25,8 +27,9 @@ function AdminLayout() {
   return (
     <div className="app">
       <nav>
-        <NavLink to="/evenings" className="logo">Session Scheduler</NavLink>
-        <NavLink to="/evenings">Schedule</NavLink>
+        <NavLink to="/sessions" className="logo">Session Scheduler</NavLink>
+        <NavLink to="/sessions">Schedule</NavLink>
+        <NavLink to="/timetables">Timetables</NavLink>
         <NavLink to="/students">Students</NavLink>
         <NavLink to="/instructors">Instructors</NavLink>
         <NavLink to="/disciplines">Disciplines</NavLink>
@@ -38,10 +41,12 @@ function AdminLayout() {
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/instructors" element={<InstructorsPage />} />
         <Route path="/disciplines" element={<DisciplinesPage />} />
-        <Route path="/evenings" element={<EveningsPage />} />
-        <Route path="/evenings/:id" element={<EveningDetailPage />} />
+        <Route path="/sessions" element={<SessionsPage />} />
+        <Route path="/sessions/:id" element={<SessionDetailPage />} />
+        <Route path="/timetables" element={<TimetablesPage />} />
+        <Route path="/timetables/:id" element={<TimetableDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/evenings" />} />
+        <Route path="*" element={<Navigate to="/sessions" />} />
       </Routes>
     </div>
   );

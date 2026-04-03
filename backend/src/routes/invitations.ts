@@ -9,12 +9,12 @@ const router = Router();
 router.get('/:token', (req: Request, res: Response) => {
   const invitation = db.prepare(`
     SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
-           te.date AS evening_date, te.notes AS evening_notes, te.status AS evening_status,
-           ts.start_time AS timeslot_start_time
+           ts.date AS session_date, ts.notes AS session_notes, ts.status AS session_status,
+           tslot.start_time AS timeslot_start_time
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
-    JOIN training_evenings te ON te.id = inv.evening_id
-    JOIN timeslots ts ON ts.id = inv.timeslot_id
+    JOIN training_sessions ts ON ts.id = inv.session_id
+    JOIN timeslots tslot ON tslot.id = inv.timeslot_id
     WHERE inv.token = ?
   `).get(req.params.token) as any;
 
@@ -24,11 +24,11 @@ router.get('/:token', (req: Request, res: Response) => {
 
   res.json({
     student_name: invitation.student_name,
-    date: invitation.evening_date,
+    date: invitation.session_date,
     start_time: invitation.timeslot_start_time,
-    notes: invitation.evening_notes,
+    notes: invitation.session_notes,
     status: invitation.status,
-    evening_status: invitation.evening_status,
+    session_status: invitation.session_status,
     club_name: clubName,
   });
 });
@@ -37,14 +37,14 @@ router.get('/:token', (req: Request, res: Response) => {
 router.post('/:token/confirm', (req: Request, res: Response) => {
   const { discipline_id } = req.body || {};
   const invitation = db.prepare(`
-    SELECT inv.*, te.status AS evening_status
+    SELECT inv.*, ts.status AS session_status
     FROM invitations inv
-    JOIN training_evenings te ON te.id = inv.evening_id
+    JOIN training_sessions ts ON ts.id = inv.session_id
     WHERE inv.token = ?
   `).get(req.params.token) as any;
 
   if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
-  if (invitation.evening_status === 'completed') { res.status(400).json({ error: 'This evening has already passed' }); return; }
+  if (invitation.session_status === 'completed') { res.status(400).json({ error: 'This session has already passed' }); return; }
   if (invitation.status !== 'invited') { res.status(400).json({ error: `Invitation already ${invitation.status}` }); return; }
 
   db.prepare(`
@@ -57,14 +57,14 @@ router.post('/:token/confirm', (req: Request, res: Response) => {
 // Decline attendance (public) — triggers next-in-line invitation
 router.post('/:token/decline', async (req: Request, res: Response) => {
   const invitation = db.prepare(`
-    SELECT inv.*, te.status AS evening_status, te.date AS evening_date, te.id AS evening_id
+    SELECT inv.*, ts.status AS session_status, ts.date AS session_date, ts.id AS session_id
     FROM invitations inv
-    JOIN training_evenings te ON te.id = inv.evening_id
+    JOIN training_sessions ts ON ts.id = inv.session_id
     WHERE inv.token = ?
   `).get(req.params.token) as any;
 
   if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
-  if (invitation.evening_status === 'completed') { res.status(400).json({ error: 'This evening has already passed' }); return; }
+  if (invitation.session_status === 'completed') { res.status(400).json({ error: 'This session has already passed' }); return; }
   if (invitation.status !== 'invited') { res.status(400).json({ error: `Invitation already ${invitation.status}` }); return; }
 
   db.prepare(`
@@ -73,8 +73,8 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
 
   // Find the next eligible student to invite as replacement
   const alreadyInvited = (db.prepare(`
-    SELECT student_id FROM invitations WHERE evening_id = ?
-  `).all(invitation.evening_id) as Array<{ student_id: number }>).map(r => r.student_id);
+    SELECT student_id FROM invitations WHERE session_id = ?
+  `).all(invitation.session_id) as Array<{ student_id: number }>).map(r => r.student_id);
 
   const nextStudent = db.prepare(`
     SELECT * FROM students
@@ -82,20 +82,20 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
       AND id NOT IN (${alreadyInvited.map(() => '?').join(',')})
       AND id NOT IN (
         SELECT inv.student_id FROM invitations inv
-        JOIN training_evenings te ON te.id = inv.evening_id
-        WHERE te.date = ? AND inv.status != 'declined'
+        JOIN training_sessions ts ON ts.id = inv.session_id
+        WHERE ts.date = ? AND inv.status != 'declined'
       )
     ORDER BY attended_sessions ASC, last_name ASC, first_name ASC
     LIMIT 1
-  `).get(...alreadyInvited, invitation.evening_date) as any;
+  `).get(...alreadyInvited, invitation.session_date) as any;
 
   let replacement: { name: string; email: string } | null = null;
   if (nextStudent) {
     const token = crypto.randomUUID();
 
     // Assign replacement to the same timeslot and instructor as the declined invitation
-    db.prepare('INSERT INTO invitations (evening_id, student_id, timeslot_id, instructor_id, token) VALUES (?, ?, ?, ?, ?)')
-      .run(invitation.evening_id, nextStudent.id, invitation.timeslot_id, invitation.instructor_id, token);
+    db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token) VALUES (?, ?, ?, ?, ?)')
+      .run(invitation.session_id, nextStudent.id, invitation.timeslot_id, invitation.instructor_id, token);
 
     // Try to send email to replacement
     try {
@@ -106,7 +106,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
       await sendInvitationEmail({
         to: nextStudent.email,
         studentName: nextStudent.first_name + ' ' + nextStudent.last_name,
-        date: invitation.evening_date,
+        date: invitation.session_date,
         token,
         clubName,
         subject,
