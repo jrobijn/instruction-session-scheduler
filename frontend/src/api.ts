@@ -54,6 +54,8 @@ export const api = {
   deleteStudent: (id: number) => request(`/students/${id}`, { method: 'DELETE' }),
   exportStudentsCsv: () => requestCsv('/students/export'),
   importStudentsCsv: (csv: string) => request('/students/import', { method: 'POST', body: JSON.stringify({ csv }) }),
+  getStudentPreferredTimeslots: (id: number) => request(`/students/${id}/preferred-timeslots`),
+  setStudentPreferredTimeslots: (studentId: number, timetableId: number, timeslotIds: number[]) => request(`/students/${studentId}/preferred-timeslots/${timetableId}`, { method: 'PUT', body: JSON.stringify({ timeslot_ids: timeslotIds }) }),
 
   // Instructors
   getInstructors: () => request('/instructors'),

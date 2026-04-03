@@ -205,24 +205,89 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     ORDER BY i.last_name ASC, i.first_name ASC
   `).all(req.params.id) as any[];
 
-  const insertMany = db.transaction((studentsArr: any[], sessionId: string | string[], slots: any[]) => {
+  // Build a grid of available slots: each timeslot has one spot per instructor
+  const slotGrid: Array<{ timeslot: any; instructor: any; timeslotIdx: number }> = [];
+  for (let ti = 0; ti < timeslots.length; ti++) {
+    for (const instructor of instructors) {
+      slotGrid.push({ timeslot: timeslots[ti], instructor, timeslotIdx: ti });
+    }
+  }
+  const slotAvailable = slotGrid.map(() => true);
+
+  // Preload preferred timeslot data for all students in one query
+  const allPrefs = db.prepare(
+    'SELECT student_id, timeslot_id FROM student_preferred_timeslots WHERE timetable_id = ?'
+  ).all(session.timetable_id) as Array<{ student_id: number; timeslot_id: number }>;
+
+  const prefsByStudent = new Map<number, Set<number>>();
+  for (const p of allPrefs) {
+    if (!prefsByStudent.has(p.student_id)) prefsByStudent.set(p.student_id, new Set());
+    prefsByStudent.get(p.student_id)!.add(p.timeslot_id);
+  }
+
+  const allTimeslotIds = new Set(timeslots.map((t: any) => t.id));
+
+  const insertMany = db.transaction((studentsArr: any[], sessionId: string | string[]) => {
     const invited: any[] = [];
-    let studentIdx = 0;
-    // Fill timeslots: for each timeslot, assign one student per instructor
-    for (const timeslot of slots) {
-      for (const instructor of instructors) {
-        if (studentIdx >= studentsArr.length) break;
-        const token = crypto.randomUUID();
-        insertInvitation.run(sessionId, studentsArr[studentIdx].id, timeslot.id, instructor.id, token);
-        invited.push({ ...studentsArr[studentIdx], token, timeslot_id: timeslot.id, instructor_id: instructor.id, start_time: timeslot.start_time });
-        studentIdx++;
+
+    for (const student of studentsArr) {
+      // Determine this student's preferred timeslots
+      const storedPrefs = prefsByStudent.get(student.id);
+      // No stored prefs = all timeslots preferred (default)
+      const preferredIds = storedPrefs && storedPrefs.size > 0 ? storedPrefs : allTimeslotIds;
+
+      // Compute preferred and adjacent timeslot indices
+      const preferredIndices = new Set<number>();
+      for (let i = 0; i < timeslots.length; i++) {
+        if (preferredIds.has(timeslots[i].id)) preferredIndices.add(i);
       }
-      if (studentIdx >= studentsArr.length) break;
+
+      const adjacentIndices = new Set<number>();
+      for (const idx of preferredIndices) {
+        if (idx > 0 && !preferredIndices.has(idx - 1)) adjacentIndices.add(idx - 1);
+        if (idx < timeslots.length - 1 && !preferredIndices.has(idx + 1)) adjacentIndices.add(idx + 1);
+      }
+
+      // Try preferred timeslots first, then adjacent, then any remaining
+      let assignedIdx = -1;
+
+      for (let i = 0; i < slotGrid.length; i++) {
+        if (slotAvailable[i] && preferredIndices.has(slotGrid[i].timeslotIdx)) {
+          assignedIdx = i;
+          break;
+        }
+      }
+
+      if (assignedIdx === -1) {
+        for (let i = 0; i < slotGrid.length; i++) {
+          if (slotAvailable[i] && adjacentIndices.has(slotGrid[i].timeslotIdx)) {
+            assignedIdx = i;
+            break;
+          }
+        }
+      }
+
+      if (assignedIdx === -1) {
+        for (let i = 0; i < slotGrid.length; i++) {
+          if (slotAvailable[i]) {
+            assignedIdx = i;
+            break;
+          }
+        }
+      }
+
+      if (assignedIdx === -1) break; // No more slots available
+
+      slotAvailable[assignedIdx] = false;
+      const slot = slotGrid[assignedIdx];
+      const token = crypto.randomUUID();
+      insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.id, token);
+      invited.push({ ...student, token, timeslot_id: slot.timeslot.id, instructor_id: slot.instructor.id, start_time: slot.timeslot.start_time });
     }
     return invited;
   });
 
-  const invited = insertMany(students, req.params.id, timeslots);
+  const invited = insertMany(students, req.params.id);
 
   // Update session status to scheduled
   db.prepare("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?").run(req.params.id);

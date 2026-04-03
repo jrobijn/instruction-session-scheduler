@@ -162,4 +162,62 @@ router.delete('/:id', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// ===== Preferred Timeslots =====
+
+// Get preferred timeslots for a student (grouped by timetable)
+router.get('/:id/preferred-timeslots', (req: Request, res: Response) => {
+  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
+
+  const rows = db.prepare(
+    'SELECT timetable_id, timeslot_id FROM student_preferred_timeslots WHERE student_id = ?'
+  ).all(req.params.id) as Array<{ timetable_id: number; timeslot_id: number }>;
+
+  // Group by timetable_id
+  const byTimetable: Record<number, number[]> = {};
+  for (const r of rows) {
+    if (!byTimetable[r.timetable_id]) byTimetable[r.timetable_id] = [];
+    byTimetable[r.timetable_id].push(r.timeslot_id);
+  }
+
+  res.json(byTimetable);
+});
+
+// Set preferred timeslots for a student for a specific timetable
+router.put('/:id/preferred-timeslots/:timetableId', (req: Request, res: Response) => {
+  const { timeslot_ids } = req.body;
+  if (!Array.isArray(timeslot_ids)) { res.status(400).json({ error: 'timeslot_ids array is required' }); return; }
+
+  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
+
+  const timetable = db.prepare('SELECT id FROM timetables WHERE id = ?').get(req.params.timetableId) as any;
+  if (!timetable) { res.status(404).json({ error: 'Timetable not found' }); return; }
+
+  // Get all timeslot IDs for this timetable
+  const allTimeslots = db.prepare('SELECT id FROM timeslots WHERE timetable_id = ?')
+    .all(req.params.timetableId) as Array<{ id: number }>;
+  const allIds = new Set(allTimeslots.map(t => t.id));
+
+  // If all timeslots are selected, clear preferences (= default all)
+  const setTransaction = db.transaction(() => {
+    db.prepare('DELETE FROM student_preferred_timeslots WHERE student_id = ? AND timetable_id = ?')
+      .run(req.params.id, req.params.timetableId);
+
+    if (timeslot_ids.length < allIds.size) {
+      const insert = db.prepare(
+        'INSERT INTO student_preferred_timeslots (student_id, timeslot_id, timetable_id) VALUES (?, ?, ?)'
+      );
+      for (const tsId of timeslot_ids) {
+        if (allIds.has(tsId)) {
+          insert.run(req.params.id, tsId, req.params.timetableId);
+        }
+      }
+    }
+  });
+
+  setTransaction();
+  res.json({ success: true });
+});
+
 export default router;
