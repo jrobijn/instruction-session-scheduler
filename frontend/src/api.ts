@@ -78,6 +78,9 @@ export const api = {
   sendInvitations: (sessionId: string) => request(`/sessions/${sessionId}/send-invitations`, { method: 'POST' }),
   completeSession: (sessionId: string) => request(`/sessions/${sessionId}/complete`, { method: 'POST' }),
   toggleNoShow: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}/toggle-no-show`, { method: 'POST' }),
+  searchAvailableStudents: (sessionId: number, q: string) => request(`/sessions/${sessionId}/available-students?q=${encodeURIComponent(q)}`),
+  addSessionInvitation: (sessionId: number, data: { student_id: number; timeslot_id: number; instructor_id: number }) => request(`/sessions/${sessionId}/invitations`, { method: 'POST', body: JSON.stringify(data) }),
+  removeSessionInvitation: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}`, { method: 'DELETE' }),
 
   // Timetables
   getTimetables: () => request('/timetables'),

@@ -177,6 +177,14 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   // Each timeslot has one spot per instructor
   const totalSlots = timeslots.length * instructorCount;
 
+  // Keep manually-added invitations (group_id IS NULL), only remove auto-generated ones
+  const manualInvitations = db.prepare(
+    'SELECT * FROM invitations WHERE session_id = ? AND group_id IS NULL'
+  ).all(req.params.id) as any[];
+  db.prepare('DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL').run(req.params.id);
+
+  const availableSlots = totalSlots - manualInvitations.length;
+
   // Get groups assigned to this timetable with percentages
   const timetableGroups = db.prepare(`
     SELECT tg.group_id, tg.percentage, g.name AS group_name, g.priority
@@ -190,25 +198,21 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     res.status(400).json({ error: 'No groups assigned to this timetable' }); return;
   }
 
-  // Compute slots per group from percentages (distribute rounding remainder to highest-priority group)
+  // Compute slots per group from percentages based on remaining available slots
   const groupSlotCounts: Array<{ group_id: number; slots: number; priority: number }> = [];
   let allocated = 0;
   for (const tg of timetableGroups) {
-    const slots = Math.floor(totalSlots * tg.percentage / 100);
+    const slots = Math.floor(availableSlots * tg.percentage / 100);
     groupSlotCounts.push({ group_id: tg.group_id, slots, priority: tg.priority });
     allocated += slots;
   }
   // Distribute remainder to highest-priority group (lowest priority number)
-  let remainder = totalSlots - allocated;
+  let remainder = availableSlots - allocated;
   for (const gsc of groupSlotCounts) {
     if (remainder <= 0) break;
     gsc.slots++;
     remainder--;
   }
-
-  // Remove existing invitations for this session before querying eligible students,
-  // so regeneration doesn't exclude previously invited students
-  db.prepare('DELETE FROM invitations WHERE session_id = ?').run(req.params.id);
 
   // Get active students ordered by attended sessions (lowest first), then by name
   // Filter by preferred_days matching the session's day of week
@@ -265,12 +269,14 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   }
 
   const assignedStudents = new Set<number>();
+  const manualStudentIds = new Set(manualInvitations.map((mi: any) => mi.student_id as number));
   // Sort timetable groups by priority (lowest first = highest priority)
   const sortedGroups = [...groupSlotCounts].sort((a, b) => a.priority - b.priority);
 
   for (const group of sortedGroups) {
     for (const student of allEligibleStudents) {
       if (assignedStudents.has(student.id)) continue;
+      if (manualStudentIds.has(student.id)) continue;
       const groups = membershipsByStudent.get(student.id);
       if (!groups || !groups.has(group.group_id)) continue;
       // Skip students with no available disciplines
@@ -280,8 +286,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     }
   }
 
-  // Check if there are any eligible students at all
-  if (assignedStudents.size === 0) {
+  // Check if there are any eligible students at all (manual students still count)
+  if (assignedStudents.size === 0 && manualInvitations.length === 0) {
     res.status(400).json({ error: 'No eligible students found. Ensure students have group memberships with access to disciplines.' });
     return;
   }
@@ -301,6 +307,12 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     }
   }
   const slotAvailable = slotGrid.map(() => true);
+
+  // Mark slots occupied by manually-added students as unavailable
+  for (const mi of manualInvitations) {
+    const idx = slotGrid.findIndex(s => s.timeslot.id === mi.timeslot_id && s.instructor.id === mi.instructor_id);
+    if (idx !== -1) slotAvailable[idx] = false;
+  }
 
   // Preload preferred timeslot data for all students
   const allPrefs = db.prepare(
@@ -417,7 +429,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   res.json({
     session_id: req.params.id,
     total_slots: totalSlots,
-    students_invited: invited.length,
+    students_invited: invited.length + manualInvitations.length,
     invitations: invited,
   });
 });
@@ -515,6 +527,99 @@ router.post('/:id/complete', (req: Request, res: Response) => {
 
   completeTransaction();
   res.json({ success: true, students_credited: confirmedStudents.length });
+});
+
+// ===== Manual Student Management =====
+
+// Search available students for a session (not already invited)
+router.get('/:id/available-students', (req: Request, res: Response) => {
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
+
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) { res.json([]); return; }
+
+  const alreadyInvited = (db.prepare(
+    `SELECT student_id FROM invitations WHERE session_id = ?`
+  ).all(req.params.id) as Array<{ student_id: number }>).map(r => r.student_id);
+
+  const placeholders = alreadyInvited.length > 0
+    ? `AND s.id NOT IN (${alreadyInvited.map(() => '?').join(',')})`
+    : '';
+
+  const students = db.prepare(`
+    SELECT s.id, s.first_name, s.last_name, s.email
+    FROM students s
+    WHERE s.active = 1
+      AND (s.first_name || ' ' || s.last_name LIKE ? OR s.email LIKE ?)
+      ${placeholders}
+    ORDER BY s.last_name ASC, s.first_name ASC
+    LIMIT 15
+  `).all(`%${q}%`, `%${q}%`, ...alreadyInvited);
+
+  res.json(students);
+});
+
+// Manually add a student to a session
+router.post('/:id/invitations', (req: Request, res: Response) => {
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
+  if (session.status !== 'draft' && session.status !== 'scheduled') {
+    res.status(400).json({ error: 'Can only add students before invitations are sent' }); return;
+  }
+
+  const { student_id, timeslot_id, instructor_id } = req.body;
+  if (!student_id || !timeslot_id || !instructor_id) {
+    res.status(400).json({ error: 'student_id, timeslot_id, and instructor_id are required' }); return;
+  }
+
+  // Check student is not already in this session
+  const existing = db.prepare(
+    'SELECT id FROM invitations WHERE session_id = ? AND student_id = ?'
+  ).get(req.params.id, student_id);
+  if (existing) { res.status(409).json({ error: 'Student is already in this session' }); return; }
+
+  // Check slot is not occupied
+  const slotTaken = db.prepare(
+    'SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND instructor_id = ? AND status != ?'
+  ).get(req.params.id, timeslot_id, instructor_id, 'declined');
+  if (slotTaken) { res.status(409).json({ error: 'This slot is already occupied' }); return; }
+
+  const token = crypto.randomUUID();
+  db.prepare(
+    'INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token) VALUES (?, ?, ?, ?, ?)'
+  ).run(req.params.id, student_id, timeslot_id, instructor_id, token);
+
+  // If session was draft, move to scheduled
+  if (session.status === 'draft') {
+    db.prepare("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?").run(req.params.id);
+  }
+
+  res.status(201).json({ success: true });
+});
+
+// Remove an invitation from a session
+router.delete('/:id/invitations/:invitationId', (req: Request, res: Response) => {
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
+  if (session.status !== 'draft' && session.status !== 'scheduled') {
+    res.status(400).json({ error: 'Can only remove students before invitations are sent' }); return;
+  }
+
+  const result = db.prepare(
+    'DELETE FROM invitations WHERE id = ? AND session_id = ?'
+  ).run(req.params.invitationId, req.params.id);
+  if (result.changes === 0) { res.status(404).json({ error: 'Invitation not found' }); return; }
+
+  // If no invitations left, revert to draft
+  const remaining = (db.prepare(
+    'SELECT COUNT(*) AS cnt FROM invitations WHERE session_id = ?'
+  ).get(req.params.id) as any).cnt;
+  if (remaining === 0) {
+    db.prepare("UPDATE training_sessions SET status = 'draft' WHERE id = ?").run(req.params.id);
+  }
+
+  res.json({ success: true });
 });
 
 export default router;

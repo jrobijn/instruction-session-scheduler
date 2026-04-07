@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import jsPDF from 'jspdf';
@@ -65,6 +65,12 @@ export default function SessionDetailPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
+  const [addSlot, setAddSlot] = useState<{ timeslotId: number; instructorId: number } | null>(null);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [studentResults, setStudentResults] = useState<Array<{ id: number; first_name: string; last_name: string; email: string }>>([]);
+  const [showStudentDropdown, setShowStudentDropdown] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     try {
@@ -85,6 +91,57 @@ export default function SessionDetailPage() {
   };
 
   useEffect(() => { load(); }, [id]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowStudentDropdown(false);
+        setAddSlot(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const searchStudents = (query: string) => {
+    setStudentSearch(query);
+    clearTimeout(searchTimeout.current);
+    if (query.trim().length < 2) { setStudentResults([]); setShowStudentDropdown(false); return; }
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const results = await api.searchAvailableStudents(Number(id), query.trim());
+        setStudentResults(results);
+        setShowStudentDropdown(results.length > 0);
+      } catch { setStudentResults([]); }
+    }, 300);
+  };
+
+  const addStudentToSlot = async (studentId: number) => {
+    if (!addSlot) return;
+    try {
+      await api.addSessionInvitation(Number(id), {
+        student_id: studentId,
+        timeslot_id: addSlot.timeslotId,
+        instructor_id: addSlot.instructorId,
+      });
+      setAddSlot(null);
+      setStudentSearch('');
+      setStudentResults([]);
+      setShowStudentDropdown(false);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const removeInvitation = async (invitationId: number) => {
+    try {
+      await api.removeSessionInvitation(Number(id), invitationId);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
 
   const assignInstructor = async () => {
     if (!selectedInstructor) return;
@@ -185,6 +242,29 @@ export default function SessionDetailPage() {
     if (inv.status !== 'declined') {
       scheduleGrid[inv.timeslot_id] ??= {};
       scheduleGrid[inv.timeslot_id][inv.instructor_id] = inv;
+    }
+  }
+
+  const canEdit = session.status === 'draft' || session.status === 'scheduled';
+
+  // Build unified slot list for invitations table: every timeslot×instructor gets rows for
+  // existing invitations (including declined) plus an empty add-row if the slot is unoccupied
+  type SlotEntry = { timeslotId: number; instructorId: number; startTime: string; invitation: Invitation | null; empty: boolean };
+  const allSlots: SlotEntry[] = [];
+  for (const ts of session.timeslots) {
+    for (const instr of session.instructors) {
+      const slotInvitations = session.invitations.filter(
+        inv => inv.timeslot_id === ts.id && inv.instructor_id === instr.id
+      );
+      // Add all invitations for this slot (active + declined)
+      for (const inv of slotInvitations) {
+        allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: inv, empty: false });
+      }
+      // If no active (non-declined) invitation occupies this slot, add an empty row
+      const hasActive = slotInvitations.some(inv => inv.status !== 'declined');
+      if (!hasActive) {
+        allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: null, empty: true });
+      }
     }
   }
 
@@ -370,12 +450,10 @@ export default function SessionDetailPage() {
                       <td key={instr.id}>
                         {inv ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-                            {inv.group_color && (
-                              <span title={inv.group_name || ''} style={{
-                                width: '10px', height: '10px', borderRadius: '50%',
-                                background: inv.group_color, display: 'inline-block', flexShrink: 0,
-                              }} />
-                            )}
+                            <span title={inv.group_name || ''} style={{
+                              width: '10px', height: '10px', borderRadius: '50%',
+                              background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
+                            }} />
                             {inv.student_name}
                             <span className={`badge ${
                               inv.status === 'confirmed' ? 'badge-confirmed' :
@@ -398,7 +476,7 @@ export default function SessionDetailPage() {
       )}
 
       {/* Invitations */}
-      {session.invitations.length > 0 && (
+      {(session.invitations.length > 0 || (canEdit && session.timeslots.length > 0 && session.instructors.length > 0)) && (
         <div>
           <h2>Invitations ({session.invitations.length})</h2>
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
@@ -414,53 +492,113 @@ export default function SessionDetailPage() {
                 <th>Student</th>
                 <th>Discipline</th>
                 <th>Status</th>
+                {canEdit && <th></th>}
               </tr>
             </thead>
             <tbody>
-              {session.invitations.map(inv => (
-                <tr key={inv.id}>
-                  <td>{inv.timeslot_start_time}</td>
-                  <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-                      {inv.group_color && (
+              {allSlots.map((slot, idx) => {
+                const inv = slot.invitation;
+                if (inv) return (
+                  <tr key={inv.id}>
+                    <td>{inv.timeslot_start_time}</td>
+                    <td>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
                         <span title={inv.group_name || ''} style={{
                           width: '10px', height: '10px', borderRadius: '50%',
-                          background: inv.group_color, display: 'inline-block', flexShrink: 0,
+                          background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
                         }} />
+                        {inv.student_name}
+                      </span>
+                    </td>
+                    <td>{inv.discipline_name || '—'}</td>
+                    <td>
+                      <span className={`badge ${
+                        inv.status === 'confirmed' ? 'badge-confirmed' :
+                        inv.status === 'declined' ? 'badge-declined' :
+                        inv.status === 'scheduled' ? 'badge-draft' :
+                        'badge-pending'
+                      }`}>
+                        {inv.status}
+                      </span>
+                      {inv.status === 'confirmed' && session.status !== 'completed' && (
+                        <span
+                          className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
+                          style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
+                          onClick={() => toggleNoShow(inv.id)}
+                        >
+                          {inv.no_show ? 'no-show' : 'show'}
+                        </span>
                       )}
-                      {inv.student_name}
-                    </span>
-                  </td>
-                  <td>{inv.discipline_name || '—'}</td>
-                  <td>
-                    <span className={`badge ${
-                      inv.status === 'confirmed' ? 'badge-confirmed' :
-                      inv.status === 'declined' ? 'badge-declined' :
-                      inv.status === 'scheduled' ? 'badge-draft' :
-                      'badge-pending'
-                    }`}>
-                      {inv.status}
-                    </span>
-                    {inv.status === 'confirmed' && session.status !== 'completed' && (
-                      <span
-                        className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
-                        style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
-                        onClick={() => toggleNoShow(inv.id)}
-                      >
-                        {inv.no_show ? 'no-show' : 'show'}
-                      </span>
+                      {inv.status === 'confirmed' && session.status === 'completed' && (
+                        <span
+                          className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
+                          style={{ marginLeft: '0.5rem' }}
+                        >
+                          {inv.no_show ? 'no-show' : 'show'}
+                        </span>
+                      )}
+                    </td>
+                    {canEdit && (
+                      <td>
+                        {inv.status !== 'declined' && (
+                          <button
+                            className="btn btn-outline"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
+                            onClick={() => removeInvitation(inv.id)}
+                          >×</button>
+                        )}
+                      </td>
                     )}
-                    {inv.status === 'confirmed' && session.status === 'completed' && (
-                      <span
-                        className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
-                        style={{ marginLeft: '0.5rem' }}
-                      >
-                        {inv.no_show ? 'no-show' : 'show'}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                  </tr>
+                );
+                if (!slot.empty || !canEdit) return null;
+                return (
+                  <tr key={`empty-${slot.timeslotId}-${slot.instructorId}`}>
+                    <td>{slot.startTime}</td>
+                    <td colSpan={2}>
+                      {addSlot?.timeslotId === slot.timeslotId && addSlot?.instructorId === slot.instructorId ? (
+                        <div ref={dropdownRef} style={{ position: 'relative' }}>
+                          <input
+                            type="text"
+                            placeholder="Search student..."
+                            value={studentSearch}
+                            onChange={e => searchStudents(e.target.value)}
+                            autoFocus
+                            style={{ width: '100%', padding: '0.3rem 0.5rem', fontSize: '0.85rem' }}
+                          />
+                          {showStudentDropdown && (
+                            <div style={{
+                              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                              background: 'white', border: '1px solid #d1d5db', borderRadius: '0.375rem',
+                              maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                            }}>
+                              {studentResults.map(s => (
+                                <div
+                                  key={s.id}
+                                  onClick={() => addStudentToSlot(s.id)}
+                                  style={{ padding: '0.5rem', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
+                                  onMouseOver={e => (e.currentTarget.style.background = '#f3f4f6')}
+                                  onMouseOut={e => (e.currentTarget.style.background = 'white')}
+                                >
+                                  {s.first_name} {s.last_name} <span style={{ color: '#6b7280', fontSize: '0.8rem' }}>({s.email})</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          className="btn btn-outline"
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
+                          onClick={() => { setAddSlot({ timeslotId: slot.timeslotId, instructorId: slot.instructorId }); setStudentSearch(''); setStudentResults([]); }}
+                        >+ Add student</button>
+                      )}
+                    </td>
+                    <td></td>
+                    {canEdit && <td></td>}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
