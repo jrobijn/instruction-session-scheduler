@@ -13,8 +13,21 @@ function escapeCsvField(value: string | number | null | undefined): string {
 
 // List all disciplines
 router.get('/', (_req: Request, res: Response) => {
-  const disciplines = db.prepare('SELECT * FROM disciplines ORDER BY name ASC').all();
-  res.json(disciplines);
+  const disciplines = db.prepare('SELECT * FROM disciplines ORDER BY name ASC').all() as any[];
+  // Attach group info
+  const allDg = db.prepare(`
+    SELECT dg.discipline_id, dg.group_id, g.name AS group_name
+    FROM discipline_groups dg
+    JOIN groups g ON g.id = dg.group_id
+    ORDER BY g.priority ASC
+  `).all() as Array<{ discipline_id: number; group_id: number; group_name: string }>;
+  const groupsByDisc = new Map<number, Array<{ id: number; name: string }>>();
+  for (const dg of allDg) {
+    if (!groupsByDisc.has(dg.discipline_id)) groupsByDisc.set(dg.discipline_id, []);
+    groupsByDisc.get(dg.discipline_id)!.push({ id: dg.group_id, name: dg.group_name });
+  }
+  const result = disciplines.map(d => ({ ...d, groups: groupsByDisc.get(d.id) || [] }));
+  res.json(result);
 });
 
 // Export disciplines as CSV
@@ -145,6 +158,62 @@ router.put('/:id', (req: Request, res: Response) => {
     }
     throw err;
   }
+});
+
+// Set groups for a discipline
+router.put('/:id/groups', (req: Request, res: Response) => {
+  const { group_ids } = req.body;
+  if (!Array.isArray(group_ids)) { res.status(400).json({ error: 'group_ids array is required' }); return; }
+
+  const discipline = db.prepare('SELECT id FROM disciplines WHERE id = ?').get(req.params.id);
+  if (!discipline) { res.status(404).json({ error: 'Discipline not found' }); return; }
+
+  const setGroups = db.transaction(() => {
+    db.prepare('DELETE FROM discipline_groups WHERE discipline_id = ?').run(req.params.id);
+    const insert = db.prepare('INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)');
+    for (const gid of group_ids) {
+      insert.run(req.params.id, gid);
+    }
+  });
+
+  setGroups();
+  res.json({ success: true });
+});
+
+// Get groups assigned to a discipline
+router.get('/:id/groups', (req: Request, res: Response) => {
+  const discipline = db.prepare('SELECT id FROM disciplines WHERE id = ?').get(req.params.id);
+  if (!discipline) { res.status(404).json({ error: 'Discipline not found' }); return; }
+
+  const groups = db.prepare(`
+    SELECT g.id, g.name, g.priority, g.is_default, g.active
+    FROM groups g
+    JOIN discipline_groups dg ON dg.group_id = g.id
+    WHERE dg.discipline_id = ?
+    ORDER BY g.priority ASC
+  `).all(req.params.id);
+  res.json(groups);
+});
+
+// Add a group to a discipline
+router.post('/:id/groups/:groupId', (req: Request, res: Response) => {
+  const discipline = db.prepare('SELECT id FROM disciplines WHERE id = ?').get(req.params.id);
+  if (!discipline) { res.status(404).json({ error: 'Discipline not found' }); return; }
+
+  const group = db.prepare('SELECT id FROM groups WHERE id = ?').get(req.params.groupId);
+  if (!group) { res.status(404).json({ error: 'Group not found' }); return; }
+
+  db.prepare('INSERT OR IGNORE INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)').run(req.params.id, req.params.groupId);
+  res.json({ success: true });
+});
+
+// Remove a group from a discipline
+router.delete('/:id/groups/:groupId', (req: Request, res: Response) => {
+  const discipline = db.prepare('SELECT id FROM disciplines WHERE id = ?').get(req.params.id);
+  if (!discipline) { res.status(404).json({ error: 'Discipline not found' }); return; }
+
+  db.prepare('DELETE FROM discipline_groups WHERE discipline_id = ? AND group_id = ?').run(req.params.id, req.params.groupId);
+  res.json({ success: true });
 });
 
 // Delete discipline

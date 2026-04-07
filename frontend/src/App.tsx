@@ -10,6 +10,9 @@ import TimetablesPage from './pages/TimetablesPage';
 import TimetableDetailPage from './pages/TimetableDetailPage';
 import SettingsPage from './pages/SettingsPage';
 import DisciplinesPage from './pages/DisciplinesPage';
+import DisciplineDetailPage from './pages/DisciplineDetailPage';
+import GroupsPage from './pages/GroupsPage';
+import GroupDetailPage from './pages/GroupDetailPage';
 import InvitationPage from './pages/InvitationPage';
 
 function AdminLayout() {
@@ -33,6 +36,7 @@ function AdminLayout() {
         <NavLink to="/students">Students</NavLink>
         <NavLink to="/instructors">Instructors</NavLink>
         <NavLink to="/disciplines">Disciplines</NavLink>
+        <NavLink to="/groups">Groups</NavLink>
         <NavLink to="/settings">Settings</NavLink>
         <div className="spacer" />
         <button className="logout-btn" onClick={handleLogout}>Logout</button>
@@ -41,6 +45,9 @@ function AdminLayout() {
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/instructors" element={<InstructorsPage />} />
         <Route path="/disciplines" element={<DisciplinesPage />} />
+        <Route path="/disciplines/:id" element={<DisciplineDetailPage />} />
+        <Route path="/groups" element={<GroupsPage />} />
+        <Route path="/groups/:id" element={<GroupDetailPage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:id" element={<SessionDetailPage />} />
         <Route path="/timetables" element={<TimetablesPage />} />

@@ -42,12 +42,14 @@ router.get('/:id', (req: Request, res: Response) => {
   const invitations = db.prepare(`
     SELECT inv.*, inv.no_show, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.attended_sessions,
            d.name AS discipline_name, ts.start_time AS timeslot_start_time,
-           i.first_name || ' ' || i.last_name AS instructor_name
+           i.first_name || ' ' || i.last_name AS instructor_name,
+           g.name AS group_name, g.color AS group_color
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     JOIN timeslots ts ON ts.id = inv.timeslot_id
     JOIN instructors i ON i.id = inv.instructor_id
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
+    LEFT JOIN groups g ON g.id = inv.group_id
     WHERE inv.session_id = ?
     ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
@@ -156,7 +158,7 @@ router.delete('/:id/instructors/:instructorId', (req: Request, res: Response) =>
 
 // ===== Schedule Generation =====
 
-// Generate schedule for a session: allocate students with lowest attended sessions
+// Generate schedule for a session: group-based allocation with preferred timeslots
 router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
@@ -175,13 +177,43 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   // Each timeslot has one spot per instructor
   const totalSlots = timeslots.length * instructorCount;
 
-  // Remove existing invitations for this session
+  // Get groups assigned to this timetable with percentages
+  const timetableGroups = db.prepare(`
+    SELECT tg.group_id, tg.percentage, g.name AS group_name, g.priority
+    FROM timetable_groups tg
+    JOIN groups g ON g.id = tg.group_id
+    WHERE tg.timetable_id = ?
+    ORDER BY g.priority ASC
+  `).all(session.timetable_id) as Array<{ group_id: number; percentage: number; group_name: string; priority: number }>;
+
+  if (timetableGroups.length === 0) {
+    res.status(400).json({ error: 'No groups assigned to this timetable' }); return;
+  }
+
+  // Compute slots per group from percentages (distribute rounding remainder to highest-priority group)
+  const groupSlotCounts: Array<{ group_id: number; slots: number; priority: number }> = [];
+  let allocated = 0;
+  for (const tg of timetableGroups) {
+    const slots = Math.floor(totalSlots * tg.percentage / 100);
+    groupSlotCounts.push({ group_id: tg.group_id, slots, priority: tg.priority });
+    allocated += slots;
+  }
+  // Distribute remainder to highest-priority group (lowest priority number)
+  let remainder = totalSlots - allocated;
+  for (const gsc of groupSlotCounts) {
+    if (remainder <= 0) break;
+    gsc.slots++;
+    remainder--;
+  }
+
+  // Remove existing invitations for this session before querying eligible students,
+  // so regeneration doesn't exclude previously invited students
   db.prepare('DELETE FROM invitations WHERE session_id = ?').run(req.params.id);
 
   // Get active students ordered by attended sessions (lowest first), then by name
   // Filter by preferred_days matching the session's day of week
   const sessionDow = String(new Date(session.date + 'T00:00:00').getDay());
-  const students = db.prepare(`
+  const allEligibleStudents = db.prepare(`
     SELECT s.* FROM students s
     WHERE s.active = 1
       AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
@@ -193,10 +225,66 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     ORDER BY s.attended_sessions ASC, s.last_name ASC, s.first_name ASC
   `).all(sessionDow, session.date) as any[];
 
-  const insertInvitation = db.prepare(`
-    INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token)
-    VALUES (?, ?, ?, ?, ?)
-  `);
+  // Load group memberships for all students
+  const allMemberships = db.prepare(
+    'SELECT sg.student_id, sg.group_id FROM student_groups sg'
+  ).all() as Array<{ student_id: number; group_id: number }>;
+  const membershipsByStudent = new Map<number, Set<number>>();
+  for (const m of allMemberships) {
+    if (!membershipsByStudent.has(m.student_id)) membershipsByStudent.set(m.student_id, new Set());
+    membershipsByStudent.get(m.student_id)!.add(m.group_id);
+  }
+
+  // Load discipline-group associations to check which students have available disciplines
+  const allDisciplineGroups = db.prepare(
+    'SELECT dg.discipline_id, dg.group_id FROM discipline_groups dg JOIN disciplines d ON d.id = dg.discipline_id WHERE d.active = 1'
+  ).all() as Array<{ discipline_id: number; group_id: number }>;
+  const disciplineGroupIds = new Set<number>();
+  for (const dg of allDisciplineGroups) {
+    disciplineGroupIds.add(dg.group_id);
+  }
+
+  // For each student, check if they have at least one available discipline through their groups
+  const studentHasDisciplines = (studentId: number): boolean => {
+    const groups = membershipsByStudent.get(studentId);
+    if (!groups) return false;
+    for (const gid of groups) {
+      if (disciplineGroupIds.has(gid)) return true;
+    }
+    return false;
+  };
+
+  // Determine the timetable group IDs (the groups assigned to this timetable)
+  const timetableGroupIds = new Set(timetableGroups.map(tg => tg.group_id));
+
+  // Assign each student to exactly one timetable group (lowest priority number = highest priority)
+  // A student belongs to a group if they have membership AND the group is assigned to this timetable
+  const studentsByGroup = new Map<number, any[]>();
+  for (const gsc of groupSlotCounts) {
+    studentsByGroup.set(gsc.group_id, []);
+  }
+
+  const assignedStudents = new Set<number>();
+  // Sort timetable groups by priority (lowest first = highest priority)
+  const sortedGroups = [...groupSlotCounts].sort((a, b) => a.priority - b.priority);
+
+  for (const group of sortedGroups) {
+    for (const student of allEligibleStudents) {
+      if (assignedStudents.has(student.id)) continue;
+      const groups = membershipsByStudent.get(student.id);
+      if (!groups || !groups.has(group.group_id)) continue;
+      // Skip students with no available disciplines
+      if (!studentHasDisciplines(student.id)) continue;
+      studentsByGroup.get(group.group_id)!.push(student);
+      assignedStudents.add(student.id);
+    }
+  }
+
+  // Check if there are any eligible students at all
+  if (assignedStudents.size === 0) {
+    res.status(400).json({ error: 'No eligible students found. Ensure students have group memberships with access to disciplines.' });
+    return;
+  }
 
   const instructors = db.prepare(`
     SELECT i.id FROM instructors i
@@ -214,7 +302,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   }
   const slotAvailable = slotGrid.map(() => true);
 
-  // Preload preferred timeslot data for all students in one query
+  // Preload preferred timeslot data for all students
   const allPrefs = db.prepare(
     'SELECT student_id, timeslot_id FROM student_preferred_timeslots WHERE timetable_id = ?'
   ).all(session.timetable_id) as Array<{ student_id: number; timeslot_id: number }>;
@@ -227,67 +315,101 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   const allTimeslotIds = new Set(timeslots.map((t: any) => t.id));
 
-  const insertMany = db.transaction((studentsArr: any[], sessionId: string | string[]) => {
-    const invited: any[] = [];
+  // Helper: assign a student to the best available slot
+  function assignStudent(student: any, sessionId: string, groupId: number | null): any | null {
+    const storedPrefs = prefsByStudent.get(student.id);
+    const preferredIds = storedPrefs && storedPrefs.size > 0 ? storedPrefs : allTimeslotIds;
 
-    for (const student of studentsArr) {
-      // Determine this student's preferred timeslots
-      const storedPrefs = prefsByStudent.get(student.id);
-      // No stored prefs = all timeslots preferred (default)
-      const preferredIds = storedPrefs && storedPrefs.size > 0 ? storedPrefs : allTimeslotIds;
+    const preferredIndices = new Set<number>();
+    for (let i = 0; i < timeslots.length; i++) {
+      if (preferredIds.has(timeslots[i].id)) preferredIndices.add(i);
+    }
 
-      // Compute preferred and adjacent timeslot indices
-      const preferredIndices = new Set<number>();
-      for (let i = 0; i < timeslots.length; i++) {
-        if (preferredIds.has(timeslots[i].id)) preferredIndices.add(i);
+    const adjacentIndices = new Set<number>();
+    for (const idx of preferredIndices) {
+      if (idx > 0 && !preferredIndices.has(idx - 1)) adjacentIndices.add(idx - 1);
+      if (idx < timeslots.length - 1 && !preferredIndices.has(idx + 1)) adjacentIndices.add(idx + 1);
+    }
+
+    let assignedIdx = -1;
+
+    for (let i = 0; i < slotGrid.length; i++) {
+      if (slotAvailable[i] && preferredIndices.has(slotGrid[i].timeslotIdx)) {
+        assignedIdx = i;
+        break;
       }
+    }
 
-      const adjacentIndices = new Set<number>();
-      for (const idx of preferredIndices) {
-        if (idx > 0 && !preferredIndices.has(idx - 1)) adjacentIndices.add(idx - 1);
-        if (idx < timeslots.length - 1 && !preferredIndices.has(idx + 1)) adjacentIndices.add(idx + 1);
-      }
-
-      // Try preferred timeslots first, then adjacent, then any remaining
-      let assignedIdx = -1;
-
+    if (assignedIdx === -1) {
       for (let i = 0; i < slotGrid.length; i++) {
-        if (slotAvailable[i] && preferredIndices.has(slotGrid[i].timeslotIdx)) {
+        if (slotAvailable[i] && adjacentIndices.has(slotGrid[i].timeslotIdx)) {
           assignedIdx = i;
           break;
         }
       }
-
-      if (assignedIdx === -1) {
-        for (let i = 0; i < slotGrid.length; i++) {
-          if (slotAvailable[i] && adjacentIndices.has(slotGrid[i].timeslotIdx)) {
-            assignedIdx = i;
-            break;
-          }
-        }
-      }
-
-      if (assignedIdx === -1) {
-        for (let i = 0; i < slotGrid.length; i++) {
-          if (slotAvailable[i]) {
-            assignedIdx = i;
-            break;
-          }
-        }
-      }
-
-      if (assignedIdx === -1) break; // No more slots available
-
-      slotAvailable[assignedIdx] = false;
-      const slot = slotGrid[assignedIdx];
-      const token = crypto.randomUUID();
-      insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.id, token);
-      invited.push({ ...student, token, timeslot_id: slot.timeslot.id, instructor_id: slot.instructor.id, start_time: slot.timeslot.start_time });
     }
+
+    if (assignedIdx === -1) {
+      for (let i = 0; i < slotGrid.length; i++) {
+        if (slotAvailable[i]) {
+          assignedIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (assignedIdx === -1) return null;
+
+    slotAvailable[assignedIdx] = false;
+    const slot = slotGrid[assignedIdx];
+    const token = crypto.randomUUID();
+    insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.id, token, groupId);
+    return { ...student, token, timeslot_id: slot.timeslot.id, instructor_id: slot.instructor.id, start_time: slot.timeslot.start_time, group_id: groupId };
+  }
+
+  const insertInvitation = db.prepare(`
+    INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token, group_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertMany = db.transaction(() => {
+    const invited: any[] = [];
+    const invitedStudentIds = new Set<number>();
+
+    // Process groups in priority order, allocating each group's share of slots
+    for (const gsc of sortedGroups) {
+      const groupStudents = studentsByGroup.get(gsc.group_id) || [];
+      let groupSlotsUsed = 0;
+
+      for (const student of groupStudents) {
+        if (groupSlotsUsed >= gsc.slots) break;
+        const result = assignStudent(student, req.params.id as string, gsc.group_id);
+        if (!result) break; // No more slots globally
+        invited.push(result);
+        invitedStudentIds.add(student.id);
+        groupSlotsUsed++;
+      }
+    }
+
+    // Second pass: fill any remaining slots with uninvited eligible students (regardless of group)
+    for (const student of allEligibleStudents) {
+      if (invitedStudentIds.has(student.id)) continue;
+      if (!assignedStudents.has(student.id)) continue; // must still pass group/discipline checks
+      // Find which group this student was assigned to
+      let studentGroupId: number | null = null;
+      for (const group of sortedGroups) {
+        const studs = studentsByGroup.get(group.group_id) || [];
+        if (studs.some((s: any) => s.id === student.id)) { studentGroupId = group.group_id; break; }
+      }
+      const result = assignStudent(student, req.params.id as string, studentGroupId);
+      if (!result) break; // No more slots globally
+      invited.push(result);
+    }
+
     return invited;
   });
 
-  const invited = insertMany(students, req.params.id);
+  const invited = insertMany();
 
   // Update session status to scheduled
   db.prepare("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?").run(req.params.id);

@@ -35,6 +35,8 @@ interface Invitation {
   timeslot_id: number;
   timeslot_start_time: string;
   no_show: number;
+  group_name: string | null;
+  group_color: string | null;
 }
 
 interface SessionDetail {
@@ -368,6 +370,12 @@ export default function SessionDetailPage() {
                       <td key={instr.id}>
                         {inv ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {inv.group_color && (
+                              <span title={inv.group_name || ''} style={{
+                                width: '10px', height: '10px', borderRadius: '50%',
+                                background: inv.group_color, display: 'inline-block', flexShrink: 0,
+                              }} />
+                            )}
                             {inv.student_name}
                             <span className={`badge ${
                               inv.status === 'confirmed' ? 'badge-confirmed' :
@@ -412,7 +420,17 @@ export default function SessionDetailPage() {
               {session.invitations.map(inv => (
                 <tr key={inv.id}>
                   <td>{inv.timeslot_start_time}</td>
-                  <td>{inv.student_name}</td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                      {inv.group_color && (
+                        <span title={inv.group_name || ''} style={{
+                          width: '10px', height: '10px', borderRadius: '50%',
+                          background: inv.group_color, display: 'inline-block', flexShrink: 0,
+                        }} />
+                      )}
+                      {inv.student_name}
+                    </span>
+                  </td>
                   <td>{inv.discipline_name || '—'}</td>
                   <td>
                     <span className={`badge ${

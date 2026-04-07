@@ -30,7 +30,7 @@ export default function InvitationPage() {
       try {
         const [inv, discs] = await Promise.all([
           api.getInvitation(token!),
-          api.getPublicDisciplines()
+          api.getPublicDisciplinesForToken(token!)
         ]);
         setInvitation(inv);
         setDisciplines(discs);
