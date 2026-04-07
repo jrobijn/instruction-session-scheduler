@@ -83,6 +83,7 @@ export function initializeDatabase(): void {
       token TEXT NOT NULL UNIQUE,
       status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined')),
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
+      group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
       no_show INTEGER NOT NULL DEFAULT 0,
       invited_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -95,6 +96,38 @@ export function initializeDatabase(): void {
       timetable_id INTEGER NOT NULL REFERENCES timetables(id) ON DELETE CASCADE,
       PRIMARY KEY(student_id, timeslot_id)
     );
+
+    CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      priority INTEGER NOT NULL DEFAULT 9999 UNIQUE,
+      color TEXT NOT NULL DEFAULT '#3b82f6',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS student_groups (
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      PRIMARY KEY(student_id, group_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS timetable_groups (
+      timetable_id INTEGER NOT NULL REFERENCES timetables(id) ON DELETE CASCADE,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      percentage INTEGER NOT NULL DEFAULT 100,
+      PRIMARY KEY(timetable_id, group_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS discipline_groups (
+      discipline_id INTEGER NOT NULL REFERENCES disciplines(id) ON DELETE CASCADE,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      PRIMARY KEY(discipline_id, group_id)
+    );
+
+    -- Default group (all students belong to this)
+    INSERT OR IGNORE INTO groups (name, priority, is_default, color) VALUES ('Default', 10000, 1, '#565656');
 
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -201,6 +234,30 @@ export function initializeDatabase(): void {
       updateDow.run(dow, s.id);
     }
   }
+
+  // Ensure all students are members of the default group
+  const defaultGroup = db.prepare("SELECT id FROM groups WHERE is_default = 1").get() as { id: number } | undefined;
+  if (defaultGroup) {
+    db.exec(`
+      INSERT OR IGNORE INTO student_groups (student_id, group_id)
+      SELECT id, ${defaultGroup.id} FROM students
+    `);
+  }
+
+  // Add color column to groups if missing
+  const groupCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
+  if (!groupCols.some(c => c.name === 'color')) {
+    db.exec("ALTER TABLE groups ADD COLUMN color TEXT NOT NULL DEFAULT '#3b82f6'");
+  }
+
+  // Add group_id column to invitations if missing
+  const invCols = db.prepare("PRAGMA table_info(invitations)").all() as Array<{ name: string }>;
+  if (!invCols.some(c => c.name === 'group_id')) {
+    db.exec('ALTER TABLE invitations ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL');
+  }
+
+  // Ensure default group has the correct color
+  db.exec("UPDATE groups SET color = '#565656' WHERE is_default = 1 AND color IN ('#3b82f6', '#232323')");
 }
 
 export default db;

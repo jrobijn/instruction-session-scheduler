@@ -14,7 +14,7 @@ router.get('/', (_req: Request, res: Response) => {
   res.json(timetables);
 });
 
-// Get single timetable with timeslots
+// Get single timetable with timeslots and groups
 router.get('/:id', (req: Request, res: Response) => {
   const timetable = db.prepare('SELECT * FROM timetables WHERE id = ?').get(req.params.id) as any;
   if (!timetable) { res.status(404).json({ error: 'Timetable not found' }); return; }
@@ -23,7 +23,15 @@ router.get('/:id', (req: Request, res: Response) => {
     'SELECT * FROM timeslots WHERE timetable_id = ? ORDER BY start_time ASC'
   ).all(req.params.id);
 
-  res.json({ ...timetable, timeslots });
+  const groups = db.prepare(`
+    SELECT tg.group_id, tg.percentage, g.name AS group_name, g.priority, g.is_default, g.color AS group_color
+    FROM timetable_groups tg
+    JOIN groups g ON g.id = tg.group_id
+    WHERE tg.timetable_id = ?
+    ORDER BY g.priority ASC
+  `).all(req.params.id);
+
+  res.json({ ...timetable, timeslots, groups });
 });
 
 // Create timetable
@@ -32,7 +40,13 @@ router.post('/', (req: Request, res: Response) => {
   if (!name) { res.status(400).json({ error: 'Name is required' }); return; }
 
   const result = db.prepare('INSERT INTO timetables (name) VALUES (?)').run(name);
-  const timetable = db.prepare('SELECT * FROM timetables WHERE id = ?').get(result.lastInsertRowid);
+  const timetableId = result.lastInsertRowid;
+  // Auto-assign default group at 100%
+  const defaultGroup = db.prepare("SELECT id FROM groups WHERE is_default = 1").get() as { id: number } | undefined;
+  if (defaultGroup) {
+    db.prepare('INSERT INTO timetable_groups (timetable_id, group_id, percentage) VALUES (?, ?, 100)').run(timetableId, defaultGroup.id);
+  }
+  const timetable = db.prepare('SELECT * FROM timetables WHERE id = ?').get(timetableId);
   res.status(201).json(timetable);
 });
 
@@ -62,6 +76,12 @@ router.post('/:id/save', (req: Request, res: Response) => {
 
   const timeslotCount = (db.prepare('SELECT COUNT(*) AS cnt FROM timeslots WHERE timetable_id = ?').get(req.params.id) as any).cnt;
   if (timeslotCount === 0) { res.status(400).json({ error: 'Cannot save a timetable with no timeslots' }); return; }
+
+  // Validate groups are assigned and percentages sum to 100
+  const groups = db.prepare('SELECT percentage FROM timetable_groups WHERE timetable_id = ?').all(req.params.id) as Array<{ percentage: number }>;
+  if (groups.length === 0) { res.status(400).json({ error: 'At least one group must be assigned' }); return; }
+  const totalPct = groups.reduce((sum, g) => sum + g.percentage, 0);
+  if (totalPct !== 100) { res.status(400).json({ error: `Group percentages must add up to 100% (currently ${totalPct}%)` }); return; }
 
   db.prepare("UPDATE timetables SET status = 'saved' WHERE id = ?").run(req.params.id);
   const updated = db.prepare('SELECT * FROM timetables WHERE id = ?').get(req.params.id);
@@ -131,6 +151,29 @@ router.delete('/:id', (req: Request, res: Response) => {
   });
 
   deleteTransaction();
+  res.json({ success: true });
+});
+
+// ===== Group Assignment =====
+
+// Set groups for a timetable (draft only)
+router.put('/:id/groups', (req: Request, res: Response) => {
+  const { groups } = req.body;
+  if (!Array.isArray(groups)) { res.status(400).json({ error: 'groups array is required' }); return; }
+
+  const timetable = db.prepare('SELECT * FROM timetables WHERE id = ?').get(req.params.id) as any;
+  if (!timetable) { res.status(404).json({ error: 'Timetable not found' }); return; }
+  if (timetable.status !== 'draft') { res.status(400).json({ error: 'Cannot modify groups of a saved timetable' }); return; }
+
+  const setGroups = db.transaction(() => {
+    db.prepare('DELETE FROM timetable_groups WHERE timetable_id = ?').run(req.params.id);
+    const insert = db.prepare('INSERT INTO timetable_groups (timetable_id, group_id, percentage) VALUES (?, ?, ?)');
+    for (const g of groups) {
+      insert.run(req.params.id, g.group_id, g.percentage);
+    }
+  });
+
+  setGroups();
   res.json({ success: true });
 });
 

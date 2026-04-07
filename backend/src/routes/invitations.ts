@@ -76,6 +76,23 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
     SELECT student_id FROM invitations WHERE session_id = ?
   `).all(invitation.session_id) as Array<{ student_id: number }>).map(r => r.student_id);
 
+  // Get the session's timetable to check group membership
+  const sessionInfo = db.prepare(
+    'SELECT timetable_id FROM training_sessions WHERE id = ?'
+  ).get(invitation.session_id) as { timetable_id: number | null };
+
+  // Get group IDs assigned to this timetable
+  const timetableGroupIds = sessionInfo?.timetable_id
+    ? (db.prepare('SELECT group_id FROM timetable_groups WHERE timetable_id = ?')
+        .all(sessionInfo.timetable_id) as Array<{ group_id: number }>).map(r => r.group_id)
+    : [];
+
+  // Get discipline-group associations to check discipline access
+  const discGroupIds = new Set(
+    (db.prepare('SELECT DISTINCT dg.group_id FROM discipline_groups dg JOIN disciplines d ON d.id = dg.discipline_id WHERE d.active = 1')
+      .all() as Array<{ group_id: number }>).map(r => r.group_id)
+  );
+
   const nextStudent = db.prepare(`
     SELECT * FROM students
     WHERE active = 1
@@ -87,16 +104,31 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
         WHERE ts.date = ? AND inv.status != 'declined'
       )
     ORDER BY attended_sessions ASC, last_name ASC, first_name ASC
-    LIMIT 1
-  `).get(String(new Date(invitation.session_date + 'T00:00:00').getDay()), ...alreadyInvited, invitation.session_date) as any;
+  `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), ...alreadyInvited, invitation.session_date) as any[];
+
+  // Filter: must be in the same group as the declined invitation AND have discipline access
+  const declinedGroupId = invitation.group_id as number | null;
+  let replacementStudent = null;
+  for (const student of nextStudent) {
+    const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
+      .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
+    const inSameGroup = declinedGroupId
+      ? studentGroupIds.includes(declinedGroupId)
+      : (timetableGroupIds.length === 0 || studentGroupIds.some(gid => timetableGroupIds.includes(gid)));
+    const hasDisciplines = studentGroupIds.some(gid => discGroupIds.has(gid));
+    if (inSameGroup && hasDisciplines) {
+      replacementStudent = student;
+      break;
+    }
+  }
 
   let replacement: { name: string; email: string } | null = null;
-  if (nextStudent) {
+  if (replacementStudent) {
     const token = crypto.randomUUID();
 
-    // Assign replacement to the same timeslot and instructor as the declined invitation
-    db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token) VALUES (?, ?, ?, ?, ?)')
-      .run(invitation.session_id, nextStudent.id, invitation.timeslot_id, invitation.instructor_id, token);
+    // Assign replacement to the same timeslot, instructor, and group as the declined invitation
+    db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, group_id, token) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.instructor_id, declinedGroupId, token);
 
     // Try to send email to replacement
     try {
@@ -105,8 +137,8 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
         || 'You are invited to a coaching session!';
 
       await sendInvitationEmail({
-        to: nextStudent.email,
-        studentName: nextStudent.first_name + ' ' + nextStudent.last_name,
+        to: replacementStudent.email,
+        studentName: replacementStudent.first_name + ' ' + replacementStudent.last_name,
         date: invitation.session_date,
         token,
         clubName,
@@ -117,7 +149,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
       // Email sending failed, but invitation is still created
     }
 
-    replacement = { name: nextStudent.first_name + ' ' + nextStudent.last_name, email: nextStudent.email };
+    replacement = { name: replacementStudent.first_name + ' ' + replacementStudent.last_name, email: replacementStudent.email };
   }
 
   res.json({

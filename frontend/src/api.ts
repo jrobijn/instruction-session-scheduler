@@ -102,6 +102,29 @@ export const api = {
   deleteDiscipline: (id: number) => request(`/disciplines/${id}`, { method: 'DELETE' }),
   exportDisciplinesCsv: () => requestCsv('/disciplines/export'),
   importDisciplinesCsv: (csv: string) => request('/disciplines/import', { method: 'POST', body: JSON.stringify({ csv }) }),
+  setDisciplineGroups: (id: number, groupIds: number[]) => request(`/disciplines/${id}/groups`, { method: 'PUT', body: JSON.stringify({ group_ids: groupIds }) }),
+  getDisciplineGroups: (id: number) => request(`/disciplines/${id}/groups`),
+  addDisciplineGroup: (disciplineId: number, groupId: number) => request(`/disciplines/${disciplineId}/groups/${groupId}`, { method: 'POST' }),
+  removeDisciplineGroup: (disciplineId: number, groupId: number) => request(`/disciplines/${disciplineId}/groups/${groupId}`, { method: 'DELETE' }),
+
+  // Groups
+  getGroups: () => request('/groups'),
+  createGroup: (data: { name: string; priority: number; color?: string }) => request('/groups', { method: 'POST', body: JSON.stringify(data) }),
+  updateGroup: (id: number, data: Record<string, unknown>) => request(`/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteGroup: (id: number) => request(`/groups/${id}`, { method: 'DELETE' }),
+  exportGroupsCsv: () => requestCsv('/groups/export'),
+  importGroupsCsv: (csv: string) => request('/groups/import', { method: 'POST', body: JSON.stringify({ csv }) }),
+  getGroupMembers: (id: number) => request(`/groups/${id}/members`),
+  addGroupMember: (groupId: number, studentId: number) => request(`/groups/${groupId}/members`, { method: 'POST', body: JSON.stringify({ student_id: studentId }) }),
+  removeGroupMember: (groupId: number, studentId: number) => request(`/groups/${groupId}/members/${studentId}`, { method: 'DELETE' }),
+  searchGroupNonMembers: (groupId: number, query: string) => request(`/groups/${groupId}/non-members?q=${encodeURIComponent(query)}`),
+
+  // Student groups
+  getStudentGroups: (id: number) => request(`/students/${id}/groups`),
+  setStudentGroups: (id: number, groupIds: number[]) => request(`/students/${id}/groups`, { method: 'PUT', body: JSON.stringify({ group_ids: groupIds }) }),
+
+  // Timetable groups
+  setTimetableGroups: (id: number, groups: Array<{ group_id: number; percentage: number }>) => request(`/timetables/${id}/groups`, { method: 'PUT', body: JSON.stringify({ groups }) }),
 
   // Public invitation
   getInvitation: (token: string) => request(`/invitations/${token}`),
@@ -110,4 +133,5 @@ export const api = {
 
   // Public disciplines (no auth)
   getPublicDisciplines: () => request('/public/disciplines'),
+  getPublicDisciplinesForToken: (token: string) => request(`/public/disciplines/${token}`),
 };

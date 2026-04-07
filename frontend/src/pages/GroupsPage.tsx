@@ -2,42 +2,35 @@ import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 
-interface Discipline {
-  id: number;
-  name: string;
-  active: number;
-  groups: Array<{ id: number; name: string }>;
-}
-
 interface Group {
   id: number;
   name: string;
-  active: number;
+  priority: number;
+  color: string;
   is_default: number;
+  active: number;
+  member_count: number;
 }
 
-export default function DisciplinesPage() {
+export default function GroupsPage() {
   const navigate = useNavigate();
-  const [disciplines, setDisciplines] = useState<Discipline[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState<Discipline | null>(null);
-  const [form, setForm] = useState({ name: '' });
-  const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
-  const [allGroups, setAllGroups] = useState<Group[]>([]);
+  const [editing, setEditing] = useState<Group | null>(null);
+  const [form, setForm] = useState({ name: '', priority: '9999', color: '#3b82f6' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [sortCol, setSortCol] = useState<keyof Discipline>('name');
+  const [sortCol, setSortCol] = useState<keyof Group>('priority');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
-  const toggleSort = (col: keyof Discipline) => {
-    if (col === 'groups') return;
+  const toggleSort = (col: keyof Group) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
   };
 
-  const sortedDisciplines = [...disciplines].sort((a, b) => {
+  const sortedGroups = [...groups].sort((a, b) => {
     const av = a[sortCol], bv = b[sortCol];
     let cmp: number;
     if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
@@ -45,13 +38,11 @@ export default function DisciplinesPage() {
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
-  const sortIcon = (col: keyof Discipline) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const sortIcon = (col: keyof Group) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
   const load = async () => {
     try {
-      const [discs, groups] = await Promise.all([api.getDisciplines(), api.getGroups()]);
-      setDisciplines(discs);
-      setAllGroups(groups.filter((g: Group) => g.active));
+      setGroups(await api.getGroups());
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -63,16 +54,14 @@ export default function DisciplinesPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: '' });
-    setSelectedGroupIds([]);
+    setForm({ name: '', priority: '9999', color: '#3b82f6' });
     setError('');
     setShowModal(true);
   };
 
-  const openEdit = (discipline: Discipline) => {
-    setEditing(discipline);
-    setForm({ name: discipline.name });
-    setSelectedGroupIds(discipline.groups.map(g => g.id));
+  const openEdit = (group: Group) => {
+    setEditing(group);
+    setForm({ name: group.name, priority: String(group.priority), color: group.color || '#3b82f6' });
     setError('');
     setShowModal(true);
   };
@@ -81,15 +70,11 @@ export default function DisciplinesPage() {
     e.preventDefault();
     setError('');
     try {
-      let discId: number;
       if (editing) {
-        await api.updateDiscipline(editing.id, form);
-        discId = editing.id;
+        await api.updateGroup(editing.id, { name: form.name, priority: Number(form.priority), color: form.color });
       } else {
-        const created = await api.createDiscipline(form);
-        discId = created.id;
+        await api.createGroup({ name: form.name, priority: Number(form.priority), color: form.color });
       }
-      await api.setDisciplineGroups(discId, selectedGroupIds);
       setShowModal(false);
       load();
     } catch (err: any) {
@@ -97,19 +82,19 @@ export default function DisciplinesPage() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this discipline?')) return;
+  const handleDelete = async (group: Group) => {
+    if (!confirm(`Are you sure you want to delete the group "${group.name}"?`)) return;
     try {
-      await api.deleteDiscipline(id);
+      await api.deleteGroup(group.id);
       load();
     } catch (err: any) {
       alert(err.message);
     }
   };
 
-  const toggleActive = async (discipline: Discipline) => {
+  const toggleActive = async (group: Group) => {
     try {
-      await api.updateDiscipline(discipline.id, { active: discipline.active ? 0 : 1 });
+      await api.updateGroup(group.id, { active: group.active ? 0 : 1 });
       load();
     } catch (err: any) {
       alert(err.message);
@@ -118,12 +103,12 @@ export default function DisciplinesPage() {
 
   const handleExport = async () => {
     try {
-      const csv = await api.exportDisciplinesCsv();
+      const csv = await api.exportGroupsCsv();
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'disciplines.csv';
+      a.download = 'groups.csv';
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: any) {
@@ -136,7 +121,7 @@ export default function DisciplinesPage() {
     if (!file) return;
     try {
       const csv = await file.text();
-      const result = await api.importDisciplinesCsv(csv);
+      const result = await api.importGroupsCsv(csv);
       setImportResult(result);
       load();
     } catch (err: any) {
@@ -150,12 +135,12 @@ export default function DisciplinesPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Disciplines ({disciplines.length})</h1>
+        <h1>Groups ({groups.length})</h1>
         <div className="btn-group">
           <button className="btn btn-outline" onClick={handleExport}>Export CSV</button>
           <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>Import CSV</button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-          <button className="btn btn-primary" onClick={openCreate}>+ Add Discipline</button>
+          <button className="btn btn-primary" onClick={openCreate}>+ Add Group</button>
         </div>
       </div>
 
@@ -171,38 +156,60 @@ export default function DisciplinesPage() {
         </div>
       )}
 
-      {disciplines.length === 0 ? (
+      {groups.length === 0 ? (
         <div className="empty-state">
-          <h3>No disciplines yet</h3>
-          <p>Add your first discipline to get started.</p>
+          <h3>No groups yet</h3>
+          <p>Add your first group to get started.</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
               <th className="sortable" onClick={() => toggleSort('name')}>Name{sortIcon('name')}</th>
-              <th>Groups</th>
+              <th>Color</th>
+              <th className="sortable" onClick={() => toggleSort('priority')}>Priority{sortIcon('priority')}</th>
+              <th className="sortable" onClick={() => toggleSort('member_count')}>Members{sortIcon('member_count')}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {sortedDisciplines.map(d => (
-              <tr key={d.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/disciplines/${d.id}`)}>
-                <td>{d.name}</td>
-                <td>{d.groups.length}</td>
+            {sortedGroups.map(g => (
+              <tr key={g.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/groups/${g.id}`)}>
+                <td>{g.name}{g.is_default ? ' (default)' : ''}</td>
                 <td>
-                  <span className={`badge ${d.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {d.active ? 'Active' : 'Inactive'}
+                  <input
+                    type="color"
+                    value={g.color || '#3b82f6'}
+                    onClick={e => e.stopPropagation()}
+                    onChange={async e => {
+                      e.stopPropagation();
+                      try {
+                        await api.updateGroup(g.id, { color: e.target.value });
+                        load();
+                      } catch { /* ignore */ }
+                    }}
+                    style={{ width: '32px', height: '24px', padding: 0, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}
+                  />
+                </td>
+                <td>{g.priority}</td>
+                <td>{g.member_count}</td>
+                <td>
+                  <span className={`badge ${g.active ? 'badge-confirmed' : 'badge-declined'}`}>
+                    {g.active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
                 <td>
                   <div className="btn-group">
-                    <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); openEdit(d); }}>Edit</button>
-                    <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); toggleActive(d); }}>
-                      {d.active ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button className="btn btn-danger btn-sm" onClick={e => { e.stopPropagation(); handleDelete(d.id); }}>Delete</button>
+                    {!g.is_default && (
+                      <>
+                        <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); openEdit(g); }}>Edit</button>
+                        <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); toggleActive(g); }}>
+                          {g.active ? 'Deactivate' : 'Activate'}
+                        </button>
+                        <button className="btn btn-danger btn-sm" onClick={e => { e.stopPropagation(); handleDelete(g); }}>Delete</button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -214,7 +221,7 @@ export default function DisciplinesPage() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{editing ? 'Edit Discipline' : 'Add Discipline'}</h2>
+            <h2>{editing ? 'Edit Group' : 'Add Group'}</h2>
             {error && <div className="alert alert-error">{error}</div>}
             <form onSubmit={handleSubmit}>
               <div className="form-group">
@@ -222,31 +229,16 @@ export default function DisciplinesPage() {
                 <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Groups with access</label>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {allGroups.map(g => {
-                    const checked = selectedGroupIds.includes(g.id);
-                    return (
-                      <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setSelectedGroupIds(checked
-                              ? selectedGroupIds.filter(id => id !== g.id)
-                              : [...selectedGroupIds, g.id]
-                            );
-                          }}
-                        />
-                        {g.name}
-                      </label>
-                    );
-                  })}
-                </div>
+                <label>Priority (lower = higher priority, max 9999)</label>
+                <input type="number" min="1" max="9999" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>Color</label>
+                <input type="color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} style={{ width: '60px', height: '32px', padding: 0, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editing ? 'Save' : 'Add Discipline'}</button>
+                <button type="submit" className="btn btn-primary">{editing ? 'Save' : 'Add Group'}</button>
               </div>
             </form>
           </div>
