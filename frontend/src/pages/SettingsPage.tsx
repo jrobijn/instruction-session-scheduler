@@ -39,6 +39,8 @@ export default function SettingsPage() {
   const settingsConfig = [
     { key: 'club_name', label: 'Club Name', type: 'text', description: 'Name of the sports club, used in emails.' },
     { key: 'invitation_email_subject', label: 'Invitation Email Subject', type: 'text', description: 'Subject line for invitation emails sent to students.' },
+    { key: 'invitation_expiry_minutes', label: 'Invitation Expiry (minutes)', type: 'number', description: 'Minutes before an unanswered invitation expires and a replacement is invited. Set to 0 to disable.' },
+    { key: 'invitation_check_interval_minutes', label: 'Expiry Check Interval (minutes)', type: 'number', description: 'How often the server checks for expired invitations. Changes take effect after the current interval completes.' },
   ];
 
   return (

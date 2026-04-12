@@ -8,8 +8,9 @@ import studentsRouter from './routes/students.js';
 import instructorsRouter from './routes/instructors.js';
 import sessionsRouter from './routes/sessions.js';
 import timetablesRouter from './routes/timetables.js';
-import invitationsRouter from './routes/invitations.js';
+import invitationsRouter, { processExpiredInvitations } from './routes/invitations.js';
 import settingsRouter from './routes/settings.js';
+import { setCheckIntervalChangedCallback } from './routes/settings.js';
 import disciplinesRouter from './routes/disciplines.js';
 import groupsRouter from './routes/groups.js';
 
@@ -89,6 +90,38 @@ app.get('/api/health', (_req: Request, res: Response) => res.json({ status: 'ok'
 // Initialize and start
 initializeDatabase();
 initializeMailer();
+
+// Check for expired invitations on a configurable interval
+let expirationTimer: ReturnType<typeof setTimeout> | null = null;
+
+function getCheckIntervalMs(): number {
+  try {
+    const val = (db.prepare("SELECT value FROM settings WHERE key = 'invitation_check_interval_minutes'").get() as any)?.value;
+    const minutes = Number(val || '15');
+    return Math.max(1, minutes) * 60 * 1000;
+  } catch {
+    return 15 * 60 * 1000;
+  }
+}
+
+export function rescheduleExpirationCheck() {
+  if (expirationTimer) clearTimeout(expirationTimer);
+  expirationTimer = setTimeout(async () => {
+    try {
+      const count = await processExpiredInvitations();
+      if (count > 0) console.log(`Expired ${count} invitation(s) and invited replacements`);
+    } catch (err) {
+      console.error('Error processing expired invitations:', err);
+    }
+    rescheduleExpirationCheck();
+  }, getCheckIntervalMs());
+}
+
+rescheduleExpirationCheck();
+setCheckIntervalChangedCallback(() => rescheduleExpirationCheck());
+
+// Also run once at startup
+processExpiredInvitations().catch(err => console.error('Error processing expired invitations at startup:', err));
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
