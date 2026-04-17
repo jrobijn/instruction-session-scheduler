@@ -62,10 +62,10 @@ app.get('/api/public/disciplines', (_req: Request, res: Response) => {
   res.json(disciplines);
 });
 app.get('/api/public/disciplines/:token', (req: Request, res: Response) => {
-  // Get disciplines available to the student based on their group memberships
+  // Get disciplines available to the student based on the invitation's group
   const invitation = db.prepare(`
-    SELECT inv.student_id FROM invitations inv WHERE inv.token = ?
-  `).get(req.params.token) as { student_id: number } | undefined;
+    SELECT inv.student_id, inv.group_id FROM invitations inv WHERE inv.token = ?
+  `).get(req.params.token) as { student_id: number; group_id: number | null } | undefined;
 
   if (!invitation) {
     // Fallback: return all active disciplines
@@ -74,14 +74,26 @@ app.get('/api/public/disciplines/:token', (req: Request, res: Response) => {
     return;
   }
 
-  const disciplines = db.prepare(`
-    SELECT DISTINCT d.id, d.name FROM disciplines d
-    JOIN discipline_groups dg ON dg.discipline_id = d.id
-    JOIN student_groups sg ON sg.group_id = dg.group_id
-    WHERE d.active = 1 AND sg.student_id = ?
-    ORDER BY d.name ASC
-  `).all(invitation.student_id);
-  res.json(disciplines);
+  if (invitation.group_id) {
+    // Auto-scheduled: disciplines linked to the invitation's specific group
+    const disciplines = db.prepare(`
+      SELECT DISTINCT d.id, d.name FROM disciplines d
+      JOIN discipline_groups dg ON dg.discipline_id = d.id
+      WHERE d.active = 1 AND dg.group_id = ?
+      ORDER BY d.name ASC
+    `).all(invitation.group_id);
+    res.json(disciplines);
+  } else {
+    // Manually assigned (no group): disciplines from all student's groups
+    const disciplines = db.prepare(`
+      SELECT DISTINCT d.id, d.name FROM disciplines d
+      JOIN discipline_groups dg ON dg.discipline_id = d.id
+      JOIN student_groups sg ON sg.group_id = dg.group_id
+      WHERE d.active = 1 AND sg.student_id = ?
+      ORDER BY d.name ASC
+    `).all(invitation.student_id);
+    res.json(disciplines);
+  }
 });
 
 // Health check
