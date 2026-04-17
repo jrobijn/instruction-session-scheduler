@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
+import { useT } from '../i18n';
 
 interface Student {
   id: number;
@@ -41,6 +42,7 @@ export default function StudentsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [cooldownModal, setCooldownModal] = useState<Student | null>(null);
   const [cooldownDays, setCooldownDays] = useState(7);
+  const t = useT();
 
   const toggleSort = (col: keyof Student) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -135,7 +137,7 @@ export default function StudentsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this student?')) return;
+    if (!confirm(t.confirmDeleteStudent)) return;
     try {
       await api.deleteStudent(id);
       load();
@@ -211,50 +213,50 @@ export default function StudentsPage() {
     }
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
 
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Students ({students.length})</h1>
+        <h1>{t.studentsTitle(students.length)}</h1>
         <div className="btn-group">
-          <button className="btn btn-outline" onClick={handleExport}>Export CSV</button>
-          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>Import CSV</button>
+          <button className="btn btn-outline" onClick={handleExport}>{t.exportCsv}</button>
+          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>{t.importCsv}</button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-          <button className="btn btn-primary" onClick={openCreate}>+ Add Student</button>
+          <button className="btn btn-primary" onClick={openCreate}>{t.addStudent}</button>
         </div>
       </div>
 
       {importResult && (
         <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-          Imported: {importResult.imported}, Skipped: {importResult.skipped}
+          {t.importResult(importResult.imported, importResult.skipped)}
           {importResult.errors.length > 0 && (
             <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.5rem' }}>
               {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
             </ul>
           )}
-          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>Dismiss</button>
+          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>{t.dismiss}</button>
         </div>
       )}
 
       {students.length === 0 ? (
         <div className="empty-state">
-          <h3>No students yet</h3>
-          <p>Add your first student to get started.</p>
+          <h3>{t.noStudentsYet}</h3>
+          <p>{t.noStudentsHint}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th className="sortable" onClick={() => toggleSort('first_name')}>First Name{sortIcon('first_name')}</th>
-              <th className="sortable" onClick={() => toggleSort('last_name')}>Last Name{sortIcon('last_name')}</th>
-              <th className="sortable" onClick={() => toggleSort('email')}>Email{sortIcon('email')}</th>
-              <th className="sortable" onClick={() => toggleSort('attended_sessions')}>Sessions{sortIcon('attended_sessions')}</th>
-              <th className="sortable" onClick={() => toggleSort('no_show_count')}>No-shows{sortIcon('no_show_count')}</th>
-              <th className="sortable" onClick={() => toggleSort('priority')}>Priority{sortIcon('priority')}</th>
-              <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
-              <th>Cooldown</th>
-              <th>Actions</th>
+              <th className="sortable" onClick={() => toggleSort('first_name')}>{t.firstName}{sortIcon('first_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('last_name')}>{t.lastName}{sortIcon('last_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('email')}>{t.email}{sortIcon('email')}</th>
+              <th className="sortable" onClick={() => toggleSort('attended_sessions')}>{t.sessionsAttended}{sortIcon('attended_sessions')}</th>
+              <th className="sortable" onClick={() => toggleSort('no_show_count')}>{t.noShows}{sortIcon('no_show_count')}</th>
+              <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
+              <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
+              <th>{t.cooldown}</th>
+              <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -268,7 +270,7 @@ export default function StudentsPage() {
                 <td>{s.priority}</td>
                 <td>
                   <span className={`badge ${s.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {s.active ? 'Active' : 'Inactive'}
+                    {s.active ? t.active : t.inactive}
                   </span>
                 </td>
                 <td>
@@ -277,17 +279,17 @@ export default function StudentsPage() {
                       <span className="badge badge-declined" title={`Until ${new Date(s.cooldown_until + 'Z').toLocaleString()}`}>
                         {formatCooldown(s)}
                       </span>
-                      <button className="btn btn-outline btn-sm" onClick={() => handleClearCooldown(s.id)} title="Remove cooldown">✕</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => handleClearCooldown(s.id)} title={t.removeCooldownTooltip}>✕</button>
                     </span>
                   ) : (
-                    <button className="btn btn-outline btn-sm" onClick={() => { setCooldownModal(s); setCooldownDays(7); }}>Set</button>
+                    <button className="btn btn-outline btn-sm" onClick={() => { setCooldownModal(s); setCooldownDays(7); }}>{t.setCooldown}</button>
                   )}
                 </td>
                 <td>
                   <ActionDropdown actions={[
-                    { label: 'Edit', onClick: () => openEdit(s) },
-                    { label: s.active ? 'Deactivate' : 'Activate', onClick: () => toggleActive(s) },
-                    { label: 'Delete', onClick: () => handleDelete(s.id), danger: true },
+                    { label: t.edit, onClick: () => openEdit(s) },
+                    { label: s.active ? t.deactivate : t.activate, onClick: () => toggleActive(s) },
+                    { label: t.delete, onClick: () => handleDelete(s.id), danger: true },
                   ]} />
                 </td>
               </tr>
@@ -299,23 +301,23 @@ export default function StudentsPage() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{editing ? 'Edit Student' : 'Add Student'}</h2>
+            <h2>{editing ? t.editStudent : t.addStudentTitle}</h2>
             {error && <div className="alert alert-error">{error}</div>}
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label>First Name</label>
+                <label>{t.firstName}</label>
                 <input value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Last Name</label>
+                <label>{t.lastName}</label>
                 <input value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Email</label>
+                <label>{t.email}</label>
                 <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Preferred Days</label>
+                <label>{t.preferredDays}</label>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {DAY_LABELS.map((label, idx) => {
                     const days = form.preferred_days ? form.preferred_days.split('|').filter(Boolean) : [];
@@ -342,7 +344,7 @@ export default function StudentsPage() {
               </div>
               {timetables.length > 0 && (
                 <div className="form-group">
-                  <label>Preferred Timeslots</label>
+                  <label>{t.preferredTimeslots}</label>
                   {timetables.map(tt => {
                     const slots = tt.timeslots || [];
                     const allSlotIds = slots.map(s => s.id);
@@ -371,7 +373,7 @@ export default function StudentsPage() {
                                 }
                               }}
                             />
-                            All
+                            {t.all}
                           </label>
                           {slots.map(slot => {
                             const checked = allSelected || selectedIds.includes(slot.id);
@@ -407,8 +409,8 @@ export default function StudentsPage() {
                 </div>
               )}
               <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editing ? 'Save' : 'Add Student'}</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
+                <button type="submit" className="btn btn-primary">{editing ? t.save : t.addStudentTitle}</button>
               </div>
             </form>
           </div>
@@ -418,20 +420,20 @@ export default function StudentsPage() {
       {cooldownModal && (
         <div className="modal-overlay" onClick={() => setCooldownModal(null)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <h2>Set Cooldown</h2>
-            <p>Prevent <strong>{cooldownModal.first_name} {cooldownModal.last_name}</strong> from being automatically scheduled for a number of days.</p>
+            <h2>{t.setCooldownTitle}</h2>
+            <p>{t.setCooldownText(`${cooldownModal.first_name} ${cooldownModal.last_name}`)}</p>
             <div className="form-group">
-              <label>Days</label>
+              <label>{t.cooldownDays}</label>
               <input type="number" min={1} value={cooldownDays} onChange={e => setCooldownDays(Number(e.target.value))} />
               {cooldownDays > 0 && (
                 <small style={{ color: '#666', marginTop: '0.25rem', display: 'block' }}>
-                  Until {new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toLocaleDateString()}
+                  {t.cooldownUntil(new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toLocaleDateString())}
                 </small>
               )}
             </div>
             <div className="modal-actions">
-              <button className="btn btn-outline" onClick={() => setCooldownModal(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSetCooldown} disabled={cooldownDays < 1}>Set Cooldown</button>
+              <button className="btn btn-outline" onClick={() => setCooldownModal(null)}>{t.cancel}</button>
+              <button className="btn btn-primary" onClick={handleSetCooldown} disabled={cooldownDays < 1}>{t.setCooldownButton}</button>
             </div>
           </div>
         </div>

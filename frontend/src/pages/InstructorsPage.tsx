@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
+import { useT } from '../i18n';
 
 interface Instructor {
   id: number;
@@ -11,6 +12,7 @@ interface Instructor {
 }
 
 export default function InstructorsPage() {
+  const t = useT();
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Instructor | null>(null);
@@ -80,7 +82,7 @@ export default function InstructorsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this instructor?')) return;
+    if (!confirm(t.confirmDeleteInstructor)) return;
     try {
       await api.deleteInstructor(id);
       load();
@@ -127,46 +129,46 @@ export default function InstructorsPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
 
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Instructors ({instructors.length})</h1>
+        <h1>{t.instructorsTitle(instructors.length)}</h1>
         <div className="btn-group">
-          <button className="btn btn-outline" onClick={handleExport}>Export CSV</button>
-          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>Import CSV</button>
+          <button className="btn btn-outline" onClick={handleExport}>{t.exportCsv}</button>
+          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>{t.importCsv}</button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-          <button className="btn btn-primary" onClick={openCreate}>+ Add Instructor</button>
+          <button className="btn btn-primary" onClick={openCreate}>{t.addInstructor}</button>
         </div>
       </div>
 
       {importResult && (
         <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-          Imported: {importResult.imported}, Skipped: {importResult.skipped}
+          {t.importResult(importResult.imported, importResult.skipped)}
           {importResult.errors.length > 0 && (
             <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.5rem' }}>
               {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
             </ul>
           )}
-          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>Dismiss</button>
+          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>{t.dismiss}</button>
         </div>
       )}
 
       {instructors.length === 0 ? (
         <div className="empty-state">
-          <h3>No instructors yet</h3>
-          <p>Add your first instructor to get started.</p>
+          <h3>{t.noInstructorsYet}</h3>
+          <p>{t.noInstructorsHint}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th className="sortable" onClick={() => toggleSort('first_name')}>First Name{sortIcon('first_name')}</th>
-              <th className="sortable" onClick={() => toggleSort('last_name')}>Last Name{sortIcon('last_name')}</th>
-              <th className="sortable" onClick={() => toggleSort('email')}>Email{sortIcon('email')}</th>
-              <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
-              <th>Actions</th>
+              <th className="sortable" onClick={() => toggleSort('first_name')}>{t.firstName}{sortIcon('first_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('last_name')}>{t.lastName}{sortIcon('last_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('email')}>{t.email}{sortIcon('email')}</th>
+              <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
+              <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -177,14 +179,14 @@ export default function InstructorsPage() {
                 <td>{i.email}</td>
                 <td>
                   <span className={`badge ${i.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {i.active ? 'Active' : 'Inactive'}
+                    {i.active ? t.active : t.inactive}
                   </span>
                 </td>
                 <td>
                   <ActionDropdown actions={[
-                    { label: 'Edit', onClick: () => openEdit(i) },
-                    { label: i.active ? 'Deactivate' : 'Activate', onClick: () => toggleActive(i) },
-                    { label: 'Delete', onClick: () => handleDelete(i.id), danger: true },
+                    { label: t.edit, onClick: () => openEdit(i) },
+                    { label: i.active ? t.deactivate : t.activate, onClick: () => toggleActive(i) },
+                    { label: t.delete, onClick: () => handleDelete(i.id), danger: true },
                   ]} />
                 </td>
               </tr>
@@ -196,24 +198,24 @@ export default function InstructorsPage() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{editing ? 'Edit Instructor' : 'Add Instructor'}</h2>
+            <h2>{editing ? t.editInstructor : t.addInstructorTitle}</h2>
             {error && <div className="alert alert-error">{error}</div>}
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label>First Name</label>
+                <label>{t.firstName}</label>
                 <input value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Last Name</label>
+                <label>{t.lastName}</label>
                 <input value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Email</label>
+                <label>{t.email}</label>
                 <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editing ? 'Save' : 'Add Instructor'}</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
+                <button type="submit" className="btn btn-primary">{editing ? t.save : t.addInstructorTitle}</button>
               </div>
             </form>
           </div>

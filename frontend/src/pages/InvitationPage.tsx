@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api';
+import { useT } from '../i18n';
 
 interface Invitation {
   id: number;
@@ -24,13 +25,14 @@ export default function InvitationPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionDone, setActionDone] = useState('');
+  const t = useT();
 
   useEffect(() => {
     const load = async () => {
       try {
         const [inv, discs] = await Promise.all([
           api.getInvitation(token!),
-          api.getPublicDisciplinesForToken(token!)
+          api.getPublicDisciplines(token!),
         ]);
         setInvitation(inv);
         setDisciplines(discs);
@@ -66,9 +68,9 @@ export default function InvitationPage() {
     }
   };
 
-  if (loading) return <div className="invitation-page"><p>Loading...</p></div>;
+  if (loading) return <div className="invitation-page"><p>{t.loading}</p></div>;
   if (error) return <div className="invitation-page"><div className="alert alert-error">{error}</div></div>;
-  if (!invitation) return <div className="invitation-page"><p>Invitation not found.</p></div>;
+  if (!invitation) return <div className="invitation-page"><p>{t.invitationNotFound}</p></div>;
 
   const dateStr = new Date(invitation.date + 'T00:00:00')
     .toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -76,39 +78,39 @@ export default function InvitationPage() {
   return (
     <div className="invitation-page">
       <div className="card" style={{ maxWidth: 500, margin: '2rem auto', padding: '2rem' }}>
-        <h1 style={{ marginBottom: '1.5rem' }}>Training Invitation</h1>
+        <h1 style={{ marginBottom: '1.5rem' }}>{t.trainingInvitation}</h1>
 
         <div style={{ marginBottom: '1.5rem' }}>
-          <p><strong>Student:</strong> {invitation.student_name}</p>
-          <p><strong>Date:</strong> {dateStr}</p>
-          <p><strong>Time:</strong> {invitation.start_time}</p>
-          <p><strong>Status:</strong>{' '}
+          <p><strong>{t.studentLabel}</strong> {invitation.student_name}</p>
+          <p><strong>{t.dateLabel}</strong> {dateStr}</p>
+          <p><strong>{t.timeLabel}</strong> {invitation.start_time}</p>
+          <p><strong>{t.statusLabel}</strong>{' '}
             <span className={`badge ${
               invitation.status === 'confirmed' ? 'badge-confirmed' :
               invitation.status === 'declined' ? 'badge-declined' :
               invitation.status === 'expired' ? 'badge-declined' :
               'badge-pending'
             }`}>
-              {invitation.status}
+              {t.statusMap(invitation.status)}
             </span>
           </p>
         </div>
 
         {actionDone === 'confirmed' && (
           <div className="alert alert-success">
-            Your attendance has been confirmed. See you at the training!
+            {t.invitationConfirmedMsg}
           </div>
         )}
 
         {actionDone === 'declined' && (
           <div className="alert alert-error">
-            You have declined this invitation. Another student will be invited in your place.
+            {t.invitationDeclinedMsg}
           </div>
         )}
 
         {invitation.status === 'expired' && !actionDone && (
           <div className="alert alert-error">
-            This invitation has expired. Another student has been invited in your place.
+            {t.invitationExpiredMsg}
           </div>
         )}
 
@@ -116,9 +118,9 @@ export default function InvitationPage() {
           <>
             {disciplines.length > 0 && (
               <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>Preferred Discipline</label>
+                <label>{t.preferredDiscipline}</label>
                 <select value={selectedDiscipline} onChange={e => setSelectedDiscipline(e.target.value)}>
-                  <option value="">No preference</option>
+                  <option value="">{t.noPreference}</option>
                   {disciplines.map(d => (
                     <option key={d.id} value={d.id}>{d.name}</option>
                   ))}
@@ -127,10 +129,10 @@ export default function InvitationPage() {
             )}
             <div style={{ display: 'flex', gap: '1rem' }}>
               <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm}>
-                Confirm Attendance
+                {t.confirmAttendance}
               </button>
               <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleDecline}>
-                Decline
+                {t.decline}
               </button>
             </div>
           </>

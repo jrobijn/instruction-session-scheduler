@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
+import { useT } from '../i18n';
 
 interface Timetable {
   id: number;
@@ -19,6 +20,7 @@ export default function TimetablesPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const t = useT();
 
   const load = async () => {
     try {
@@ -47,7 +49,7 @@ export default function TimetablesPage() {
 
   const handleDelete = async (id: number, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!confirm('Are you sure you want to delete this timetable? Sessions using it may be affected.')) return;
+    if (!confirm(t.confirmDeleteTimetable)) return;
     try {
       await api.deleteTimetable(id);
       load();
@@ -76,55 +78,55 @@ export default function TimetablesPage() {
     }
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
 
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Timetables ({timetables.length})</h1>
-        <button className="btn btn-primary" onClick={() => { setError(''); setName(''); setShowModal(true); }}>+ New Timetable</button>
+        <h1>{t.timetablesTitle(timetables.length)}</h1>
+        <button className="btn btn-primary" onClick={() => { setError(''); setName(''); setShowModal(true); }}>{t.newTimetable}</button>
       </div>
 
       {timetables.length === 0 ? (
         <div className="empty-state">
-          <h3>No timetables yet</h3>
-          <p>Create your first timetable to define reusable timeslot configurations.</p>
+          <h3>{t.noTimetablesYet}</h3>
+          <p>{t.noTimetablesHint}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Timeslots</th>
-              <th>Active</th>
-              <th>Actions</th>
+              <th>{t.name}</th>
+              <th>{t.status}</th>
+              <th>{t.timeslots}</th>
+              <th>{t.active}</th>
+              <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
-            {timetables.map(t => (
-              <tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/timetables/${t.id}`)}>
+            {timetables.map(tt => (
+              <tr key={tt.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/timetables/${tt.id}`)}>
                 <td>
-                  {t.name}
-                  {t.is_default ? <span className="badge badge-confirmed" style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>default</span> : null}
+                  {tt.name}
+                  {tt.is_default ? <span className="badge badge-confirmed" style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>{t.default}</span> : null}
                 </td>
                 <td>
-                  <span className={`badge ${t.status === 'saved' ? 'badge-confirmed' : 'badge-draft'}`}>
-                    {t.status}
+                  <span className={`badge ${tt.status === 'saved' ? 'badge-confirmed' : 'badge-draft'}`}>
+                    {t.statusMap(tt.status)}
                   </span>
                 </td>
-                <td>{t.timeslot_count}</td>
+                <td>{tt.timeslot_count}</td>
                 <td>
-                  <span className={`badge ${t.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {t.active ? 'Active' : 'Inactive'}
+                  <span className={`badge ${tt.active ? 'badge-confirmed' : 'badge-declined'}`}>
+                    {tt.active ? t.active : t.inactive}
                   </span>
                 </td>
                 <td>
                   <ActionDropdown actions={[
-                    { label: 'View', onClick: () => navigate(`/timetables/${t.id}`) },
-                    ...(t.status === 'saved' && t.active && !t.is_default ? [{ label: 'Set Default', onClick: () => handleSetDefault(t.id) }] : []),
-                    { label: t.active ? 'Deactivate' : 'Activate', onClick: () => handleToggleActive(t.id) },
-                    { label: 'Delete', onClick: () => handleDelete(t.id), danger: true },
+                    { label: t.view, onClick: () => navigate(`/timetables/${tt.id}`) },
+                    ...(tt.status === 'saved' && tt.active && !tt.is_default ? [{ label: t.setDefault, onClick: () => handleSetDefault(tt.id) }] : []),
+                    { label: tt.active ? t.deactivate : t.activate, onClick: () => handleToggleActive(tt.id) },
+                    { label: t.delete, onClick: () => handleDelete(tt.id), danger: true },
                   ]} />
                 </td>
               </tr>
@@ -136,15 +138,15 @@ export default function TimetablesPage() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>New Timetable</h2>
+            <h2>{t.newTimetableTitle}</h2>
             {error && <div className="alert alert-error">{error}</div>}
             <div className="form-group">
-              <label>Name</label>
-              <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Wednesday Evening" required />
+              <label>{t.name}</label>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder={t.timetableNamePlaceholder} required />
             </div>
             <div className="modal-actions">
-              <button className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleCreate}>Create</button>
+              <button className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
+              <button className="btn btn-primary" onClick={handleCreate}>{t.create}</button>
             </div>
           </div>
         </div>

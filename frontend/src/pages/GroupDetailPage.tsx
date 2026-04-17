@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
+import { useT } from '../i18n';
 
 interface GroupDetail {
   id: number;
@@ -29,6 +30,7 @@ interface SearchResult {
 export default function GroupDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const t = useT();
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +48,7 @@ export default function GroupDetailPage() {
         api.getGroupMembers(Number(id))
       ]);
       const g = groupsData.find((g: GroupDetail) => g.id === Number(id));
-      if (!g) { setError('Group not found'); return; }
+      if (!g) { setError(t.groupNotFound); return; }
       setGroup(g);
       setMembers(membersData);
     } catch (err: any) {
@@ -99,7 +101,7 @@ export default function GroupDetailPage() {
   };
 
   const handleRemoveMember = async (studentId: number) => {
-    if (!confirm('Remove this student from the group?')) return;
+    if (!confirm(t.confirmRemoveMember)) return;
     try {
       await api.removeGroupMember(Number(id), studentId);
       load();
@@ -108,27 +110,27 @@ export default function GroupDetailPage() {
     }
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
   if (error) return <div className="page"><div className="alert alert-error">{error}</div></div>;
-  if (!group) return <div className="page"><p>Group not found.</p></div>;
+  if (!group) return <div className="page"><p>{t.groupNotFoundText}</p></div>;
 
   return (
     <div className="page">
       <button className="btn btn-outline" onClick={() => navigate('/groups')} style={{ marginBottom: '1rem' }}>
-        &larr; Back to Groups
+        {t.backToGroups}
       </button>
 
       <div className="page-header">
-        <h1>{group.name}{group.is_default ? ' (default)' : ''}</h1>
-        <span style={{ color: '#666', fontSize: '0.9rem' }}>Priority: {group.priority} &middot; {members.length} member{members.length !== 1 ? 's' : ''}</span>
+        <h1>{group.name}{group.is_default ? ` ${t.defaultSuffix}` : ''}</h1>
+        <span style={{ color: '#666', fontSize: '0.9rem' }}>{t.groupInfo(group.priority, members.length)}</span>
       </div>
 
       {!group.is_default && (
         <div style={{ marginBottom: '1.5rem', position: 'relative' }} ref={dropdownRef}>
-          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>Add Member</label>
+          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>{t.addMember}</label>
           <input
             type="text"
-            placeholder="Search students by name or email..."
+            placeholder={t.searchStudents}
             value={searchQuery}
             onChange={e => handleSearch(e.target.value)}
             style={{ width: '100%', maxWidth: '400px' }}
@@ -165,7 +167,7 @@ export default function GroupDetailPage() {
               maxWidth: '400px', width: '100%', padding: '0.5rem 0.75rem', color: '#888',
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
             }}>
-              No students found
+              {t.noStudentsFound}
             </div>
           )}
         </div>
@@ -173,18 +175,18 @@ export default function GroupDetailPage() {
 
       {members.length === 0 ? (
         <div className="empty-state">
-          <h3>No members</h3>
-          <p>Add students to this group using the search above.</p>
+          <h3>{t.noMembers}</h3>
+          <p>{t.noMembersHint}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>First Name</th>
-              <th>Last Name</th>
-              <th>Email</th>
-              <th>Status</th>
-              {!group.is_default && <th>Actions</th>}
+              <th>{t.firstName}</th>
+              <th>{t.lastName}</th>
+              <th>{t.email}</th>
+              <th>{t.status}</th>
+              {!group.is_default && <th>{t.actions}</th>}
             </tr>
           </thead>
           <tbody>
@@ -195,13 +197,13 @@ export default function GroupDetailPage() {
                 <td>{m.email}</td>
                 <td>
                   <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {m.active ? 'Active' : 'Inactive'}
+                    {m.active ? t.active : t.inactive}
                   </span>
                 </td>
                 {!group.is_default && (
                   <td>
                     <ActionDropdown actions={[
-                      { label: 'Remove', onClick: () => handleRemoveMember(m.id), danger: true },
+                      { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
                     ]} />
                   </td>
                 )}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { useT } from '../i18n';
 
 interface Timeslot {
   id: number;
@@ -39,6 +40,7 @@ interface TimetableDetail {
 export default function TimetableDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const t = useT();
   const [timetable, setTimetable] = useState<TimetableDetail | null>(null);
   const [editName, setEditName] = useState('');
   const [newTimeslotTime, setNewTimeslotTime] = useState('');
@@ -98,7 +100,7 @@ export default function TimetableDetailPage() {
   };
 
   const handleSave = async () => {
-    if (!confirm('Save this timetable? It will become read-only after saving.')) return;
+    if (!confirm(t.confirmSaveTimetable)) return;
     try {
       await api.saveTimetable(Number(id));
       load();
@@ -126,7 +128,7 @@ export default function TimetableDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this timetable? Sessions using it may be affected.')) return;
+    if (!confirm(t.confirmDeleteTimetable)) return;
     try {
       await api.deleteTimetable(Number(id));
       navigate('/timetables');
@@ -135,8 +137,8 @@ export default function TimetableDetailPage() {
     }
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
-  if (!timetable) return <div className="page"><p>Timetable not found</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
+  if (!timetable) return <div className="page"><p>{t.timetableNotFound}</p></div>;
 
   const isDraft = timetable.status === 'draft';
 
@@ -149,7 +151,7 @@ export default function TimetableDetailPage() {
         return { name: group?.name || `Group ${ga.group_id}`, percentage: ga.percentage, color: group?.color || GROUP_COLORS_FALLBACK[idx % GROUP_COLORS_FALLBACK.length] };
       })
     : timetable.groups.map((g, idx) => ({
-        name: g.group_name + (g.is_default ? ' (default)' : ''),
+        name: g.group_name + (g.is_default ? ` ${t.defaultSuffix}` : ''),
         percentage: g.percentage,
         color: g.group_color || GROUP_COLORS_FALLBACK[idx % GROUP_COLORS_FALLBACK.length],
       }));
@@ -197,7 +199,7 @@ export default function TimetableDetailPage() {
   return (
     <div className="page">
       <button className="btn btn-outline" onClick={() => navigate('/timetables')} style={{ marginBottom: '1rem' }}>
-        ← Back to Timetables
+        {t.backToTimetables}
       </button>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -206,37 +208,37 @@ export default function TimetableDetailPage() {
         <h1>{timetable.name}</h1>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <span className={`badge ${timetable.status === 'saved' ? 'badge-confirmed' : 'badge-draft'}`}>
-            {timetable.status}
+            {t.statusMap(timetable.status)}
           </span>
           <span className={`badge ${timetable.active ? 'badge-confirmed' : 'badge-declined'}`}>
-            {timetable.active ? 'Active' : 'Inactive'}
+            {timetable.active ? t.active : t.inactive}
           </span>
-          {timetable.is_default ? <span className="badge badge-confirmed">default</span> : null}
+          {timetable.is_default ? <span className="badge badge-confirmed">{t.default}</span> : null}
         </div>
       </div>
 
       {/* Name editing (draft only) */}
       {isDraft && (
         <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>Name</h2>
+          <h2>{t.name}</h2>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <input value={editName} onChange={e => setEditName(e.target.value)} style={{ flex: 1 }} />
-            <button className="btn btn-outline" onClick={updateName} disabled={editName === timetable.name || !editName}>Update Name</button>
+            <button className="btn btn-outline" onClick={updateName} disabled={editName === timetable.name || !editName}>{t.updateName}</button>
           </div>
         </div>
       )}
 
       {/* Timeslots Section */}
       <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>Timeslots ({timetable.timeslots.length})</h2>
+        <h2>{t.timeslotsCount(timetable.timeslots.length)}</h2>
         {isDraft && (
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
             <input type="time" value={newTimeslotTime} onChange={e => setNewTimeslotTime(e.target.value)} />
-            <button className="btn btn-primary" onClick={addTimeslot} disabled={!newTimeslotTime}>Add Timeslot</button>
+            <button className="btn btn-primary" onClick={addTimeslot} disabled={!newTimeslotTime}>{t.addTimeslot}</button>
           </div>
         )}
         {timetable.timeslots.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>No timeslots defined yet.</p>
+          <p style={{ color: '#6b7280' }}>{t.noTimeslotsDefined}</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {timetable.timeslots.map(ts => (
@@ -253,7 +255,7 @@ export default function TimetableDetailPage() {
 
       {/* Groups Section */}
       <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>Group Allocations</h2>
+        <h2>{t.groupAllocations}</h2>
         {isDraft ? (
           <>
             <div style={{ marginBottom: '1rem' }}>
@@ -312,7 +314,7 @@ export default function TimetableDetailPage() {
                       const total = next.reduce((s, g) => s + g.percentage, 0);
                       if (total !== 100 && next.length > 0) next[0] = { ...next[0], percentage: next[0].percentage + (100 - total) };
                       setGroupAssignments(next);
-                    }}>Remove</button>
+                    }}>{t.remove}</button>
                   </div>
                 );
               })}
@@ -346,7 +348,7 @@ export default function TimetableDetailPage() {
                     }}
                     defaultValue=""
                   >
-                    <option value="">Add group...</option>
+                    <option value="">{t.addGroupSelect}</option>
                     {available.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
                 </div>
@@ -356,19 +358,19 @@ export default function TimetableDetailPage() {
             <AllocationBar />
             <button className="btn btn-outline" onClick={async () => {
               setGroupError('');
-              if (groupAssignments.length === 0) { setGroupError('At least one group is required'); return; }
+              if (groupAssignments.length === 0) { setGroupError(t.atLeastOneGroup); return; }
               try {
                 await api.setTimetableGroups(Number(id), groupAssignments);
                 load();
               } catch (err: any) {
                 setGroupError(err.message);
               }
-            }}>Save Group Allocations</button>
+            }}>{t.saveGroupAllocations}</button>
           </>
         ) : (
           <>
             {timetable.groups.length === 0 ? (
-              <p style={{ color: '#6b7280' }}>No groups assigned.</p>
+              <p style={{ color: '#6b7280' }}>{t.noGroupsAssignedTimetable}</p>
             ) : (
               <AllocationBar />
             )}
@@ -378,22 +380,22 @@ export default function TimetableDetailPage() {
 
       {/* Actions */}
       <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>Actions</h2>
+        <h2>{t.actions}</h2>
         <div className="btn-group">
           {isDraft && timetable.timeslots.length > 0 && (
-            <button className="btn btn-primary" onClick={handleSave}>Save Timetable</button>
+            <button className="btn btn-primary" onClick={handleSave}>{t.saveTimetable}</button>
           )}
           {timetable.status === 'saved' && timetable.active && !timetable.is_default && (
-            <button className="btn btn-outline" onClick={handleSetDefault}>Set as Default</button>
+            <button className="btn btn-outline" onClick={handleSetDefault}>{t.setAsDefault}</button>
           )}
           <button className="btn btn-outline" onClick={handleToggleActive}>
-            {timetable.active ? 'Deactivate' : 'Activate'}
+            {timetable.active ? t.deactivate : t.activate}
           </button>
-          <button className="btn btn-danger" onClick={handleDelete}>Delete</button>
+          <button className="btn btn-danger" onClick={handleDelete}>{t.delete}</button>
         </div>
         {isDraft && (
           <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-            Saving will finalize this timetable and make it read-only. Only saved timetables can be attached to sessions.
+            {t.saveTimetableHint}
           </p>
         )}
       </div>
