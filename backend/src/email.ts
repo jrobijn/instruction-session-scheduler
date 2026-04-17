@@ -9,6 +9,7 @@ export function initializeMailer(): void {
   const secure = process.env.SMTP_SECURE === 'true';
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
+  const ciphers = process.env.SMTP_TLS_CIPHERS || 'DEFAULT@SECLEVEL=2';
 
   if (!host || !user) {
     console.warn('⚠ SMTP not configured — emails will be logged to console instead of sent.');
@@ -20,6 +21,11 @@ export function initializeMailer(): void {
     port,
     secure,
     auth: { user, pass },
+    pool: true,
+    maxConnections: 1,
+    tls: {
+        ciphers
+    }
   });
 }
 
@@ -68,6 +74,11 @@ export async function sendInvitationEmail({ to, studentName, date, token, clubNa
     subject,
     text,
     html,
+  }, (error, info) => {
+      if (error) {
+          return console.log(error);
+      }
+      console.log('Message %s sent: %s', info.messageId, info.response);
   });
 }
 
