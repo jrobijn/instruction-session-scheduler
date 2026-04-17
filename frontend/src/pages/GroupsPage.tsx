@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
+import { useT } from '../i18n';
 
 interface Group {
   id: number;
@@ -15,6 +16,7 @@ interface Group {
 
 export default function GroupsPage() {
   const navigate = useNavigate();
+  const t = useT();
   const [groups, setGroups] = useState<Group[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Group | null>(null);
@@ -84,7 +86,7 @@ export default function GroupsPage() {
   };
 
   const handleDelete = async (group: Group) => {
-    if (!confirm(`Are you sure you want to delete the group "${group.name}"?`)) return;
+    if (!confirm(t.confirmDeleteGroup(group.name))) return;
     try {
       await api.deleteGroup(group.id);
       load();
@@ -131,53 +133,53 @@ export default function GroupsPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
 
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Groups ({groups.length})</h1>
+        <h1>{t.groupsTitle(groups.length)}</h1>
         <div className="btn-group">
-          <button className="btn btn-outline" onClick={handleExport}>Export CSV</button>
-          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>Import CSV</button>
+          <button className="btn btn-outline" onClick={handleExport}>{t.exportCsv}</button>
+          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>{t.importCsv}</button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-          <button className="btn btn-primary" onClick={openCreate}>+ Add Group</button>
+          <button className="btn btn-primary" onClick={openCreate}>{t.addGroupButton}</button>
         </div>
       </div>
 
       {importResult && (
         <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-          Imported: {importResult.imported}, Skipped: {importResult.skipped}
+          {t.importResult(importResult.imported, importResult.skipped)}
           {importResult.errors.length > 0 && (
             <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.5rem' }}>
               {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
             </ul>
           )}
-          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>Dismiss</button>
+          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>{t.dismiss}</button>
         </div>
       )}
 
       {groups.length === 0 ? (
         <div className="empty-state">
-          <h3>No groups yet</h3>
-          <p>Add your first group to get started.</p>
+          <h3>{t.noGroupsYet}</h3>
+          <p>{t.noGroupsHint}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th className="sortable" onClick={() => toggleSort('name')}>Name{sortIcon('name')}</th>
-              <th>Color</th>
-              <th className="sortable" onClick={() => toggleSort('priority')}>Priority{sortIcon('priority')}</th>
-              <th className="sortable" onClick={() => toggleSort('member_count')}>Members{sortIcon('member_count')}</th>
-              <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
-              <th>Actions</th>
+              <th className="sortable" onClick={() => toggleSort('name')}>{t.name}{sortIcon('name')}</th>
+              <th>{t.color}</th>
+              <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
+              <th className="sortable" onClick={() => toggleSort('member_count')}>{t.members}{sortIcon('member_count')}</th>
+              <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
+              <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
             {sortedGroups.map(g => (
               <tr key={g.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/groups/${g.id}`)}>
-                <td>{g.name}{g.is_default ? ' (default)' : ''}</td>
+                <td>{g.name}{g.is_default ? ` ${t.defaultSuffix}` : ''}</td>
                 <td>
                   <input
                     type="color"
@@ -197,15 +199,15 @@ export default function GroupsPage() {
                 <td>{g.member_count}</td>
                 <td>
                   <span className={`badge ${g.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {g.active ? 'Active' : 'Inactive'}
+                    {g.active ? t.active : t.inactive}
                   </span>
                 </td>
                 <td>
                   {!g.is_default && (
                     <ActionDropdown actions={[
-                      { label: 'Edit', onClick: () => openEdit(g) },
-                      { label: g.active ? 'Deactivate' : 'Activate', onClick: () => toggleActive(g) },
-                      { label: 'Delete', onClick: () => handleDelete(g), danger: true },
+                      { label: t.edit, onClick: () => openEdit(g) },
+                      { label: g.active ? t.deactivate : t.activate, onClick: () => toggleActive(g) },
+                      { label: t.delete, onClick: () => handleDelete(g), danger: true },
                     ]} />
                   )}
                 </td>
@@ -218,24 +220,24 @@ export default function GroupsPage() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{editing ? 'Edit Group' : 'Add Group'}</h2>
+            <h2>{editing ? t.editGroup : t.addGroupTitle}</h2>
             {error && <div className="alert alert-error">{error}</div>}
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label>Name</label>
+                <label>{t.name}</label>
                 <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Priority (lower = higher priority, max 9999)</label>
+                <label>{t.priorityFieldLabel}</label>
                 <input type="number" min="1" max="9999" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Color</label>
+                <label>{t.color}</label>
                 <input type="color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} style={{ width: '60px', height: '32px', padding: 0, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }} />
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editing ? 'Save' : 'Add Group'}</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
+                <button type="submit" className="btn btn-primary">{editing ? t.save : t.addGroupTitle}</button>
               </div>
             </form>
           </div>

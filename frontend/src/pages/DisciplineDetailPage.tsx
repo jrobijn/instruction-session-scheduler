@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
+import { useT } from '../i18n';
 
 interface DisciplineInfo {
   id: number;
@@ -27,6 +28,7 @@ interface AvailableGroup {
 export default function DisciplineDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const t = useT();
   const [discipline, setDiscipline] = useState<DisciplineInfo | null>(null);
   const [groups, setGroups] = useState<AssignedGroup[]>([]);
   const [allGroups, setAllGroups] = useState<AvailableGroup[]>([]);
@@ -44,7 +46,7 @@ export default function DisciplineDetailPage() {
         api.getGroups()
       ]);
       const d = discData.find((d: DisciplineInfo) => d.id === Number(id));
-      if (!d) { setError('Discipline not found'); return; }
+      if (!d) { setError(t.disciplineNotFound); return; }
       setDiscipline(d);
       setGroups(groupsData);
       setAllGroups(allGroupsData.filter((g: AvailableGroup) => g.active));
@@ -80,7 +82,7 @@ export default function DisciplineDetailPage() {
   };
 
   const handleRemove = async (groupId: number) => {
-    if (!confirm('Remove this group from the discipline?')) return;
+    if (!confirm(t.confirmRemoveGroup)) return;
     try {
       await api.removeDisciplineGroup(Number(id), groupId);
       load();
@@ -89,9 +91,9 @@ export default function DisciplineDetailPage() {
     }
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
   if (error) return <div className="page"><div className="alert alert-error">{error}</div></div>;
-  if (!discipline) return <div className="page"><p>Discipline not found.</p></div>;
+  if (!discipline) return <div className="page"><p>{t.disciplineNotFoundText}</p></div>;
 
   const assignedIds = new Set(groups.map(g => g.id));
   const unassignedGroups = allGroups.filter(g => !assignedIds.has(g.id));
@@ -99,20 +101,20 @@ export default function DisciplineDetailPage() {
   return (
     <div className="page">
       <button className="btn btn-outline" onClick={() => navigate('/disciplines')} style={{ marginBottom: '1rem' }}>
-        &larr; Back to Disciplines
+        {t.backToDisciplines}
       </button>
 
       <div className="page-header">
         <h1>{discipline.name}</h1>
-        <span style={{ color: '#666', fontSize: '0.9rem' }}>{groups.length} group{groups.length !== 1 ? 's' : ''}</span>
+        <span style={{ color: '#666', fontSize: '0.9rem' }}>{t.groupCount(groups.length)}</span>
       </div>
 
       {unassignedGroups.length > 0 && (
         <div style={{ marginBottom: '1.5rem', position: 'relative' }} ref={dropdownRef}>
-          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>Add Group</label>
+          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>{t.addGroup}</label>
           <input
             type="text"
-            placeholder="Search groups by name..."
+            placeholder={t.searchGroups}
             value={searchQuery}
             onChange={e => { setSearchQuery(e.target.value); setShowDropdown(true); }}
             onFocus={() => setShowDropdown(true)}
@@ -142,7 +144,7 @@ export default function DisciplineDetailPage() {
                     onMouseLeave={e => (e.currentTarget.style.background = 'white')}
                   >
                     <span>{g.name}</span>
-                    <span style={{ color: '#888', fontSize: '0.85rem' }}>Priority: {g.priority}</span>
+                    <span style={{ color: '#888', fontSize: '0.85rem' }}>{t.priorityLabel(g.priority)}</span>
                   </div>
                 ))}
               </div>
@@ -154,7 +156,7 @@ export default function DisciplineDetailPage() {
                 maxWidth: '400px', width: '100%', padding: '0.5rem 0.75rem', color: '#888',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
               }}>
-                No groups found
+                {t.noGroupsFound}
               </div>
             );
             return null;
@@ -164,32 +166,32 @@ export default function DisciplineDetailPage() {
 
       {groups.length === 0 ? (
         <div className="empty-state">
-          <h3>No groups assigned</h3>
-          <p>Add groups to control which students can choose this discipline.</p>
+          <h3>{t.noGroupsAssigned}</h3>
+          <p>{t.noGroupsAssignedHint}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Priority</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>{t.name}</th>
+              <th>{t.priority}</th>
+              <th>{t.status}</th>
+              <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
             {groups.map(g => (
               <tr key={g.id}>
-                <td>{g.name}{g.is_default ? ' (default)' : ''}</td>
+                <td>{g.name}{g.is_default ? ` ${t.defaultSuffix}` : ''}</td>
                 <td>{g.priority}</td>
                 <td>
                   <span className={`badge ${g.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {g.active ? 'Active' : 'Inactive'}
+                    {g.active ? t.active : t.inactive}
                   </span>
                 </td>
                 <td>
                   <ActionDropdown actions={[
-                    { label: 'Remove', onClick: () => handleRemove(g.id), danger: true },
+                    { label: t.remove, onClick: () => handleRemove(g.id), danger: true },
                   ]} />
                 </td>
               </tr>

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
+import { useT } from '../i18n';
 
 interface Discipline {
   id: number;
@@ -19,6 +20,7 @@ interface Group {
 
 export default function DisciplinesPage() {
   const navigate = useNavigate();
+  const t = useT();
   const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Discipline | null>(null);
@@ -99,7 +101,7 @@ export default function DisciplinesPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this discipline?')) return;
+    if (!confirm(t.confirmDeleteDiscipline)) return;
     try {
       await api.deleteDiscipline(id);
       load();
@@ -146,45 +148,45 @@ export default function DisciplinesPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
 
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Disciplines ({disciplines.length})</h1>
+        <h1>{t.disciplinesTitle(disciplines.length)}</h1>
         <div className="btn-group">
-          <button className="btn btn-outline" onClick={handleExport}>Export CSV</button>
-          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>Import CSV</button>
+          <button className="btn btn-outline" onClick={handleExport}>{t.exportCsv}</button>
+          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>{t.importCsv}</button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-          <button className="btn btn-primary" onClick={openCreate}>+ Add Discipline</button>
+          <button className="btn btn-primary" onClick={openCreate}>{t.addDiscipline}</button>
         </div>
       </div>
 
       {importResult && (
         <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-          Imported: {importResult.imported}, Skipped: {importResult.skipped}
+          {t.importResult(importResult.imported, importResult.skipped)}
           {importResult.errors.length > 0 && (
             <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.5rem' }}>
               {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
             </ul>
           )}
-          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>Dismiss</button>
+          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>{t.dismiss}</button>
         </div>
       )}
 
       {disciplines.length === 0 ? (
         <div className="empty-state">
-          <h3>No disciplines yet</h3>
-          <p>Add your first discipline to get started.</p>
+          <h3>{t.noDisciplinesYet}</h3>
+          <p>{t.noDisciplinesHint}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th className="sortable" onClick={() => toggleSort('name')}>Name{sortIcon('name')}</th>
-              <th>Groups</th>
-              <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
-              <th>Actions</th>
+              <th className="sortable" onClick={() => toggleSort('name')}>{t.name}{sortIcon('name')}</th>
+              <th>{t.groups}</th>
+              <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
+              <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -194,14 +196,14 @@ export default function DisciplinesPage() {
                 <td>{d.groups.length}</td>
                 <td>
                   <span className={`badge ${d.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {d.active ? 'Active' : 'Inactive'}
+                    {d.active ? t.active : t.inactive}
                   </span>
                 </td>
                 <td>
                   <ActionDropdown actions={[
-                    { label: 'Edit', onClick: () => openEdit(d) },
-                    { label: d.active ? 'Deactivate' : 'Activate', onClick: () => toggleActive(d) },
-                    { label: 'Delete', onClick: () => handleDelete(d.id), danger: true },
+                    { label: t.edit, onClick: () => openEdit(d) },
+                    { label: d.active ? t.deactivate : t.activate, onClick: () => toggleActive(d) },
+                    { label: t.delete, onClick: () => handleDelete(d.id), danger: true },
                   ]} />
                 </td>
               </tr>
@@ -213,15 +215,15 @@ export default function DisciplinesPage() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{editing ? 'Edit Discipline' : 'Add Discipline'}</h2>
+            <h2>{editing ? t.editDiscipline : t.addDisciplineTitle}</h2>
             {error && <div className="alert alert-error">{error}</div>}
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label>Name</label>
+                <label>{t.name}</label>
                 <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Groups with access</label>
+                <label>{t.groupsWithAccess}</label>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {allGroups.map(g => {
                     const checked = selectedGroupIds.includes(g.id);
@@ -244,8 +246,8 @@ export default function DisciplinesPage() {
                 </div>
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">{editing ? 'Save' : 'Add Discipline'}</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
+                <button type="submit" className="btn btn-primary">{editing ? t.save : t.addDisciplineTitle}</button>
               </div>
             </form>
           </div>

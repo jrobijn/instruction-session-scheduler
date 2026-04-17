@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import ActionDropdown from '../components/ActionDropdown';
 import DatePicker from 'react-datepicker';
 import { api } from '../api';
+import { useT } from '../i18n';
 
 interface Session {
   id: number;
@@ -35,6 +36,7 @@ export default function SessionsPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const t = useT();
 
   const load = async () => {
     try {
@@ -81,7 +83,7 @@ export default function SessionsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this session?')) return;
+    if (!confirm(t.confirmDeleteSession)) return;
     try {
       await api.deleteSession(id);
       load();
@@ -90,30 +92,30 @@ export default function SessionsPage() {
     }
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
 
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Training Sessions ({sessions.length})</h1>
-        <button className="btn btn-primary" onClick={openCreateModal}>+ New Session</button>
+        <h1>{t.sessionsTitle(sessions.length)}</h1>
+        <button className="btn btn-primary" onClick={openCreateModal}>{t.newSession}</button>
       </div>
 
       {sessions.length === 0 ? (
         <div className="empty-state">
-          <h3>No training sessions yet</h3>
-          <p>Create your first training session to get started.</p>
+          <h3>{t.noSessionsYet}</h3>
+          <p>{t.noSessionsHint}</p>
         </div>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Status</th>
-              <th>Timetable</th>
-              <th>Instructors</th>
-              <th>Invitations</th>
-              <th>Actions</th>
+              <th>{t.date}</th>
+              <th>{t.status}</th>
+              <th>{t.timetable}</th>
+              <th>{t.instructors}</th>
+              <th>{t.invitations}</th>
+              <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -128,16 +130,16 @@ export default function SessionsPage() {
                     s.status === 'draft' ? 'badge-draft' :
                     'badge-declined'
                   }`}>
-                    {s.status.replace(/_/g, ' ')}
+                    {t.statusMap(s.status)}
                   </span>
                 </td>
-                <td>{s.timetable_name || '—'}</td>
+                <td>{s.timetable_name || t.noData}</td>
                 <td>{s.instructor_count}</td>
                 <td>{s.invitation_count}</td>
                 <td>
                   <ActionDropdown actions={[
-                    { label: 'View', onClick: () => navigate(`/sessions/${s.id}`) },
-                    ...(s.status === 'draft' ? [{ label: 'Delete', onClick: () => handleDelete(s.id), danger: true }] : []),
+                    { label: t.view, onClick: () => navigate(`/sessions/${s.id}`) },
+                    ...(s.status === 'draft' ? [{ label: t.delete, onClick: () => handleDelete(s.id), danger: true }] : []),
                   ]} />
                 </td>
               </tr>
@@ -149,31 +151,31 @@ export default function SessionsPage() {
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>New Training Session</h2>
+            <h2>{t.newSessionTitle}</h2>
             {error && <div className="alert alert-error">{error}</div>}
             <div className="form-group">
-              <label>Date</label>
+              <label>{t.date}</label>
               <DatePicker
                 selected={selectedDate}
                 onChange={(d: Date | null) => setSelectedDate(d)}
                 filterDate={isClubDay}
                 dateFormat="yyyy-MM-dd"
-                placeholderText="Select a date..."
+                placeholderText={t.selectDate}
                 className="datepicker-input"
               />
             </div>
             <div className="form-group">
-              <label>Timetable</label>
+              <label>{t.timetable}</label>
               <select value={selectedTimetable} onChange={e => setSelectedTimetable(e.target.value)}>
-                <option value="">No timetable</option>
-                {timetables.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</option>
+                <option value="">{t.noTimetable}</option>
+                {timetables.map(tt => (
+                  <option key={tt.id} value={tt.id}>{tt.name}{tt.is_default ? ` ${t.defaultSuffix}` : ''}</option>
                 ))}
               </select>
             </div>
             <div className="modal-actions">
-              <button className="btn btn-outline" onClick={() => setShowModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleCreate} disabled={!selectedDate}>Create</button>
+              <button className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
+              <button className="btn btn-primary" onClick={handleCreate} disabled={!selectedDate}>{t.create}</button>
             </div>
           </div>
         </div>

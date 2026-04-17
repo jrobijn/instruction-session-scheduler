@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useT } from '../i18n';
 
 interface Instructor {
   id: number;
@@ -58,6 +59,7 @@ function formatDate(dateStr: string) {
 export default function SessionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const t = useT();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [allInstructors, setAllInstructors] = useState<Instructor[]>([]);
   const [allTimetables, setAllTimetables] = useState<TimetableInfo[]>([]);
@@ -166,7 +168,7 @@ export default function SessionDetailPage() {
   const changeTimetable = async (timetableId: string) => {
     const newTtId = timetableId ? Number(timetableId) : null;
     if (session?.status === 'scheduled') {
-      if (!confirm('Changing the timetable will clear the generated schedule and reset the session to draft. Continue?')) return;
+      if (!confirm(t.confirmTimetableChange)) return;
     }
     try {
       await api.updateSession(String(id), { timetable_id: newTtId });
@@ -210,7 +212,7 @@ export default function SessionDetailPage() {
   };
 
   const completeSession = async () => {
-    if (!confirm('Mark this session as completed? This will update attendance counts.')) return;
+    if (!confirm(t.confirmComplete)) return;
     setActionLoading('completing');
     try {
       await api.completeSession(Number(id));
@@ -222,8 +224,8 @@ export default function SessionDetailPage() {
     }
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
-  if (!session) return <div className="page"><p>Session not found</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
+  if (!session) return <div className="page"><p>{t.sessionNotFound}</p></div>;
 
   const assignedIds = new Set(session.instructors.map(i => i.id));
   const availableInstructors = allInstructors.filter(i => !assignedIds.has(i.id));
@@ -273,7 +275,7 @@ export default function SessionDetailPage() {
     const doc = new jsPDF();
     const dateStr = formatDate(session.date);
     doc.setFontSize(16);
-    doc.text(`Schedule — ${dateStr}`, 14, 20);
+    doc.text(t.pdfTitle(dateStr), 14, 20);
 
     const head = [['Time', ...session.instructors.map(i => `${i.first_name} ${i.last_name}`)]];
     const body = session.timeslots.map(ts => {
@@ -299,7 +301,7 @@ export default function SessionDetailPage() {
   return (
     <div className="page">
       <button className="btn btn-outline" onClick={() => navigate('/sessions')} style={{ marginBottom: '1rem' }}>
-        ← Back to Sessions
+        {t.backToSessions}
       </button>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -313,26 +315,26 @@ export default function SessionDetailPage() {
           session.status === 'draft' ? 'badge-draft' :
           'badge-declined'
         }`}>
-          {session.status.replace(/_/g, ' ')}
+          {t.statusMap(session.status)}
         </span>
       </div>
 
       {/* Instructors Section */}
       <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>Instructors ({session.instructors.length})</h2>
+        <h2>{t.instructorsCount(session.instructors.length)}</h2>
         {session.status === 'draft' && (
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
             <select value={selectedInstructor} onChange={e => setSelectedInstructor(e.target.value)}>
-              <option value="">Select instructor...</option>
+              <option value="">{t.selectInstructor}</option>
               {availableInstructors.map(i => (
                 <option key={i.id} value={i.id}>{i.first_name} {i.last_name}</option>
               ))}
             </select>
-            <button className="btn btn-primary" onClick={assignInstructor} disabled={!selectedInstructor}>Assign</button>
+            <button className="btn btn-primary" onClick={assignInstructor} disabled={!selectedInstructor}>{t.assign}</button>
           </div>
         )}
         {session.instructors.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>No instructors assigned yet.</p>
+          <p style={{ color: '#6b7280' }}>{t.noInstructorsAssigned}</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {session.instructors.map(i => (
@@ -349,30 +351,30 @@ export default function SessionDetailPage() {
 
       {/* Timetable Section */}
       <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>Timetable</h2>
+        <h2>{t.timetableSection}</h2>
         {(session.status === 'draft' || session.status === 'scheduled') ? (
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', alignItems: 'center' }}>
             <select
               value={session.timetable_id ?? ''}
               onChange={e => changeTimetable(e.target.value)}
             >
-              <option value="">No timetable</option>
+              <option value="">{t.noTimetable}</option>
               {allTimetables.map(t => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
               {/* Show current timetable even if not in the active list */}
               {session.timetable && !allTimetables.some(t => t.id === session.timetable!.id) && (
-                <option value={session.timetable.id}>{session.timetable.name} (inactive)</option>
+                <option value={session.timetable.id}>{session.timetable.name} {t.inactiveSuffix}</option>
               )}
             </select>
           </div>
         ) : (
           <p style={{ marginBottom: '0.5rem' }}>
-            {session.timetable ? session.timetable.name : 'No timetable attached'}
+            {session.timetable ? session.timetable.name : t.noTimetableAttached}
           </p>
         )}
         {session.timeslots.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>No timeslots{session.timetable_id ? ' in the attached timetable' : ' — attach a timetable first'}.</p>
+          <p style={{ color: '#6b7280' }}>{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {session.timeslots.map(ts => (
@@ -383,34 +385,34 @@ export default function SessionDetailPage() {
           </div>
         )}
         <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-          Each timeslot has space for one student per instructor ({session.timeslots.length * session.instructors.length} total slots).
+          {t.slotsInfo(session.timeslots.length * session.instructors.length)}
         </p>
       </div>
 
       {/* Actions */}
       {session.status === 'draft' && session.instructors.length > 0 && session.timetable_id && session.timeslots.length > 0 && (
         <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>Actions</h2>
+          <h2>{t.actions}</h2>
           <div className="btn-group">
             <button className="btn btn-primary" onClick={generateSchedule} disabled={actionLoading === 'generating'}>
-              {actionLoading === 'generating' ? 'Generating...' : 'Generate Schedule'}
+              {actionLoading === 'generating' ? t.generating : t.generateSchedule}
             </button>
           </div>
           <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-            This will select students with the fewest attended sessions and create invitations.
+            {t.scheduleHint}
           </p>
         </div>
       )}
 
       {session.status === 'scheduled' && (
         <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>Actions</h2>
+          <h2>{t.actions}</h2>
           <div className="btn-group">
             <button className="btn btn-primary" onClick={sendInvitations} disabled={actionLoading === 'sending'}>
-              {actionLoading === 'sending' ? 'Sending...' : 'Send Invitations'}
+              {actionLoading === 'sending' ? t.sending : t.sendInvitations}
             </button>
             <button className="btn btn-outline" onClick={generateSchedule} disabled={actionLoading === 'generating'}>
-              {actionLoading === 'generating' ? 'Regenerating...' : 'Regenerate Schedule'}
+              {actionLoading === 'generating' ? t.regenerating : t.regenerateSchedule}
             </button>
           </div>
         </div>
@@ -418,9 +420,9 @@ export default function SessionDetailPage() {
 
       {session.status === 'invitations_sent' && (
         <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>Actions</h2>
+          <h2>{t.actions}</h2>
           <button className="btn btn-primary" onClick={completeSession} disabled={actionLoading === 'completing'}>
-            {actionLoading === 'completing' ? 'Completing...' : 'Mark as Completed'}
+            {actionLoading === 'completing' ? t.completing : t.markCompleted}
           </button>
         </div>
       )}
@@ -429,13 +431,13 @@ export default function SessionDetailPage() {
       {session.invitations.length > 0 && session.instructors.length > 0 && session.timeslots.length > 0 && (
         <div style={{ marginBottom: '2rem' }}>
           <div className="page-header">
-            <h2>Schedule Overview</h2>
-            <button className="btn btn-outline" onClick={exportPdf}>Export PDF</button>
+            <h2>{t.scheduleOverview}</h2>
+            <button className="btn btn-outline" onClick={exportPdf}>{t.exportPdf}</button>
           </div>
           <table>
             <thead>
               <tr>
-                <th>Time</th>
+                <th>{t.time}</th>
                 {session.instructors.map(i => (
                   <th key={i.id}>{i.first_name} {i.last_name}</th>
                 ))}
@@ -463,10 +465,10 @@ export default function SessionDetailPage() {
                               inv.status === 'scheduled' ? 'badge-draft' :
                               'badge-pending'
                             }`} style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
-                              {inv.status}
+                              {t.statusMap(inv.status)}
                             </span>
                           </span>
-                        ) : '—'}
+                        ) : t.noData}
                       </td>
                     );
                   })}
@@ -480,21 +482,21 @@ export default function SessionDetailPage() {
       {/* Invitations */}
       {(session.invitations.length > 0 || (canEdit && session.timeslots.length > 0 && session.instructors.length > 0)) && (
         <div>
-          <h2>Invitations ({session.invitations.length})</h2>
+          <h2>{t.invitationsCount(session.invitations.length)}</h2>
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-            <span className="badge badge-confirmed">Confirmed: {confirmed}</span>
-            <span className="badge badge-pending">Invited: {invited}</span>
-            {scheduled > 0 && <span className="badge badge-draft">Scheduled: {scheduled}</span>}
-            <span className="badge badge-declined">Declined: {declined}</span>
-            {expired > 0 && <span className="badge badge-declined">Expired: {expired}</span>}
+            <span className="badge badge-confirmed">{t.summaryConfirmed(confirmed)}</span>
+            <span className="badge badge-pending">{t.summaryInvited(invited)}</span>
+            {scheduled > 0 && <span className="badge badge-draft">{t.summaryScheduled(scheduled)}</span>}
+            <span className="badge badge-declined">{t.summaryDeclined(declined)}</span>
+            {expired > 0 && <span className="badge badge-declined">{t.summaryExpired(expired)}</span>}
           </div>
           <table>
             <thead>
               <tr>
-                <th>Timeslot</th>
-                <th>Student</th>
-                <th>Discipline</th>
-                <th>Status</th>
+                <th>{t.timeslot}</th>
+                <th>{t.student}</th>
+                <th>{t.discipline}</th>
+                <th>{t.status}</th>
                 {canEdit && <th></th>}
               </tr>
             </thead>
@@ -513,7 +515,7 @@ export default function SessionDetailPage() {
                         {inv.student_name}
                       </span>
                     </td>
-                    <td>{inv.discipline_name || '—'}</td>
+                    <td>{inv.discipline_name || t.noData}</td>
                     <td>
                       <span className={`badge ${
                         inv.status === 'confirmed' ? 'badge-confirmed' :
@@ -522,7 +524,7 @@ export default function SessionDetailPage() {
                         inv.status === 'scheduled' ? 'badge-draft' :
                         'badge-pending'
                       }`}>
-                        {inv.status}
+                        {t.statusMap(inv.status)}
                       </span>
                       {inv.status === 'confirmed' && session.status !== 'completed' && (
                         <span
@@ -530,7 +532,7 @@ export default function SessionDetailPage() {
                           style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
                           onClick={() => toggleNoShow(inv.id)}
                         >
-                          {inv.no_show ? 'no-show' : 'show'}
+                          {inv.no_show ? t.noShow : t.show}
                         </span>
                       )}
                       {inv.status === 'confirmed' && session.status === 'completed' && (
@@ -538,7 +540,7 @@ export default function SessionDetailPage() {
                           className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
                           style={{ marginLeft: '0.5rem' }}
                         >
-                          {inv.no_show ? 'no-show' : 'show'}
+                          {inv.no_show ? t.noShow : t.show}
                         </span>
                       )}
                     </td>
@@ -564,7 +566,7 @@ export default function SessionDetailPage() {
                         <div ref={dropdownRef} style={{ position: 'relative' }}>
                           <input
                             type="text"
-                            placeholder="Search student..."
+                            placeholder={t.searchStudent}
                             value={studentSearch}
                             onChange={e => searchStudents(e.target.value)}
                             autoFocus
@@ -595,7 +597,7 @@ export default function SessionDetailPage() {
                           className="btn btn-outline"
                           style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
                           onClick={() => { setAddSlot({ timeslotId: slot.timeslotId, instructorId: slot.instructorId }); setStudentSearch(''); setStudentResults([]); }}
-                        >+ Add student</button>
+                        >{t.addStudentToSlot}</button>
                       )}
                     </td>
                     <td></td>

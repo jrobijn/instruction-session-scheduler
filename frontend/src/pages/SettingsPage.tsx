@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api';
+import { useT, getLocale, setLocale, getAvailableLocales } from '../i18n';
 
 interface Settings {
   [key: string]: string;
@@ -11,6 +12,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({});
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState('');
+  const t = useT();
 
   const load = async () => {
     try {
@@ -34,19 +36,32 @@ export default function SettingsPage() {
     }
   };
 
-  if (loading) return <div className="page"><p>Loading...</p></div>;
+  if (loading) return <div className="page"><p>{t.loading}</p></div>;
 
   const settingsConfig = [
-    { key: 'club_name', label: 'Club Name', type: 'text', description: 'Name of the sports club, used in emails.' },
-    { key: 'invitation_email_subject', label: 'Invitation Email Subject', type: 'text', description: 'Subject line for invitation emails sent to students.' },
-    { key: 'invitation_expiry_minutes', label: 'Invitation Expiry (minutes)', type: 'number', description: 'Minutes before an unanswered invitation expires and a replacement is invited. Set to 0 to disable.' },
-    { key: 'invitation_check_interval_minutes', label: 'Expiry Check Interval (minutes)', type: 'number', description: 'How often the server checks for expired invitations. Changes take effect after the current interval completes.' },
+    { key: 'club_name', label: t.settingClubName, type: 'text', description: t.settingClubNameDesc },
+    { key: 'invitation_email_subject', label: t.settingEmailSubject, type: 'text', description: t.settingEmailSubjectDesc },
+    { key: 'invitation_expiry_minutes', label: t.settingExpiryMinutes, type: 'number', description: t.settingExpiryMinutesDesc },
+    { key: 'invitation_check_interval_minutes', label: t.settingCheckInterval, type: 'number', description: t.settingCheckIntervalDesc },
   ];
 
   return (
     <div className="page">
-      <h1>Settings</h1>
+      <h1>{t.settingsTitle}</h1>
       <div className="card">
+        <div className="form-group">
+          <label>{t.settingLanguage}</label>
+          <select
+            value={getLocale()}
+            onChange={e => setLocale(e.target.value)}
+          >
+            {getAvailableLocales().map(code => (
+              <option key={code} value={code}>{t.languageNames[code] || code}</option>
+            ))}
+          </select>
+          <small style={{ color: '#6b7280' }}>{t.settingLanguageDesc}</small>
+        </div>
+
         {settingsConfig.map(({ key, label, type, description }) => (
           <div key={key} className="form-group">
             <label>{label}</label>
@@ -57,12 +72,12 @@ export default function SettingsPage() {
               onBlur={e => saveSetting(key, e.target.value)}
             />
             <small style={{ color: '#6b7280' }}>{description}</small>
-            {saved === key && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>✓ Saved</small>}
+            {saved === key && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>{t.saved}</small>}
           </div>
         ))}
 
         <div className="form-group">
-          <label>Club Days</label>
+          <label>{t.settingClubDays}</label>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             {DAY_LABELS.map((label, idx) => {
               const days = (settings.club_days || '0|1|2|3|4|5|6').split('|').filter(Boolean);
@@ -88,8 +103,8 @@ export default function SettingsPage() {
               );
             })}
           </div>
-          <small style={{ color: '#6b7280' }}>Days of the week the club operates. At least one must be selected.</small>
-          {saved === 'club_days' && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>✓ Saved</small>}
+            <small style={{ color: '#6b7280' }}>{t.settingClubDaysDesc}</small>
+            {saved === 'club_days' && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>{t.saved}</small>}
         </div>
       </div>
     </div>

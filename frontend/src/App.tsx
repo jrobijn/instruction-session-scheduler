@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
 import { isAuthenticated, clearToken } from './api';
+import { useT } from './i18n';
 import LoginPage from './pages/LoginPage';
 import StudentsPage from './pages/StudentsPage';
 import InstructorsPage from './pages/InstructorsPage';
@@ -18,6 +19,7 @@ import InvitationPage from './pages/InvitationPage';
 function AdminLayout() {
   const navigate = useNavigate();
   const [, forceUpdate] = useState(0);
+  const t = useT();
 
   const handleLogout = () => {
     clearToken();
@@ -30,16 +32,16 @@ function AdminLayout() {
   return (
     <div className="app">
       <nav>
-        <NavLink to="/sessions" className="logo">Session Scheduler</NavLink>
-        <NavLink to="/sessions">Schedule</NavLink>
-        <NavLink to="/timetables">Timetables</NavLink>
-        <NavLink to="/students">Students</NavLink>
-        <NavLink to="/instructors">Instructors</NavLink>
-        <NavLink to="/disciplines">Disciplines</NavLink>
-        <NavLink to="/groups">Groups</NavLink>
-        <NavLink to="/settings">Settings</NavLink>
+        <NavLink to="/sessions" className="logo">{t.appTitle}</NavLink>
+        <NavLink to="/sessions">{t.navSchedule}</NavLink>
+        <NavLink to="/timetables">{t.navTimetables}</NavLink>
+        <NavLink to="/students">{t.navStudents}</NavLink>
+        <NavLink to="/instructors">{t.navInstructors}</NavLink>
+        <NavLink to="/disciplines">{t.navDisciplines}</NavLink>
+        <NavLink to="/groups">{t.navGroups}</NavLink>
+        <NavLink to="/settings">{t.navSettings}</NavLink>
         <div className="spacer" />
-        <button className="logout-btn" onClick={handleLogout}>Logout</button>
+        <button className="logout-btn" onClick={handleLogout}>{t.logout}</button>
       </nav>
       <Routes>
         <Route path="/students" element={<StudentsPage />} />
