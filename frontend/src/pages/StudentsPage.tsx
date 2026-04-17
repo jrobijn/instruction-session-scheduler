@@ -10,6 +10,7 @@ interface Student {
   no_show_count: number;
   preferred_days: string;
   active: number;
+  cooldown_until: string | null;
 }
 
 interface Timetable {
@@ -36,6 +37,8 @@ export default function StudentsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sortCol, setSortCol] = useState<keyof Student>('last_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [cooldownModal, setCooldownModal] = useState<Student | null>(null);
+  const [cooldownDays, setCooldownDays] = useState(7);
 
   const toggleSort = (col: keyof Student) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -177,6 +180,35 @@ export default function StudentsPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const hasActiveCooldown = (s: Student) => s.cooldown_until && new Date(s.cooldown_until + 'Z') > new Date();
+
+  const formatCooldown = (s: Student) => {
+    if (!hasActiveCooldown(s)) return null;
+    const until = new Date(s.cooldown_until + 'Z');
+    const days = Math.ceil((until.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    return `${days}d (until ${until.toLocaleDateString()})`;
+  };
+
+  const handleSetCooldown = async () => {
+    if (!cooldownModal) return;
+    try {
+      await api.setStudentCooldown(cooldownModal.id, cooldownDays);
+      setCooldownModal(null);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleClearCooldown = async (id: number) => {
+    try {
+      await api.clearStudentCooldown(id);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   if (loading) return <div className="page"><p>Loading...</p></div>;
 
   return (
@@ -218,6 +250,7 @@ export default function StudentsPage() {
               <th className="sortable" onClick={() => toggleSort('attended_sessions')}>Sessions Attended{sortIcon('attended_sessions')}</th>
               <th className="sortable" onClick={() => toggleSort('no_show_count')}>No-shows{sortIcon('no_show_count')}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>Status{sortIcon('active')}</th>
+              <th>Cooldown</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -233,6 +266,18 @@ export default function StudentsPage() {
                   <span className={`badge ${s.active ? 'badge-confirmed' : 'badge-declined'}`}>
                     {s.active ? 'Active' : 'Inactive'}
                   </span>
+                </td>
+                <td>
+                  {hasActiveCooldown(s) ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="badge badge-declined" title={`Until ${new Date(s.cooldown_until + 'Z').toLocaleString()}`}>
+                        {formatCooldown(s)}
+                      </span>
+                      <button className="btn btn-outline btn-sm" onClick={() => handleClearCooldown(s.id)} title="Remove cooldown">✕</button>
+                    </span>
+                  ) : (
+                    <button className="btn btn-outline btn-sm" onClick={() => { setCooldownModal(s); setCooldownDays(7); }}>Set</button>
+                  )}
                 </td>
                 <td>
                   <div className="btn-group">
@@ -364,6 +409,28 @@ export default function StudentsPage() {
                 <button type="submit" className="btn btn-primary">{editing ? 'Save' : 'Add Student'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {cooldownModal && (
+        <div className="modal-overlay" onClick={() => setCooldownModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <h2>Set Cooldown</h2>
+            <p>Prevent <strong>{cooldownModal.first_name} {cooldownModal.last_name}</strong> from being automatically scheduled for a number of days.</p>
+            <div className="form-group">
+              <label>Days</label>
+              <input type="number" min={1} value={cooldownDays} onChange={e => setCooldownDays(Number(e.target.value))} />
+              {cooldownDays > 0 && (
+                <small style={{ color: '#666', marginTop: '0.25rem', display: 'block' }}>
+                  Until {new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toLocaleDateString()}
+                </small>
+              )}
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-outline" onClick={() => setCooldownModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSetCooldown} disabled={cooldownDays < 1}>Set Cooldown</button>
+            </div>
           </div>
         </div>
       )}

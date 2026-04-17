@@ -29,6 +29,7 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
     SELECT * FROM students
     WHERE active = 1
       AND ('|' || preferred_days || '|') LIKE '%|' || ? || '|%'
+      AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))
       AND id NOT IN (${alreadyInvited.map(() => '?').join(',')})
       AND id NOT IN (
         SELECT inv.student_id FROM invitations inv

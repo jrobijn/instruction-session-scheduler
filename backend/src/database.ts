@@ -285,6 +285,12 @@ export function initializeDatabase(): void {
       ALTER TABLE invitations_new RENAME TO invitations;
     `);
   }
+
+  // Add cooldown_until column to students if missing
+  const studentCols3 = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
+  if (!studentCols3.some(c => c.name === 'cooldown_until')) {
+    db.exec('ALTER TABLE students ADD COLUMN cooldown_until TEXT');
+  }
 }
 
 export default db;

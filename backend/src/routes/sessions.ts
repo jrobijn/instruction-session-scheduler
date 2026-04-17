@@ -221,6 +221,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     SELECT s.* FROM students s
     WHERE s.active = 1
       AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
+      AND (s.cooldown_until IS NULL OR s.cooldown_until <= datetime('now'))
       AND s.id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
