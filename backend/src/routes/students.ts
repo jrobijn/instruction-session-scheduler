@@ -83,6 +83,8 @@ router.post('/import', (req: Request, res: Response) => {
   const errors: string[] = [];
 
   const insertOrUpdate = db.transaction(() => {
+    const defaultGroup = db.prepare("SELECT id FROM groups WHERE is_default = 1").get() as { id: number } | undefined;
+
     for (let i = 1; i < lines.length; i++) {
       const fields = parseCsvLine(lines[i]);
       const first_name = fields[firstNameIdx]?.trim();
@@ -99,8 +101,14 @@ router.post('/import', (req: Request, res: Response) => {
         const existing = db.prepare('SELECT id FROM students WHERE email = ?').get(email) as { id: number } | undefined;
         if (existing) {
           db.prepare('UPDATE students SET first_name = ?, last_name = ? WHERE id = ?').run(first_name, last_name, existing.id);
+          if (defaultGroup) {
+            db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(existing.id, defaultGroup.id);
+          }
         } else {
-          db.prepare('INSERT INTO students (first_name, last_name, email) VALUES (?, ?, ?)').run(first_name, last_name, email);
+          const result = db.prepare('INSERT INTO students (first_name, last_name, email) VALUES (?, ?, ?)').run(first_name, last_name, email);
+          if (defaultGroup) {
+            db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(result.lastInsertRowid, defaultGroup.id);
+          }
         }
         imported++;
       } catch (err: any) {
