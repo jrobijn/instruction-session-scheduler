@@ -63,7 +63,6 @@ export default function SessionDetailPage() {
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [allInstructors, setAllInstructors] = useState<Instructor[]>([]);
   const [allTimetables, setAllTimetables] = useState<TimetableInfo[]>([]);
-  const [selectedInstructor, setSelectedInstructor] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
@@ -139,17 +138,6 @@ export default function SessionDetailPage() {
   const removeInvitation = async (invitationId: number) => {
     try {
       await api.removeSessionInvitation(Number(id), invitationId);
-      load();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  const assignInstructor = async () => {
-    if (!selectedInstructor) return;
-    try {
-      await api.assignInstructor(Number(id), Number(selectedInstructor));
-      setSelectedInstructor('');
       load();
     } catch (err: any) {
       alert(err.message);
@@ -323,14 +311,22 @@ export default function SessionDetailPage() {
       <div className="card" style={{ marginBottom: '2rem' }}>
         <h2>{t.instructorsCount(session.instructors.length)}</h2>
         {session.status === 'draft' && (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-            <select value={selectedInstructor} onChange={e => setSelectedInstructor(e.target.value)}>
+          <div style={{ marginBottom: '1rem' }}>
+            <select value="" onChange={async e => {
+              const val = e.target.value;
+              if (!val) return;
+              try {
+                await api.assignInstructor(Number(id), Number(val));
+                load();
+              } catch (err: any) {
+                alert(err.message);
+              }
+            }}>
               <option value="">{t.selectInstructor}</option>
               {availableInstructors.map(i => (
                 <option key={i.id} value={i.id}>{i.first_name} {i.last_name}</option>
               ))}
             </select>
-            <button className="btn btn-primary" onClick={assignInstructor} disabled={!selectedInstructor}>{t.assign}</button>
           </div>
         )}
         {session.instructors.length === 0 ? (
