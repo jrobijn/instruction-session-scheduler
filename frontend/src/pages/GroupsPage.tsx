@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import ActionDropdown from '../components/ActionDropdown';
 
 interface Group {
   id: number;
@@ -200,17 +201,13 @@ export default function GroupsPage() {
                   </span>
                 </td>
                 <td>
-                  <div className="btn-group">
-                    {!g.is_default && (
-                      <>
-                        <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); openEdit(g); }}>Edit</button>
-                        <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); toggleActive(g); }}>
-                          {g.active ? 'Deactivate' : 'Activate'}
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={e => { e.stopPropagation(); handleDelete(g); }}>Delete</button>
-                      </>
-                    )}
-                  </div>
+                  {!g.is_default && (
+                    <ActionDropdown actions={[
+                      { label: 'Edit', onClick: () => openEdit(g) },
+                      { label: g.active ? 'Deactivate' : 'Activate', onClick: () => toggleActive(g) },
+                      { label: 'Delete', onClick: () => handleDelete(g), danger: true },
+                    ]} />
+                  )}
                 </td>
               </tr>
             ))}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ActionDropdown from '../components/ActionDropdown';
 import DatePicker from 'react-datepicker';
 import { api } from '../api';
 
@@ -134,12 +135,10 @@ export default function SessionsPage() {
                 <td>{s.instructor_count}</td>
                 <td>{s.invitation_count}</td>
                 <td>
-                  <div className="btn-group">
-                    <button className="btn btn-outline btn-sm" onClick={(ev) => { ev.stopPropagation(); navigate(`/sessions/${s.id}`); }}>View</button>
-                    {s.status === 'draft' && (
-                      <button className="btn btn-danger btn-sm" onClick={(ev) => { ev.stopPropagation(); handleDelete(s.id); }}>Delete</button>
-                    )}
-                  </div>
+                  <ActionDropdown actions={[
+                    { label: 'View', onClick: () => navigate(`/sessions/${s.id}`) },
+                    ...(s.status === 'draft' ? [{ label: 'Delete', onClick: () => handleDelete(s.id), danger: true }] : []),
+                  ]} />
                 </td>
               </tr>
             ))}

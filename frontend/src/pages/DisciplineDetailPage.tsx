@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import ActionDropdown from '../components/ActionDropdown';
 
 interface DisciplineInfo {
   id: number;
@@ -187,7 +188,9 @@ export default function DisciplineDetailPage() {
                   </span>
                 </td>
                 <td>
-                  <button className="btn btn-danger btn-sm" onClick={() => handleRemove(g.id)}>Remove</button>
+                  <ActionDropdown actions={[
+                    { label: 'Remove', onClick: () => handleRemove(g.id), danger: true },
+                  ]} />
                 </td>
               </tr>
             ))}
