@@ -285,4 +285,32 @@ router.put('/:id/groups', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// ===== Cooldowns =====
+
+// Set cooldown for a student (days from now)
+router.put('/:id/cooldown', (req: Request, res: Response) => {
+  const { days } = req.body;
+  if (typeof days !== 'number' || days <= 0) { res.status(400).json({ error: 'A positive number of days is required' }); return; }
+
+  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
+
+  const cooldownUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
+  db.prepare('UPDATE students SET cooldown_until = ? WHERE id = ?').run(cooldownUntil, req.params.id);
+
+  const updated = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+  res.json(updated);
+});
+
+// Clear cooldown for a student
+router.delete('/:id/cooldown', (req: Request, res: Response) => {
+  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
+
+  db.prepare('UPDATE students SET cooldown_until = NULL WHERE id = ?').run(req.params.id);
+
+  const updated = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+  res.json(updated);
+});
+
 export default router;
