@@ -86,6 +86,7 @@ export default function InvitationPage() {
             <span className={`badge ${
               invitation.status === 'confirmed' ? 'badge-confirmed' :
               invitation.status === 'declined' ? 'badge-declined' :
+              invitation.status === 'expired' ? 'badge-declined' :
               'badge-pending'
             }`}>
               {invitation.status}
@@ -102,6 +103,12 @@ export default function InvitationPage() {
         {actionDone === 'declined' && (
           <div className="alert alert-error">
             You have declined this invitation. Another student will be invited in your place.
+          </div>
+        )}
+
+        {invitation.status === 'expired' && !actionDone && (
+          <div className="alert alert-error">
+            This invitation has expired. Another student has been invited in your place.
           </div>
         )}
 

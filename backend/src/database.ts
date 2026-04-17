@@ -81,7 +81,7 @@ export function initializeDatabase(): void {
       timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
       instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
-      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined')),
+      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired')),
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
       group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
@@ -138,6 +138,8 @@ export function initializeDatabase(): void {
     INSERT OR IGNORE INTO settings (key, value) VALUES ('club_name', 'Sports Club');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_email_subject', 'You are invited to a coaching session!');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('club_days', '0|1|2|3|4|5|6');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_expiry_minutes', '120');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_check_interval_minutes', '15');
   `);
 
   // Migrations for existing databases
@@ -258,6 +260,31 @@ export function initializeDatabase(): void {
 
   // Ensure default group has the correct color
   db.exec("UPDATE groups SET color = '#565656' WHERE is_default = 1 AND color IN ('#3b82f6', '#232323')");
+
+  // Migrate invitations CHECK constraint to include 'expired' status
+  const checkInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invitations'").get() as { sql: string } | undefined;
+  if (checkInfo && !checkInfo.sql.includes("'expired'")) {
+    db.exec(`
+      CREATE TABLE invitations_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
+        instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
+        token TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired')),
+        discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
+        group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+        email_sent INTEGER NOT NULL DEFAULT 0,
+        no_show INTEGER NOT NULL DEFAULT 0,
+        invited_at TEXT NOT NULL DEFAULT (datetime('now')),
+        responded_at TEXT
+      );
+      INSERT INTO invitations_new SELECT * FROM invitations;
+      DROP TABLE invitations;
+      ALTER TABLE invitations_new RENAME TO invitations;
+    `);
+  }
 }
 
 export default db;
