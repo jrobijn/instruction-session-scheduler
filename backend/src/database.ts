@@ -20,6 +20,7 @@ export function initializeDatabase(): void {
       email TEXT NOT NULL UNIQUE,
       attended_sessions INTEGER NOT NULL DEFAULT 0,
       no_show_count INTEGER NOT NULL DEFAULT 0,
+      priority INTEGER NOT NULL DEFAULT 1,
       preferred_days TEXT NOT NULL DEFAULT '0|1|2|3|4|5|6',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -290,6 +291,18 @@ export function initializeDatabase(): void {
   const studentCols3 = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
   if (!studentCols3.some(c => c.name === 'cooldown_until')) {
     db.exec('ALTER TABLE students ADD COLUMN cooldown_until TEXT');
+  }
+
+  // Add priority column to students if missing
+  const studentCols4 = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
+  if (!studentCols4.some(c => c.name === 'priority')) {
+    db.exec('ALTER TABLE students ADD COLUMN priority INTEGER NOT NULL DEFAULT 1');
+    // Backfill: set priority = attended_sessions + 1, then normalize so min = 1
+    db.exec('UPDATE students SET priority = attended_sessions + 1');
+    const minP = (db.prepare('SELECT MIN(priority) AS m FROM students').get() as any)?.m || 1;
+    if (minP > 1) {
+      db.exec(`UPDATE students SET priority = priority - ${minP - 1}`);
+    }
   }
 }
 

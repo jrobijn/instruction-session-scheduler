@@ -32,9 +32,9 @@ router.get('/', (_req: Request, res: Response) => {
 
 // Export students as CSV
 router.get('/export', (_req: Request, res: Response) => {
-  const students = db.prepare('SELECT first_name, last_name, email, attended_sessions, no_show_count, preferred_days, active FROM students ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; attended_sessions: number; no_show_count: number; preferred_days: string; active: number }[];
-  const header = 'first_name,last_name,email,attended_sessions,no_show_count,preferred_days,active';
-  const rows = students.map(s => [s.first_name, s.last_name, s.email, s.attended_sessions, s.no_show_count, s.preferred_days, s.active].map(escapeCsvField).join(','));
+  const students = db.prepare('SELECT first_name, last_name, email, attended_sessions, no_show_count, priority, preferred_days, active FROM students ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; attended_sessions: number; no_show_count: number; priority: number; preferred_days: string; active: number }[];
+  const header = 'first_name,last_name,email,attended_sessions,no_show_count,priority,preferred_days,active';
+  const rows = students.map(s => [s.first_name, s.last_name, s.email, s.attended_sessions, s.no_show_count, s.priority, s.preferred_days, s.active].map(escapeCsvField).join(','));
   const csv = [header, ...rows].join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="students.csv"');

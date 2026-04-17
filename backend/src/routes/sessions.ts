@@ -227,7 +227,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
         JOIN training_sessions ts ON ts.id = inv.session_id
         WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired')
       )
-    ORDER BY s.attended_sessions ASC, s.last_name ASC, s.first_name ASC
+    ORDER BY s.priority ASC, s.last_name ASC, s.first_name ASC
   `).all(sessionDow, session.date) as any[];
 
   // Load group memberships for all students
@@ -513,7 +513,7 @@ router.post('/:id/complete', (req: Request, res: Response) => {
     WHERE session_id = ? AND status = 'confirmed'
   `).all(req.params.id) as Array<{ student_id: number; no_show: number }>;
 
-  const updateAttended = db.prepare('UPDATE students SET attended_sessions = attended_sessions + 1 WHERE id = ?');
+  const updateAttended = db.prepare('UPDATE students SET attended_sessions = attended_sessions + 1, priority = priority + 1 WHERE id = ?');
   const updateNoShow = db.prepare('UPDATE students SET no_show_count = no_show_count + 1 WHERE id = ?');
   const completeTransaction = db.transaction(() => {
     for (const { student_id, no_show } of confirmedStudents) {
@@ -522,6 +522,11 @@ router.post('/:id/complete', (req: Request, res: Response) => {
       } else {
         updateAttended.run(student_id);
       }
+    }
+    // Normalize priorities so the minimum (excluding cooled-down students) is always 1
+    const minPriority = (db.prepare('SELECT MIN(priority) AS m FROM students WHERE active = 1 AND (cooldown_until IS NULL OR cooldown_until <= datetime(\'now\'))').get() as any)?.m || 1;
+    if (minPriority > 1) {
+      db.prepare('UPDATE students SET priority = MAX(1, priority - ?) WHERE active = 1').run(minPriority - 1);
     }
     db.prepare("UPDATE training_sessions SET status = 'completed' WHERE id = ?").run(req.params.id);
   });
