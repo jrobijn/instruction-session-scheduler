@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import ActionDropdown from '../components/ActionDropdown';
 
 interface Timetable {
   id: number;
@@ -44,8 +45,8 @@ export default function TimetablesPage() {
     }
   };
 
-  const handleDelete = async (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = async (id: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!confirm('Are you sure you want to delete this timetable? Sessions using it may be affected.')) return;
     try {
       await api.deleteTimetable(id);
@@ -55,8 +56,8 @@ export default function TimetablesPage() {
     }
   };
 
-  const handleToggleActive = async (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleToggleActive = async (id: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       await api.toggleTimetableActive(id);
       load();
@@ -65,8 +66,8 @@ export default function TimetablesPage() {
     }
   };
 
-  const handleSetDefault = async (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleSetDefault = async (id: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       await api.setDefaultTimetable(id);
       load();
@@ -119,16 +120,12 @@ export default function TimetablesPage() {
                   </span>
                 </td>
                 <td>
-                  <div className="btn-group">
-                    <button className="btn btn-outline btn-sm" onClick={(e) => { e.stopPropagation(); navigate(`/timetables/${t.id}`); }}>View</button>
-                    {t.status === 'saved' && t.active && !t.is_default && (
-                      <button className="btn btn-outline btn-sm" onClick={(e) => handleSetDefault(t.id, e)}>Set Default</button>
-                    )}
-                    <button className="btn btn-outline btn-sm" onClick={(e) => handleToggleActive(t.id, e)}>
-                      {t.active ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button className="btn btn-danger btn-sm" onClick={(e) => handleDelete(t.id, e)}>Delete</button>
-                  </div>
+                  <ActionDropdown actions={[
+                    { label: 'View', onClick: () => navigate(`/timetables/${t.id}`) },
+                    ...(t.status === 'saved' && t.active && !t.is_default ? [{ label: 'Set Default', onClick: () => handleSetDefault(t.id) }] : []),
+                    { label: t.active ? 'Deactivate' : 'Activate', onClick: () => handleToggleActive(t.id) },
+                    { label: 'Delete', onClick: () => handleDelete(t.id), danger: true },
+                  ]} />
                 </td>
               </tr>
             ))}

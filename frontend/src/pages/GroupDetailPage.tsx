@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import ActionDropdown from '../components/ActionDropdown';
 
 interface GroupDetail {
   id: number;
@@ -199,7 +200,9 @@ export default function GroupDetailPage() {
                 </td>
                 {!group.is_default && (
                   <td>
-                    <button className="btn btn-danger btn-sm" onClick={() => handleRemoveMember(m.id)}>Remove</button>
+                    <ActionDropdown actions={[
+                      { label: 'Remove', onClick: () => handleRemoveMember(m.id), danger: true },
+                    ]} />
                   </td>
                 )}
               </tr>

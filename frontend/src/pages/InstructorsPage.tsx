@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { api } from '../api';
+import ActionDropdown from '../components/ActionDropdown';
 
 interface Instructor {
   id: number;
@@ -180,13 +181,11 @@ export default function InstructorsPage() {
                   </span>
                 </td>
                 <td>
-                  <div className="btn-group">
-                    <button className="btn btn-outline btn-sm" onClick={() => openEdit(i)}>Edit</button>
-                    <button className="btn btn-outline btn-sm" onClick={() => toggleActive(i)}>
-                      {i.active ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(i.id)}>Delete</button>
-                  </div>
+                  <ActionDropdown actions={[
+                    { label: 'Edit', onClick: () => openEdit(i) },
+                    { label: i.active ? 'Deactivate' : 'Activate', onClick: () => toggleActive(i) },
+                    { label: 'Delete', onClick: () => handleDelete(i.id), danger: true },
+                  ]} />
                 </td>
               </tr>
             ))}

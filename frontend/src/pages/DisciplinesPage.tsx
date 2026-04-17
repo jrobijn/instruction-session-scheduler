@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import ActionDropdown from '../components/ActionDropdown';
 
 interface Discipline {
   id: number;
@@ -197,13 +198,11 @@ export default function DisciplinesPage() {
                   </span>
                 </td>
                 <td>
-                  <div className="btn-group">
-                    <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); openEdit(d); }}>Edit</button>
-                    <button className="btn btn-outline btn-sm" onClick={e => { e.stopPropagation(); toggleActive(d); }}>
-                      {d.active ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button className="btn btn-danger btn-sm" onClick={e => { e.stopPropagation(); handleDelete(d.id); }}>Delete</button>
-                  </div>
+                  <ActionDropdown actions={[
+                    { label: 'Edit', onClick: () => openEdit(d) },
+                    { label: d.active ? 'Deactivate' : 'Activate', onClick: () => toggleActive(d) },
+                    { label: 'Delete', onClick: () => handleDelete(d.id), danger: true },
+                  ]} />
                 </td>
               </tr>
             ))}
