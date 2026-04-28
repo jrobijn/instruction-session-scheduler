@@ -18,6 +18,7 @@ export function initializeDatabase(): void {
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
+      membership_id TEXT NOT NULL DEFAULT '',
       attended_sessions INTEGER NOT NULL DEFAULT 0,
       no_show_count INTEGER NOT NULL DEFAULT 0,
       priority INTEGER NOT NULL DEFAULT 1,
@@ -64,6 +65,7 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS disciplines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
+      abbreviation TEXT NOT NULL DEFAULT '',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -257,6 +259,18 @@ export function initializeDatabase(): void {
   const invCols = db.prepare("PRAGMA table_info(invitations)").all() as Array<{ name: string }>;
   if (!invCols.some(c => c.name === 'group_id')) {
     db.exec('ALTER TABLE invitations ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL');
+  }
+
+  // Add membership_id column to students if missing
+  const studentColsMid = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
+  if (!studentColsMid.some(c => c.name === 'membership_id')) {
+    db.exec("ALTER TABLE students ADD COLUMN membership_id TEXT NOT NULL DEFAULT ''");
+  }
+
+  // Add abbreviation column to disciplines if missing
+  const discCols = db.prepare("PRAGMA table_info(disciplines)").all() as Array<{ name: string }>;
+  if (!discCols.some(c => c.name === 'abbreviation')) {
+    db.exec("ALTER TABLE disciplines ADD COLUMN abbreviation TEXT NOT NULL DEFAULT ''");
   }
 
   // Ensure default group has the correct color

@@ -40,8 +40,8 @@ router.get('/:id', (req: Request, res: Response) => {
   }
 
   const invitations = db.prepare(`
-    SELECT inv.*, inv.no_show, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.attended_sessions,
-           d.name AS discipline_name, ts.start_time AS timeslot_start_time,
+    SELECT inv.*, inv.no_show, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.membership_id AS student_membership_id, s.attended_sessions,
+           d.name AS discipline_name, d.abbreviation AS discipline_abbreviation, ts.start_time AS timeslot_start_time,
            i.first_name || ' ' || i.last_name AS instructor_name,
            g.name AS group_name, g.color AS group_color
     FROM invitations inv

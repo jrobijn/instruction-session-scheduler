@@ -7,6 +7,7 @@ import { useT } from '../i18n';
 interface DisciplineInfo {
   id: number;
   name: string;
+  abbreviation: string;
   active: number;
 }
 

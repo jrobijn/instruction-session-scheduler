@@ -32,9 +32,9 @@ router.get('/', (_req: Request, res: Response) => {
 
 // Export students as CSV
 router.get('/export', (_req: Request, res: Response) => {
-  const students = db.prepare('SELECT first_name, last_name, email, attended_sessions, no_show_count, priority, preferred_days, active FROM students ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; attended_sessions: number; no_show_count: number; priority: number; preferred_days: string; active: number }[];
-  const header = 'first_name,last_name,email,attended_sessions,no_show_count,priority,preferred_days,active';
-  const rows = students.map(s => [s.first_name, s.last_name, s.email, s.attended_sessions, s.no_show_count, s.priority, s.preferred_days, s.active].map(escapeCsvField).join(','));
+  const students = db.prepare('SELECT first_name, last_name, email, membership_id, attended_sessions, no_show_count, priority, preferred_days, active FROM students ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; membership_id: string; attended_sessions: number; no_show_count: number; priority: number; preferred_days: string; active: number }[];
+  const header = 'first_name,last_name,email,membership_id,attended_sessions,no_show_count,priority,preferred_days,active';
+  const rows = students.map(s => [s.first_name, s.last_name, s.email, s.membership_id, s.attended_sessions, s.no_show_count, s.priority, s.preferred_days, s.active].map(escapeCsvField).join(','));
   const csv = [header, ...rows].join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="students.csv"');
@@ -53,6 +53,7 @@ router.post('/import', (req: Request, res: Response) => {
   const firstNameIdx = header.indexOf('first_name');
   const lastNameIdx = header.indexOf('last_name');
   const emailIdx = header.indexOf('email');
+  const membershipIdIdx = header.indexOf('membership_id');
 
   if (firstNameIdx === -1 || lastNameIdx === -1 || emailIdx === -1) {
     res.status(400).json({ error: 'CSV must contain first_name, last_name, and email columns' }); return;
@@ -90,6 +91,7 @@ router.post('/import', (req: Request, res: Response) => {
       const first_name = fields[firstNameIdx]?.trim();
       const last_name = fields[lastNameIdx]?.trim();
       const email = fields[emailIdx]?.trim();
+      const membership_id = membershipIdIdx !== -1 ? (fields[membershipIdIdx]?.trim() || '') : '';
 
       if (!first_name || !last_name || !email) {
         errors.push(`Row ${i + 1}: missing required fields`);
@@ -100,12 +102,12 @@ router.post('/import', (req: Request, res: Response) => {
       try {
         const existing = db.prepare('SELECT id FROM students WHERE email = ?').get(email) as { id: number } | undefined;
         if (existing) {
-          db.prepare('UPDATE students SET first_name = ?, last_name = ? WHERE id = ?').run(first_name, last_name, existing.id);
+          db.prepare('UPDATE students SET first_name = ?, last_name = ?, membership_id = ? WHERE id = ?').run(first_name, last_name, membership_id, existing.id);
           if (defaultGroup) {
             db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(existing.id, defaultGroup.id);
           }
         } else {
-          const result = db.prepare('INSERT INTO students (first_name, last_name, email) VALUES (?, ?, ?)').run(first_name, last_name, email);
+          const result = db.prepare('INSERT INTO students (first_name, last_name, email, membership_id) VALUES (?, ?, ?, ?)').run(first_name, last_name, email, membership_id);
           if (defaultGroup) {
             db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(result.lastInsertRowid, defaultGroup.id);
           }
@@ -131,11 +133,11 @@ router.get('/:id', (req: Request, res: Response) => {
 
 // Create student
 router.post('/', (req: Request, res: Response) => {
-  const { first_name, last_name, email } = req.body;
+  const { first_name, last_name, email, membership_id } = req.body;
   if (!first_name || !last_name || !email) { res.status(400).json({ error: 'First name, last name and email are required' }); return; }
 
   try {
-    const result = db.prepare('INSERT INTO students (first_name, last_name, email) VALUES (?, ?, ?)').run(first_name, last_name, email);
+    const result = db.prepare('INSERT INTO students (first_name, last_name, email, membership_id) VALUES (?, ?, ?, ?)').run(first_name, last_name, email, membership_id || '');
     const studentId = result.lastInsertRowid;
     // Auto-add to default group
     const defaultGroup = db.prepare("SELECT id FROM groups WHERE is_default = 1").get() as { id: number } | undefined;
@@ -155,7 +157,7 @@ router.post('/', (req: Request, res: Response) => {
 
 // Update student
 router.put('/:id', (req: Request, res: Response) => {
-  const { first_name, last_name, email, attended_sessions, active, preferred_days } = req.body;
+  const { first_name, last_name, email, membership_id, attended_sessions, active, preferred_days } = req.body;
   const student = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
@@ -165,11 +167,12 @@ router.put('/:id', (req: Request, res: Response) => {
         first_name = COALESCE(?, first_name),
         last_name = COALESCE(?, last_name),
         email = COALESCE(?, email),
+        membership_id = COALESCE(?, membership_id),
         attended_sessions = COALESCE(?, attended_sessions),
         active = COALESCE(?, active),
         preferred_days = COALESCE(?, preferred_days)
       WHERE id = ?
-    `).run(first_name ?? null, last_name ?? null, email ?? null, attended_sessions ?? null, active ?? null, preferred_days ?? null, req.params.id);
+    `).run(first_name ?? null, last_name ?? null, email ?? null, membership_id ?? null, attended_sessions ?? null, active ?? null, preferred_days ?? null, req.params.id);
 
     const updated = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
     res.json(updated);
