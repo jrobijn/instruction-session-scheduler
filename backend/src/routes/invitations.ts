@@ -5,6 +5,16 @@ import { sendInvitationEmail } from '../email.js';
 
 const router = Router();
 
+// Normalize priorities so the minimum active student has priority 1
+function normalizePriorities() {
+  const minPriority = (db.prepare(
+    "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
+  ).get() as any)?.m;
+  if (minPriority != null && minPriority !== 1) {
+    db.prepare('UPDATE students SET priority = priority - ?').run(minPriority - 1);
+  }
+}
+
 // Shared helper: find and invite a replacement student for a vacated slot
 async function findAndInviteReplacement(invitation: any): Promise<{ name: string; email: string } | null> {
   const alreadyInvited = (db.prepare(`
@@ -59,6 +69,10 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
   const token = crypto.randomUUID();
   db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, group_id, token) VALUES (?, ?, ?, ?, ?, ?)')
     .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.instructor_id, originalGroupId, token);
+
+  // Increment priority for the replacement student
+  db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?').run(replacementStudent.id);
+  normalizePriorities();
 
   try {
     const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
@@ -147,6 +161,10 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
     UPDATE invitations SET status = 'declined', responded_at = datetime('now') WHERE id = ?
   `).run(invitation.id);
 
+  // Reverse the priority increase that was applied when this student was invited
+  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
+  normalizePriorities();
+
   const replacement = await findAndInviteReplacement(invitation);
 
   res.json({
@@ -176,6 +194,9 @@ export async function processExpiredInvitations(): Promise<number> {
 
   for (const inv of expired) {
     db.prepare("UPDATE invitations SET status = 'expired', responded_at = datetime('now') WHERE id = ?").run(inv.id);
+    // Reverse the priority increase that was applied when this student was invited
+    db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
+    normalizePriorities();
     await findAndInviteReplacement(inv);
   }
 
