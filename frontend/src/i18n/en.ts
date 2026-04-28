@@ -39,6 +39,7 @@ const en = {
   navInstructors: 'Instructors',
   navDisciplines: 'Disciplines',
   navGroups: 'Groups',
+  navBuddyGroups: 'Buddies',
   navSettings: 'Settings',
   logout: 'Logout',
 
@@ -128,6 +129,24 @@ const en = {
   confirmRemoveMember: 'Remove this student from the group?',
   groupNotFound: 'Group not found',
   groupNotFoundText: 'Group not found.',
+
+  // Buddy groups
+  buddyGroupsTitle: (count: number) => `Buddy Groups (${count})`,
+  addBuddyGroupButton: '+ Add Buddy Group',
+  noBuddyGroupsYet: 'No buddy groups yet',
+  noBuddyGroupsHint: 'Create buddy groups to schedule students together at nearby timeslots.',
+  confirmDeleteBuddyGroup: (name: string) => `Are you sure you want to delete the buddy group "${name}"?`,
+  editBuddyGroup: 'Edit Buddy Group',
+  addBuddyGroupTitle: 'Add Buddy Group',
+
+  // Buddy group detail
+  backToBuddyGroups: '← Back to Buddy Groups',
+  buddyGroupMemberCount: (n: number) => `${n} member(s)`,
+  noBuddyMembers: 'No members',
+  noBuddyMembersHint: 'Add students to this buddy group using the search above.',
+  confirmRemoveBuddyMember: 'Remove this student from the buddy group?',
+  buddyGroupNotFound: 'Buddy group not found',
+  buddyGroupNotFoundText: 'Buddy group not found.',
 
   // Sessions
   sessionsTitle: (count: number) => `Training Sessions (${count})`,

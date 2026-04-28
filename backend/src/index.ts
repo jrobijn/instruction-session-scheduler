@@ -15,6 +15,7 @@ import settingsRouter from './routes/settings.js';
 import { setCheckIntervalChangedCallback } from './routes/settings.js';
 import disciplinesRouter from './routes/disciplines.js';
 import groupsRouter from './routes/groups.js';
+import buddyGroupsRouter from './routes/buddyGroups.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -56,6 +57,7 @@ app.use('/api/timetables', requireAdmin, timetablesRouter);
 app.use('/api/settings', requireAdmin, settingsRouter);
 app.use('/api/disciplines', requireAdmin, disciplinesRouter);
 app.use('/api/groups', requireAdmin, groupsRouter);
+app.use('/api/buddy-groups', requireAdmin, buddyGroupsRouter);
 
 // Public routes
 app.use('/api/invitations', invitationsRouter);

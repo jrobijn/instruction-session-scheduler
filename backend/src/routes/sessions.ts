@@ -348,8 +348,28 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   const allTimeslotIds = new Set(timeslots.map((t: any) => t.id));
 
+  // Load buddy group memberships for buddy scheduling
+  const allBuddyMembers = db.prepare(
+    'SELECT bgm.buddy_group_id, bgm.student_id FROM buddy_group_members bgm'
+  ).all() as Array<{ buddy_group_id: number; student_id: number }>;
+  const buddiesByStudent = new Map<number, Set<number>>();
+  const buddyGroupMap = new Map<number, Set<number>>();
+  for (const m of allBuddyMembers) {
+    if (!buddyGroupMap.has(m.buddy_group_id)) buddyGroupMap.set(m.buddy_group_id, new Set());
+    buddyGroupMap.get(m.buddy_group_id)!.add(m.student_id);
+  }
+  for (const members of buddyGroupMap.values()) {
+    for (const sid of members) {
+      if (!buddiesByStudent.has(sid)) buddiesByStudent.set(sid, new Set());
+      for (const other of members) {
+        if (other !== sid) buddiesByStudent.get(sid)!.add(other);
+      }
+    }
+  }
+
   // Helper: assign a student to the best available slot
-  function assignStudent(student: any, sessionId: string, groupId: number | null): any | null {
+  // nearTimeslotIdx: optional hint to prefer slots near this timeslot index (for buddy scheduling)
+  function assignStudent(student: any, sessionId: string, groupId: number | null, nearTimeslotIdx?: number): any | null {
     const storedPrefs = prefsByStudent.get(student.id);
     const preferredIds = storedPrefs && storedPrefs.size > 0 ? storedPrefs : allTimeslotIds;
 
@@ -366,10 +386,39 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
     let assignedIdx = -1;
 
-    for (let i = 0; i < slotGrid.length; i++) {
-      if (slotAvailable[i] && preferredIndices.has(slotGrid[i].timeslotIdx)) {
-        assignedIdx = i;
-        break;
+    // If nearTimeslotIdx is set (buddy scheduling), prefer slots at same or adjacent timeslot
+    // but only among the student's own preferred timeslots
+    if (nearTimeslotIdx !== undefined) {
+      const nearIndices = new Set<number>();
+      nearIndices.add(nearTimeslotIdx);
+      if (nearTimeslotIdx > 0) nearIndices.add(nearTimeslotIdx - 1);
+      if (nearTimeslotIdx < timeslots.length - 1) nearIndices.add(nearTimeslotIdx + 1);
+
+      // Try: near AND preferred
+      for (let i = 0; i < slotGrid.length; i++) {
+        if (slotAvailable[i] && nearIndices.has(slotGrid[i].timeslotIdx) && preferredIndices.has(slotGrid[i].timeslotIdx)) {
+          assignedIdx = i;
+          break;
+        }
+      }
+      // Try: near (even if not in student's preferred, buddy proximity is soft)
+      if (assignedIdx === -1) {
+        for (let i = 0; i < slotGrid.length; i++) {
+          if (slotAvailable[i] && nearIndices.has(slotGrid[i].timeslotIdx)) {
+            assignedIdx = i;
+            break;
+          }
+        }
+      }
+    }
+
+    // Standard 3-pass fallback: preferred → adjacent → any
+    if (assignedIdx === -1) {
+      for (let i = 0; i < slotGrid.length; i++) {
+        if (slotAvailable[i] && preferredIndices.has(slotGrid[i].timeslotIdx)) {
+          assignedIdx = i;
+          break;
+        }
       }
     }
 
@@ -397,7 +446,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     const slot = slotGrid[assignedIdx];
     const token = crypto.randomUUID();
     insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.id, token, groupId);
-    return { ...student, token, timeslot_id: slot.timeslot.id, instructor_id: slot.instructor.id, start_time: slot.timeslot.start_time, group_id: groupId };
+    return { ...student, token, timeslot_id: slot.timeslot.id, instructor_id: slot.instructor.id, start_time: slot.timeslot.start_time, group_id: groupId, timeslotIdx: slot.timeslotIdx };
   }
 
   const insertInvitation = db.prepare(`
@@ -413,14 +462,33 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     for (const gsc of sortedGroups) {
       const groupStudents = studentsByGroup.get(gsc.group_id) || [];
       let groupSlotsUsed = 0;
+      const processedInGroup = new Set<number>();
 
       for (const student of groupStudents) {
+        if (processedInGroup.has(student.id)) continue;
         if (groupSlotsUsed >= gsc.slots) break;
         const result = assignStudent(student, req.params.id as string, gsc.group_id);
         if (!result) break; // No more slots globally
         invited.push(result);
         invitedStudentIds.add(student.id);
+        processedInGroup.add(student.id);
         groupSlotsUsed++;
+
+        // Try to schedule buddies from the same timetable group near the same timeslot
+        const buddyIds = buddiesByStudent.get(student.id);
+        if (buddyIds) {
+          for (const buddyStudent of groupStudents) {
+            if (!buddyIds.has(buddyStudent.id)) continue;
+            if (processedInGroup.has(buddyStudent.id)) continue;
+            if (groupSlotsUsed >= gsc.slots) break;
+            const buddyResult = assignStudent(buddyStudent, req.params.id as string, gsc.group_id, result.timeslotIdx);
+            if (!buddyResult) continue; // This buddy couldn't be placed, try others
+            invited.push(buddyResult);
+            invitedStudentIds.add(buddyStudent.id);
+            processedInGroup.add(buddyStudent.id);
+            groupSlotsUsed++;
+          }
+        }
       }
     }
 

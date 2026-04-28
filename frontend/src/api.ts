@@ -128,6 +128,16 @@ export const api = {
   getStudentGroups: (id: number) => request(`/students/${id}/groups`),
   setStudentGroups: (id: number, groupIds: number[]) => request(`/students/${id}/groups`, { method: 'PUT', body: JSON.stringify({ group_ids: groupIds }) }),
 
+  // Buddy groups
+  getBuddyGroups: () => request('/buddy-groups'),
+  createBuddyGroup: (data: { name: string }) => request('/buddy-groups', { method: 'POST', body: JSON.stringify(data) }),
+  updateBuddyGroup: (id: number, data: { name: string }) => request(`/buddy-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteBuddyGroup: (id: number) => request(`/buddy-groups/${id}`, { method: 'DELETE' }),
+  getBuddyGroupMembers: (id: number) => request(`/buddy-groups/${id}/members`),
+  addBuddyGroupMember: (groupId: number, studentId: number) => request(`/buddy-groups/${groupId}/members`, { method: 'POST', body: JSON.stringify({ student_id: studentId }) }),
+  removeBuddyGroupMember: (groupId: number, studentId: number) => request(`/buddy-groups/${groupId}/members/${studentId}`, { method: 'DELETE' }),
+  searchBuddyGroupNonMembers: (groupId: number, query: string) => request(`/buddy-groups/${groupId}/non-members?q=${encodeURIComponent(query)}`),
+
   // Timetable groups
   setTimetableGroups: (id: number, groups: Array<{ group_id: number; percentage: number }>) => request(`/timetables/${id}/groups`, { method: 'PUT', body: JSON.stringify({ groups }) }),
 

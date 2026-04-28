@@ -129,6 +129,18 @@ export function initializeDatabase(): void {
       PRIMARY KEY(discipline_id, group_id)
     );
 
+    CREATE TABLE IF NOT EXISTS buddy_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS buddy_group_members (
+      buddy_group_id INTEGER NOT NULL REFERENCES buddy_groups(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      PRIMARY KEY(buddy_group_id, student_id)
+    );
+
     -- Default group (all students belong to this)
     INSERT OR IGNORE INTO groups (name, priority, is_default, color) VALUES ('Default', 10000, 1, '#565656');
 
