@@ -77,11 +77,10 @@ export default function InvitationPage() {
 
   return (
     <div className="invitation-page">
-      <div className="card" style={{ maxWidth: 500, margin: '2rem auto', padding: '2rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-          <img src="/logo.png" alt="Logo" style={{ width: 64, height: 64, objectFit: 'contain' }} />
-          <h1 style={{ margin: 0 }}>{t.trainingInvitation}</h1>
-        </div>
+      <div className="card" style={{ maxWidth: 560, margin: '2rem auto', padding: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-start', justifyContent: 'center' }}>
+        <img src="/logo.png" alt="Logo" style={{ width: 128, height: 128, objectFit: 'contain', flexShrink: 0 }} />
+        <div style={{ flex: '1 1 280px' }}>
+        <h1 style={{ margin: '0 0 1.5rem 0' }}>{t.trainingInvitation}</h1>
 
         <div style={{ marginBottom: '1.5rem' }}>
           <p><strong>{t.studentLabel}</strong> {invitation.student_name}</p>
@@ -134,12 +133,13 @@ export default function InvitationPage() {
               <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm}>
                 {t.confirmAttendance}
               </button>
-              <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleDecline}>
+              <button className="btn btn-danger" style={{ flex: 1, textAlign: 'center' }} onClick={handleDecline}>
                 {t.decline}
               </button>
             </div>
           </>
         )}
+        </div>
       </div>
     </div>
   );
