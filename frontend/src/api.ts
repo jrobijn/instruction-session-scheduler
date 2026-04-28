@@ -145,6 +145,7 @@ export const api = {
   getInvitation: (token: string) => request(`/invitations/${token}`),
   confirmInvitation: (token: string, disciplineId: string | null) => request(`/invitations/${token}/confirm`, { method: 'POST', body: JSON.stringify({ discipline_id: disciplineId }) }),
   declineInvitation: (token: string) => request(`/invitations/${token}/decline`, { method: 'POST' }),
+  cancelInvitation: (token: string) => request(`/invitations/${token}/cancel`, { method: 'POST' }),
 
   // Public disciplines (no auth)
   getPublicDisciplines: () => request('/public/disciplines'),

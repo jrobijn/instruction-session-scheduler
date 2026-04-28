@@ -245,7 +245,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
       AND s.id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
-        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired')
+        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled')
       )
     ORDER BY s.priority ASC, s.last_name ASC, s.first_name ASC
   `).all(sessionDow, session.date) as any[];
@@ -551,6 +551,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
   const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
   const subject = (db.prepare("SELECT value FROM settings WHERE key = 'invitation_email_subject'").get() as any)?.value
     || 'You are invited to a coaching session!';
+  const emailLocale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
 
   let sent = 0;
   const errors: Array<{ student: string; error: string }> = [];
@@ -564,6 +565,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
         token: inv.token,
         clubName,
         subject,
+        locale: emailLocale,
       });
       db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE id = ?").run(inv.id);
       sent++;
@@ -680,7 +682,7 @@ router.post('/:id/invitations', (req: Request, res: Response) => {
 
   // Check slot is not occupied
   const slotTaken = db.prepare(
-    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND instructor_id = ? AND status NOT IN ('declined', 'expired')"
+    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND instructor_id = ? AND status NOT IN ('declined', 'expired', 'cancelled')"
   ).get(req.params.id, timeslot_id, instructor_id);
   if (slotTaken) { res.status(409).json({ error: 'This slot is already occupied' }); return; }
 
