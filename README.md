@@ -73,3 +73,49 @@ In-app settings (via Settings page):
 - **Backend**: Node.js, Express, SQLite (better-sqlite3), Nodemailer
 - **Frontend**: React (Vite), React Router
 - **Database**: SQLite (file-based, no separate DB server needed)
+
+## Docker
+
+### Build
+
+```bash
+docker build -t session-scheduler .
+```
+
+### Run
+
+```bash
+docker run -p 3000:3000 \
+  -v scheduler-data:/data \
+  -e ADMIN_PASSWORD=changeme \
+  session-scheduler
+```
+
+The app will be available at http://localhost:3000.
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ADMIN_PASSWORD` | Password for admin login | *(required)* |
+| `PORT` | Server port | `3000` |
+| `DB_PATH` | SQLite database file path | `/data/data.db` |
+| `SMTP_HOST` | SMTP server for sending emails | — |
+| `SMTP_PORT` | SMTP port | `587` |
+| `SMTP_SECURE` | Use TLS (true/false) | `false` |
+| `SMTP_USER` | SMTP username | — |
+| `SMTP_PASS` | SMTP password | — |
+| `SMTP_FROM` | From address for emails | — |
+| `FRONTEND_URL` | Base URL for links in emails | — |
+
+### Data Persistence
+
+The SQLite database is stored at `/data/data.db` inside the container. Mount a volume to persist data across container restarts:
+
+```bash
+# Named volume (recommended)
+docker run -v scheduler-data:/data ...
+
+# Bind mount to a host directory
+docker run -v /path/on/host:/data ...
+```

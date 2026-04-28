@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { initializeDatabase } from './database.js';
 import db from './database.js';
 import { initializeMailer } from './email.js';
@@ -98,6 +100,14 @@ app.get('/api/public/disciplines/:token', (req: Request, res: Response) => {
 
 // Health check
 app.get('/api/health', (_req: Request, res: Response) => res.json({ status: 'ok' }));
+
+// Serve frontend static files in production
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.join(__dirname, '..', 'public');
+app.use(express.static(publicDir));
+app.get('*', (_req: Request, res: Response) => {
+  res.sendFile(path.join(publicDir, 'index.html'));
+});
 
 // Initialize and start
 initializeDatabase();
