@@ -296,6 +296,13 @@ const nl: Translations = {
   invitationExpiredMsg: 'Deze uitnodiging is verlopen. Een andere leerling is in jouw plaats uitgenodigd.',
   invitationCancelledMsg: 'Je deelname is geannuleerd. Een andere leerling wordt in jouw plaats uitgenodigd.',
   cancelParticipation: 'Deelname annuleren',
+  confirmPromptConfirm: 'Weet je zeker dat je je aanwezigheid wilt bevestigen?',
+  confirmPromptDecline: 'Weet je zeker dat je deze uitnodiging wilt afwijzen?',
+  confirmPromptCancel: 'Weet je zeker dat je je deelname wilt annuleren?',
+  yesConfirm: 'Ja, bevestigen',
+  yesDecline: 'Ja, afwijzen',
+  yesCancel: 'Ja, annuleren',
+  goBack: 'Terug',
   invitationNotFound: 'Uitnodiging niet gevonden.',
 };
 
