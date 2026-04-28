@@ -74,6 +74,13 @@ export default function SessionDetailPage() {
   const [showStudentDropdown, setShowStudentDropdown] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const logoRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.src = '/logo.png';
+    img.onload = () => { logoRef.current = img; };
+  }, []);
 
   const load = async () => {
     try {
@@ -264,8 +271,18 @@ export default function SessionDetailPage() {
   const exportPdf = () => {
     const doc = new jsPDF({ orientation: 'landscape' });
     const dateStr = formatDate(session.date);
+
+    // Add logo
+    if (logoRef.current) {
+      try {
+        doc.addImage(logoRef.current, 'PNG', 14, 10, 16, 16);
+      } catch {
+        // logo failed, continue without
+      }
+    }
+
     doc.setFontSize(16);
-    doc.text(t.pdfTitle(dateStr), 14, 20);
+    doc.text(t.pdfTitle(dateStr), 34, 22);
 
     const boxSize = 3.5;
     const boxPad = 2;

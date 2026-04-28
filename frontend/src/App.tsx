@@ -32,7 +32,10 @@ function AdminLayout() {
   return (
     <div className="app">
       <nav>
-        <NavLink to="/sessions" className="logo">{t.appTitle}</NavLink>
+        <NavLink to="/sessions" className="logo" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <img src="/logo.png" alt="Logo" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
+          {t.appTitle}
+        </NavLink>
         <NavLink to="/sessions">{t.navSchedule}</NavLink>
         <NavLink to="/timetables">{t.navTimetables}</NavLink>
         <NavLink to="/students">{t.navStudents}</NavLink>

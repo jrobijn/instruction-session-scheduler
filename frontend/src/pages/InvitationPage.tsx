@@ -78,7 +78,10 @@ export default function InvitationPage() {
   return (
     <div className="invitation-page">
       <div className="card" style={{ maxWidth: 500, margin: '2rem auto', padding: '2rem' }}>
-        <h1 style={{ marginBottom: '1.5rem' }}>{t.trainingInvitation}</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+          <img src="/logo.png" alt="Logo" style={{ width: 64, height: 64, objectFit: 'contain' }} />
+          <h1 style={{ margin: 0 }}>{t.trainingInvitation}</h1>
+        </div>
 
         <div style={{ marginBottom: '1.5rem' }}>
           <p><strong>{t.studentLabel}</strong> {invitation.student_name}</p>
