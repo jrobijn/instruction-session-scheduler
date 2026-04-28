@@ -294,6 +294,13 @@ const en = {
   invitationExpiredMsg: 'This invitation has expired. Another student has been invited in your place.',
   invitationCancelledMsg: 'Your participation has been cancelled. Another student will be invited in your place.',
   cancelParticipation: 'Cancel Participation',
+  confirmPromptConfirm: 'Are you sure you want to confirm your attendance?',
+  confirmPromptDecline: 'Are you sure you want to decline this invitation?',
+  confirmPromptCancel: 'Are you sure you want to cancel your participation?',
+  yesConfirm: 'Yes, confirm',
+  yesDecline: 'Yes, decline',
+  yesCancel: 'Yes, cancel',
+  goBack: 'Go back',
   invitationNotFound: 'Invitation not found.',
 };
 

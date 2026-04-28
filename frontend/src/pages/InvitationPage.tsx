@@ -26,6 +26,7 @@ export default function InvitationPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionDone, setActionDone] = useState('');
+  const [confirmingAction, setConfirmingAction] = useState<'confirm' | 'decline' | 'cancel' | null>(null);
   const t = useT();
 
   useEffect(() => {
@@ -91,7 +92,7 @@ export default function InvitationPage() {
 
   return (
     <div className="invitation-page">
-      <div className="card" style={{ maxWidth: 560, margin: '2rem auto', padding: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-start', justifyContent: 'center' }}>
+      <div className="card" style={{ width: '100%', maxWidth: 560, margin: '2rem auto', padding: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-start', justifyContent: 'center' }}>
         <img src="/logo.png" alt="Logo" style={{ width: 128, height: 128, objectFit: 'contain', flexShrink: 0 }} />
         <div style={{ flex: '1 1 280px' }}>
         <h1 style={{ margin: '0 0 1.5rem 0' }}>{t.trainingInvitation}</h1>
@@ -142,18 +143,28 @@ export default function InvitationPage() {
             <div className="alert alert-success" style={{ marginBottom: '1.5rem' }}>
               {t.invitationConfirmedMsg}
             </div>
-            {invitation.discipline_name && (
+            {invitation.discipline_name && !confirmingAction && (
               <p style={{ marginBottom: '1rem' }}><strong>{t.discipline}:</strong> {invitation.discipline_name}</p>
             )}
-            <button className="btn btn-danger" style={{ width: '100%' }} onClick={handleCancel}>
-              {t.cancelParticipation}
-            </button>
+            {confirmingAction === 'cancel' ? (
+              <div style={{ padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+                <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptCancel}</p>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleCancel}>{t.yesCancel}</button>
+                  <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmingAction(null)}>{t.goBack}</button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn btn-danger" style={{ width: '100%' }} onClick={() => setConfirmingAction('cancel')}>
+                {t.cancelParticipation}
+              </button>
+            )}
           </>
         )}
 
         {invitation.status === 'invited' && !actionDone && (
           <>
-            {disciplines.length > 0 && (
+            {disciplines.length > 0 && !confirmingAction && (
               <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                 <label>{t.preferredDiscipline}</label>
                 <select value={selectedDiscipline} onChange={e => setSelectedDiscipline(e.target.value)}>
@@ -164,14 +175,32 @@ export default function InvitationPage() {
                 </select>
               </div>
             )}
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm}>
-                {t.confirmAttendance}
-              </button>
-              <button className="btn btn-danger" style={{ flex: 1, textAlign: 'center' }} onClick={handleDecline}>
-                {t.decline}
-              </button>
-            </div>
+            {confirmingAction === 'confirm' ? (
+              <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8 }}>
+                <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptConfirm}</p>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm}>{t.yesConfirm}</button>
+                  <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmingAction(null)}>{t.goBack}</button>
+                </div>
+              </div>
+            ) : confirmingAction === 'decline' ? (
+              <div style={{ padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+                <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptDecline}</p>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleDecline}>{t.yesDecline}</button>
+                  <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmingAction(null)}>{t.goBack}</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setConfirmingAction('confirm')}>
+                  {t.confirmAttendance}
+                </button>
+                <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => setConfirmingAction('decline')}>
+                  {t.decline}
+                </button>
+              </div>
+            )}
           </>
         )}
         </div>
