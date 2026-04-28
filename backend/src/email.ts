@@ -29,6 +29,63 @@ export function initializeMailer(): void {
   });
 }
 
+// Email translations
+interface EmailStrings {
+  greeting: (name: string) => string;
+  invitationBody: (clubName: string, date: string) => string;
+  invitationCta: string;
+  respondButton: string;
+  copyLink: string;
+  bestRegards: string;
+  confirmationBody: (clubName: string) => string;
+  dateLabel: string;
+  timeLabel: string;
+  disciplineLabel: string;
+  cancelExplanation: string;
+  cancelButton: string;
+  seeYou: string;
+  confirmationSubject: (clubName: string) => string;
+}
+
+const emailStrings: Record<string, EmailStrings> = {
+  en: {
+    greeting: (name) => `Hi ${name},`,
+    invitationBody: (clubName, date) => `You have been invited to a coaching session at <strong>${clubName}</strong> on <strong>${date}</strong>.`,
+    invitationCta: 'Please click the link below to confirm or decline your attendance:',
+    respondButton: 'Respond to Invitation',
+    copyLink: 'Or copy this link:',
+    bestRegards: 'Best regards,',
+    confirmationBody: (clubName) => `Your attendance has been confirmed for the coaching session at <strong>${clubName}</strong>.`,
+    dateLabel: 'Date:',
+    timeLabel: 'Time:',
+    disciplineLabel: 'Discipline:',
+    cancelExplanation: 'If you can no longer attend, please cancel your participation using the link below so another student can take your place:',
+    cancelButton: 'Cancel Participation',
+    seeYou: 'See you at the training!',
+    confirmationSubject: (clubName) => `Confirmation — ${clubName}`,
+  },
+  nl: {
+    greeting: (name) => `Hoi ${name},`,
+    invitationBody: (clubName, date) => `Je bent uitgenodigd voor een coachingsessie bij <strong>${clubName}</strong> op <strong>${date}</strong>.`,
+    invitationCta: 'Klik op de link hieronder om je aanwezigheid te bevestigen of af te wijzen:',
+    respondButton: 'Reageer op uitnodiging',
+    copyLink: 'Of kopieer deze link:',
+    bestRegards: 'Met vriendelijke groet,',
+    confirmationBody: (clubName) => `Je aanwezigheid is bevestigd voor de coachingsessie bij <strong>${clubName}</strong>.`,
+    dateLabel: 'Datum:',
+    timeLabel: 'Tijd:',
+    disciplineLabel: 'Discipline:',
+    cancelExplanation: 'Als je toch niet kunt komen, annuleer dan je deelname via de link hieronder zodat een andere leerling jouw plek kan innemen:',
+    cancelButton: 'Deelname annuleren',
+    seeYou: 'Tot bij de training!',
+    confirmationSubject: (clubName) => `Bevestiging — ${clubName}`,
+  },
+};
+
+export function getEmailStrings(locale: string): EmailStrings {
+  return emailStrings[locale] || emailStrings['en'];
+}
+
 interface InvitationEmailParams {
   to: string;
   studentName: string;
@@ -36,31 +93,33 @@ interface InvitationEmailParams {
   token: string;
   clubName: string;
   subject: string;
+  locale?: string;
 }
 
-export async function sendInvitationEmail({ to, studentName, date, token, clubName, subject }: InvitationEmailParams): Promise<void> {
+export async function sendInvitationEmail({ to, studentName, date, token, clubName, subject, locale }: InvitationEmailParams): Promise<void> {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const invitationUrl = `${frontendUrl}/invitation/${token}`;
+  const s = getEmailStrings(locale || 'en');
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2>Hi ${escapeHtml(studentName)},</h2>
-      <p>You have been invited to a coaching session at <strong>${escapeHtml(clubName)}</strong> on <strong>${escapeHtml(date)}</strong>.</p>
-      <p>Please click the link below to confirm or decline your attendance:</p>
+      <h2>${escapeHtml(s.greeting(studentName))}</h2>
+      <p>${s.invitationBody(escapeHtml(clubName), escapeHtml(date))}</p>
+      <p>${escapeHtml(s.invitationCta)}</p>
       <p style="margin: 24px 0;">
         <a href="${escapeHtml(invitationUrl)}"
            style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-          Respond to Invitation
+          ${escapeHtml(s.respondButton)}
         </a>
       </p>
       <p style="color: #666; font-size: 14px;">
-        Or copy this link: ${escapeHtml(invitationUrl)}
+        ${escapeHtml(s.copyLink)} ${escapeHtml(invitationUrl)}
       </p>
-      <p>Best regards,<br/>${escapeHtml(clubName)}</p>
+      <p>${escapeHtml(s.bestRegards)}<br/>${escapeHtml(clubName)}</p>
     </div>
   `;
 
-  const text = `Hi ${studentName},\n\nYou have been invited to a coaching session at ${clubName} on ${date}.\n\nPlease visit the following link to respond:\n${invitationUrl}\n\nBest regards,\n${clubName}`;
+  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.invitationBody(clubName, date))}\n\n${s.invitationCta}\n${invitationUrl}\n\n${s.bestRegards}\n${clubName}`;
 
   if (!transporter) {
     console.log(`📧 [Email Preview] To: ${to} | Subject: ${subject}`);
@@ -90,6 +149,10 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function stripHtml(str: string): string {
+  return String(str).replace(/<[^>]*>/g, '');
+}
+
 interface ConfirmationEmailParams {
   to: string;
   studentName: string;
@@ -99,41 +162,43 @@ interface ConfirmationEmailParams {
   token: string;
   clubName: string;
   subject: string;
+  locale?: string;
 }
 
-export async function sendConfirmationEmail({ to, studentName, date, startTime, disciplineName, token, clubName, subject }: ConfirmationEmailParams): Promise<void> {
+export async function sendConfirmationEmail({ to, studentName, date, startTime, disciplineName, token, clubName, subject, locale }: ConfirmationEmailParams): Promise<void> {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const cancelUrl = `${frontendUrl}/invitation/${token}`;
+  const s = getEmailStrings(locale || 'en');
 
   const disciplineLine = disciplineName
-    ? `<p><strong>Discipline:</strong> ${escapeHtml(disciplineName)}</p>`
+    ? `<p style="margin: 4px 0;"><strong>${escapeHtml(s.disciplineLabel)}</strong> ${escapeHtml(disciplineName)}</p>`
     : '';
-  const disciplineText = disciplineName ? `Discipline: ${disciplineName}\n` : '';
+  const disciplineText = disciplineName ? `${s.disciplineLabel} ${disciplineName}\n` : '';
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2>Hi ${escapeHtml(studentName)},</h2>
-      <p>Your attendance has been confirmed for the coaching session at <strong>${escapeHtml(clubName)}</strong>.</p>
+      <h2>${escapeHtml(s.greeting(studentName))}</h2>
+      <p>${s.confirmationBody(escapeHtml(clubName))}</p>
       <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 16px 0;">
-        <p style="margin: 4px 0;"><strong>Date:</strong> ${escapeHtml(date)}</p>
-        <p style="margin: 4px 0;"><strong>Time:</strong> ${escapeHtml(startTime)}</p>
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(date)}</p>
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.timeLabel)}</strong> ${escapeHtml(startTime)}</p>
         ${disciplineLine}
       </div>
-      <p>If you can no longer attend, please cancel your participation using the link below so another student can take your place:</p>
+      <p>${escapeHtml(s.cancelExplanation)}</p>
       <p style="margin: 24px 0;">
         <a href="${escapeHtml(cancelUrl)}"
            style="background-color: #dc2626; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-          Cancel Participation
+          ${escapeHtml(s.cancelButton)}
         </a>
       </p>
       <p style="color: #666; font-size: 14px;">
-        Or copy this link: ${escapeHtml(cancelUrl)}
+        ${escapeHtml(s.copyLink)} ${escapeHtml(cancelUrl)}
       </p>
-      <p>See you at the training!<br/>${escapeHtml(clubName)}</p>
+      <p>${escapeHtml(s.seeYou)}<br/>${escapeHtml(clubName)}</p>
     </div>
   `;
 
-  const text = `Hi ${studentName},\n\nYour attendance has been confirmed for the coaching session at ${clubName}.\n\nDate: ${date}\nTime: ${startTime}\n${disciplineText}\nIf you can no longer attend, please cancel using this link:\n${cancelUrl}\n\nSee you at the training!\n${clubName}`;
+  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.confirmationBody(clubName))}\n\n${s.dateLabel} ${date}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.cancelExplanation}\n${cancelUrl}\n\n${s.seeYou}\n${clubName}`;
 
   if (!transporter) {
     console.log(`📧 [Confirmation Email Preview] To: ${to} | Subject: ${subject}`);

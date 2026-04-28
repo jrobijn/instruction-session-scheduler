@@ -155,6 +155,7 @@ export function initializeDatabase(): void {
     INSERT OR IGNORE INTO settings (key, value) VALUES ('club_days', '0|1|2|3|4|5|6');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_expiry_minutes', '120');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_check_interval_minutes', '15');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('email_locale', 'en');
   `);
 
   // Migrations for existing databases

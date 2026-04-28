@@ -265,6 +265,8 @@ const en = {
   settingsTitle: 'Settings',
   settingLanguage: 'Language',
   settingLanguageDesc: 'Display language for the interface.',
+  settingEmailLocale: 'Email Language',
+  settingEmailLocaleDesc: 'Language used for invitation and confirmation emails sent to students.',
   languageNames: { en: 'English', nl: 'Nederlands' } as Record<string, string>,
   settingClubName: 'Club Name',
   settingClubNameDesc: 'Name of the sports club, used in emails.',

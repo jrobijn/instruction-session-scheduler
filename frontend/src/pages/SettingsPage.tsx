@@ -62,6 +62,23 @@ export default function SettingsPage() {
           <small style={{ color: '#6b7280' }}>{t.settingLanguageDesc}</small>
         </div>
 
+        <div className="form-group">
+          <label>{t.settingEmailLocale}</label>
+          <select
+            value={settings.email_locale || 'en'}
+            onChange={e => {
+              setSettings({ ...settings, email_locale: e.target.value });
+              saveSetting('email_locale', e.target.value);
+            }}
+          >
+            {getAvailableLocales().map(code => (
+              <option key={code} value={code}>{t.languageNames[code] || code}</option>
+            ))}
+          </select>
+          <small style={{ color: '#6b7280' }}>{t.settingEmailLocaleDesc}</small>
+          {saved === 'email_locale' && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>{t.saved}</small>}
+        </div>
+
         {settingsConfig.map(({ key, label, type, description }) => (
           <div key={key} className="form-group">
             <label>{label}</label>

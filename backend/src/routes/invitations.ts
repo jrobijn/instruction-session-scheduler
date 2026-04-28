@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import db from '../database.js';
-import { sendInvitationEmail, sendConfirmationEmail } from '../email.js';
+import { sendInvitationEmail, sendConfirmationEmail, getEmailStrings } from '../email.js';
 
 const router = Router();
 
@@ -78,6 +78,7 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
     const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
     const subject = (db.prepare("SELECT value FROM settings WHERE key = 'invitation_email_subject'").get() as any)?.value
       || 'You are invited to a coaching session!';
+    const emailLocale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
 
     await sendInvitationEmail({
       to: replacementStudent.email,
@@ -86,6 +87,7 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
       token,
       clubName,
       subject,
+      locale: emailLocale,
     });
     db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE token = ?").run(token);
   } catch {
@@ -113,6 +115,7 @@ router.get('/:token', (req: Request, res: Response) => {
   if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
 
   const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
+  const locale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
 
   res.json({
     student_name: invitation.student_name,
@@ -123,6 +126,7 @@ router.get('/:token', (req: Request, res: Response) => {
     session_status: invitation.session_status,
     discipline_name: invitation.discipline_name || null,
     club_name: clubName,
+    locale,
   });
 });
 
@@ -151,6 +155,7 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
   // Send confirmation email with cancellation link
   try {
     const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
+    const emailLocale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
     let disciplineName: string | null = null;
     if (discipline_id) {
       const disc = db.prepare('SELECT name FROM disciplines WHERE id = ?').get(discipline_id) as { name: string } | undefined;
@@ -164,7 +169,8 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
       disciplineName,
       token: req.params.token as string,
       clubName,
-      subject: `Confirmation — ${clubName}`,
+      subject: getEmailStrings(emailLocale).confirmationSubject(clubName),
+      locale: emailLocale,
     });
   } catch (err) {
     console.error('Failed to send confirmation email:', err);

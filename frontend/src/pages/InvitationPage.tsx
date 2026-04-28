@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api';
-import { useT } from '../i18n';
+import { useT, setLocale } from '../i18n';
 
 interface Invitation {
   id: number;
@@ -37,6 +37,9 @@ export default function InvitationPage() {
         ]);
         setInvitation(inv);
         setDisciplines(discs);
+        if (inv.locale) {
+          setLocale(inv.locale);
+        }
         if (inv.discipline_id) {
           setSelectedDiscipline(String(inv.discipline_id));
         }

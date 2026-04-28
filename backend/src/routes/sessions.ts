@@ -551,6 +551,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
   const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
   const subject = (db.prepare("SELECT value FROM settings WHERE key = 'invitation_email_subject'").get() as any)?.value
     || 'You are invited to a coaching session!';
+  const emailLocale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
 
   let sent = 0;
   const errors: Array<{ student: string; error: string }> = [];
@@ -564,6 +565,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
         token: inv.token,
         clubName,
         subject,
+        locale: emailLocale,
       });
       db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE id = ?").run(inv.id);
       sent++;
