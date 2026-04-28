@@ -57,7 +57,7 @@ tr:last-child td { border-bottom: none; }
 tr:hover td { background: #f1f5f9; }
 
 .btn {
-  display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 16px;
   border-radius: var(--radius); border: none; font-size: 14px; font-weight: 500;
   cursor: pointer; transition: background 0.15s, opacity 0.15s; text-decoration: none;
 }
