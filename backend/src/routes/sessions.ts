@@ -5,6 +5,16 @@ import { sendInvitationEmail } from '../email.js';
 
 const router = Router();
 
+// Normalize priorities so the minimum active student has priority 1
+function normalizePriorities() {
+  const minPriority = (db.prepare(
+    "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
+  ).get() as any)?.m;
+  if (minPriority != null && minPriority !== 1) {
+    db.prepare('UPDATE students SET priority = priority - ?').run(minPriority - 1);
+  }
+}
+
 // List all training sessions
 router.get('/', (_req: Request, res: Response) => {
   const sessions = db.prepare(`
@@ -181,7 +191,17 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   const manualInvitations = db.prepare(
     'SELECT * FROM invitations WHERE session_id = ? AND group_id IS NULL'
   ).all(req.params.id) as any[];
+
+  // Reverse priority for students whose auto-generated invitations are being removed
+  const removedStudents = db.prepare(
+    'SELECT DISTINCT student_id FROM invitations WHERE session_id = ? AND group_id IS NOT NULL'
+  ).all(req.params.id) as Array<{ student_id: number }>;
+  const decrementPriority = db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?');
+  for (const { student_id } of removedStudents) {
+    decrementPriority.run(student_id);
+  }
   db.prepare('DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL').run(req.params.id);
+  normalizePriorities();
 
   const availableSlots = totalSlots - manualInvitations.length;
 
@@ -424,6 +444,13 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   const invited = insertMany();
 
+  // Increment priority for each newly invited student
+  const incrementPriority = db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?');
+  for (const inv of invited) {
+    incrementPriority.run(inv.id);
+  }
+  normalizePriorities();
+
   // Update session status to scheduled
   db.prepare("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?").run(req.params.id);
 
@@ -513,7 +540,7 @@ router.post('/:id/complete', (req: Request, res: Response) => {
     WHERE session_id = ? AND status = 'confirmed'
   `).all(req.params.id) as Array<{ student_id: number; no_show: number }>;
 
-  const updateAttended = db.prepare('UPDATE students SET attended_sessions = attended_sessions + 1, priority = priority + 1 WHERE id = ?');
+  const updateAttended = db.prepare('UPDATE students SET attended_sessions = attended_sessions + 1 WHERE id = ?');
   const updateNoShow = db.prepare('UPDATE students SET no_show_count = no_show_count + 1 WHERE id = ?');
   const completeTransaction = db.transaction(() => {
     for (const { student_id, no_show } of confirmedStudents) {
@@ -523,11 +550,9 @@ router.post('/:id/complete', (req: Request, res: Response) => {
         updateAttended.run(student_id);
       }
     }
-    // Normalize priorities so the minimum (excluding cooled-down students) is always 1
-    const minPriority = (db.prepare('SELECT MIN(priority) AS m FROM students WHERE active = 1 AND (cooldown_until IS NULL OR cooldown_until <= datetime(\'now\'))').get() as any)?.m || 1;
-    if (minPriority > 1) {
-      db.prepare('UPDATE students SET priority = MAX(1, priority - ?) WHERE active = 1').run(minPriority - 1);
-    }
+    // Priority was already incremented at invitation time, so no increment needed here.
+    // Normalize priorities in case any shifts occurred.
+    normalizePriorities();
     db.prepare("UPDATE training_sessions SET status = 'completed' WHERE id = ?").run(req.params.id);
   });
 
@@ -596,6 +621,10 @@ router.post('/:id/invitations', (req: Request, res: Response) => {
     'INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token) VALUES (?, ?, ?, ?, ?)'
   ).run(req.params.id, student_id, timeslot_id, instructor_id, token);
 
+  // Increment priority for the manually added student
+  db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?').run(student_id);
+  normalizePriorities();
+
   // If session was draft, move to scheduled
   if (session.status === 'draft') {
     db.prepare("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?").run(req.params.id);
@@ -612,10 +641,17 @@ router.delete('/:id/invitations/:invitationId', (req: Request, res: Response) =>
     res.status(400).json({ error: 'Can only remove students before invitations are sent' }); return;
   }
 
-  const result = db.prepare(
-    'DELETE FROM invitations WHERE id = ? AND session_id = ?'
-  ).run(req.params.invitationId, req.params.id);
-  if (result.changes === 0) { res.status(404).json({ error: 'Invitation not found' }); return; }
+  // Get the student_id before deleting so we can reverse their priority
+  const invitation = db.prepare(
+    'SELECT student_id FROM invitations WHERE id = ? AND session_id = ?'
+  ).get(req.params.invitationId, req.params.id) as { student_id: number } | undefined;
+  if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
+
+  db.prepare('DELETE FROM invitations WHERE id = ? AND session_id = ?').run(req.params.invitationId, req.params.id);
+
+  // Reverse priority for the removed student
+  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
+  normalizePriorities();
 
   // If no invitations left, revert to draft
   const remaining = (db.prepare(
