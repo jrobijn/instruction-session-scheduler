@@ -45,6 +45,8 @@ interface EmailStrings {
   cancelButton: string;
   seeYou: string;
   confirmationSubject: (clubName: string) => string;
+  cancellationBody: (clubName: string) => string;
+  cancellationSubject: (clubName: string) => string;
 }
 
 const emailStrings: Record<string, EmailStrings> = {
@@ -63,6 +65,8 @@ const emailStrings: Record<string, EmailStrings> = {
     cancelButton: 'Cancel Participation',
     seeYou: 'See you at the training!',
     confirmationSubject: (clubName) => `Confirmation — ${clubName}`,
+    cancellationBody: (clubName) => `Your participation in the coaching session at <strong>${clubName}</strong> has been cancelled.`,
+    cancellationSubject: (clubName) => `Cancellation — ${clubName}`,
   },
   nl: {
     greeting: (name) => `Hoi ${name},`,
@@ -79,6 +83,8 @@ const emailStrings: Record<string, EmailStrings> = {
     cancelButton: 'Deelname annuleren',
     seeYou: 'Tot bij de training!',
     confirmationSubject: (clubName) => `Bevestiging — ${clubName}`,
+    cancellationBody: (clubName) => `Je deelname aan de coachingsessie bij <strong>${clubName}</strong> is geannuleerd.`,
+    cancellationSubject: (clubName) => `Annulering — ${clubName}`,
   },
 };
 
@@ -203,6 +209,59 @@ export async function sendConfirmationEmail({ to, studentName, date, startTime, 
   if (!transporter) {
     console.log(`📧 [Confirmation Email Preview] To: ${to} | Subject: ${subject}`);
     console.log(`   Cancel link: ${cancelUrl}`);
+    return;
+  }
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    text,
+    html,
+  }, (error, info) => {
+      if (error) {
+          return console.log(error);
+      }
+      console.log('Message %s sent: %s', info.messageId, info.response);
+  });
+}
+
+interface CancellationEmailParams {
+  to: string;
+  studentName: string;
+  date: string;
+  startTime: string;
+  disciplineName: string | null;
+  clubName: string;
+  subject: string;
+  locale?: string;
+}
+
+export async function sendCancellationEmail({ to, studentName, date, startTime, disciplineName, clubName, subject, locale }: CancellationEmailParams): Promise<void> {
+  const s = getEmailStrings(locale || 'en');
+
+  const disciplineLine = disciplineName
+    ? `<p style="margin: 4px 0;"><strong>${escapeHtml(s.disciplineLabel)}</strong> ${escapeHtml(disciplineName)}</p>`
+    : '';
+  const disciplineText = disciplineName ? `${s.disciplineLabel} ${disciplineName}\n` : '';
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2>${escapeHtml(s.greeting(studentName))}</h2>
+      <p>${s.cancellationBody(escapeHtml(clubName))}</p>
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 16px 0;">
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(date)}</p>
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.timeLabel)}</strong> ${escapeHtml(startTime)}</p>
+        ${disciplineLine}
+      </div>
+      <p>${escapeHtml(s.bestRegards)}<br/>${escapeHtml(clubName)}</p>
+    </div>
+  `;
+
+  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.cancellationBody(clubName))}\n\n${s.dateLabel} ${date}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.bestRegards}\n${clubName}`;
+
+  if (!transporter) {
+    console.log(`📧 [Cancellation Email Preview] To: ${to} | Subject: ${subject}`);
     return;
   }
 
