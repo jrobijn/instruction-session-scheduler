@@ -28,9 +28,11 @@ interface Invitation {
   id: number;
   student_name: string;
   student_email: string;
+  student_membership_id: string;
   instructor_id: number;
   instructor_name: string;
   discipline_name: string | null;
+  discipline_abbreviation: string | null;
   status: string;
   token: string;
   timeslot_id: number;
@@ -260,27 +262,79 @@ export default function SessionDetailPage() {
   }
 
   const exportPdf = () => {
-    const doc = new jsPDF();
+    const doc = new jsPDF({ orientation: 'landscape' });
     const dateStr = formatDate(session.date);
     doc.setFontSize(16);
     doc.text(t.pdfTitle(dateStr), 14, 20);
 
-    const head = [['Time', ...session.instructors.map(i => `${i.first_name} ${i.last_name}`)]];
-    const body = session.timeslots.map(ts => {
+    const boxSize = 3.5;
+    const boxPad = 2;
+
+    // Each instructor gets 2 columns: student (with checkbox + membership ID subtitle) and discipline abbreviation
+    const headerRow: any[] = [{ content: t.time, rowSpan: 2, styles: { cellPadding: 3, halign: 'left' } }];
+    for (const instr of session.instructors) {
+      headerRow.push({ content: `${instr.first_name} ${instr.last_name}`, colSpan: 2, styles: { halign: 'left' } });
+    }
+    const subHeaderRow: any[] = [];
+    for (let i = 0; i < session.instructors.length; i++) {
+      subHeaderRow.push({ content: 'Student', styles: { fontSize: 8, fontStyle: 'italic' } });
+      subHeaderRow.push({ content: 'Disc.', styles: { fontSize: 8, fontStyle: 'italic' } });
+    }
+
+    const subtitles: Record<string, string> = {};
+    const body = session.timeslots.map((ts, rowIdx) => {
       const row: string[] = [ts.start_time];
-      for (const instr of session.instructors) {
+      session.instructors.forEach((instr, colIdx) => {
         const inv = scheduleGrid[ts.id]?.[instr.id];
         row.push(inv ? inv.student_name : '');
-      }
+        row.push(inv?.discipline_abbreviation || '');
+        if (inv?.student_membership_id) {
+          const studentColIdx = 1 + colIdx * 2;
+          subtitles[`${rowIdx}-${studentColIdx}`] = inv.student_membership_id;
+        }
+      });
       return row;
     });
 
+    // Build columnStyles: Time col normal padding, discipline cols smaller width
+    const colStyles: Record<number, any> = { 0: { cellPadding: 3, halign: 'left' } };
+    for (let i = 0; i < session.instructors.length; i++) {
+      colStyles[2 + i * 2] = { cellPadding: 3, cellWidth: 18, halign: 'center' };
+    }
+
     autoTable(doc, {
       startY: 28,
-      head,
+      head: [headerRow, subHeaderRow],
       body,
-      styles: { fontSize: 10 },
-      headStyles: { fillColor: [37, 99, 235] },
+      styles: { fontSize: 10, cellPadding: { top: 3, right: 3, bottom: 6, left: 8 } },
+      headStyles: { fillColor: [37, 99, 235], cellPadding: { top: 3, right: 3, bottom: 3, left: 8 } },
+      columnStyles: colStyles,
+      didDrawCell: (data: any) => {
+        if (data.section !== 'body' || data.column.index === 0) return;
+        // Only draw on student columns (odd indices: 1, 3, 5, ...)
+        const isStudentCol = (data.column.index - 1) % 2 === 0;
+        if (!isStudentCol) return;
+        const key = `${data.row.index}-${data.column.index}`;
+        // Draw checkbox
+        if (data.cell.raw && String(data.cell.raw).trim()) {
+          const x = data.cell.x + boxPad;
+          const y = data.cell.y + 3 + (10 * 0.3528 - boxSize) / 2;
+          doc.setDrawColor(0);
+          doc.setLineWidth(0.3);
+          doc.rect(x, y, boxSize, boxSize);
+        }
+        // Draw membership ID subtitle
+        if (subtitles[key]) {
+          const nameBaselineY = data.cell.y + 3 + 10 * 0.3528;
+          doc.setFontSize(7);
+          doc.setFont('helvetica', 'italic');
+          doc.setTextColor(120, 120, 120);
+          doc.text(subtitles[key], data.cell.x + 8, nameBaselineY + 3);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(0, 0, 0);
+          doc.setFontSize(10);
+        }
+      },
     });
 
     doc.save(`schedule-${session.date}.pdf`);
@@ -448,21 +502,24 @@ export default function SessionDetailPage() {
                     return (
                       <td key={instr.id}>
                         {inv ? (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span title={inv.group_name || ''} style={{
-                              width: '10px', height: '10px', borderRadius: '50%',
-                              background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
-                            }} />
-                            {inv.student_name}
-                            <span className={`badge ${
-                              inv.status === 'confirmed' ? 'badge-confirmed' :
-                              inv.status === 'declined' ? 'badge-declined' :
-                              inv.status === 'expired' ? 'badge-declined' :
-                              inv.status === 'scheduled' ? 'badge-draft' :
-                              'badge-pending'
-                            }`} style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
-                              {t.statusMap(inv.status)}
+                          <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span title={inv.group_name || ''} style={{
+                                width: '10px', height: '10px', borderRadius: '50%',
+                                background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
+                              }} />
+                              <span>{inv.student_name}</span>
+                              <span className={`badge ${
+                                inv.status === 'confirmed' ? 'badge-confirmed' :
+                                inv.status === 'declined' ? 'badge-declined' :
+                                inv.status === 'expired' ? 'badge-declined' :
+                                inv.status === 'scheduled' ? 'badge-draft' :
+                                'badge-pending'
+                              }`} style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+                                {t.statusMap(inv.status)}
+                              </span>
                             </span>
+                            <span style={{ fontSize: '0.75rem', fontStyle: 'italic', opacity: inv.discipline_name ? 0.7 : 0, whiteSpace: 'pre', paddingLeft: 'calc(10px + 0.5rem)' }}>{inv.discipline_name || '\u00A0'}</span>
                           </span>
                         ) : t.noData}
                       </td>

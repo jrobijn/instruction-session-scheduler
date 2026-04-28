@@ -7,6 +7,7 @@ import { useT } from '../i18n';
 interface Discipline {
   id: number;
   name: string;
+  abbreviation: string;
   active: number;
   groups: Array<{ id: number; name: string }>;
 }
@@ -24,7 +25,7 @@ export default function DisciplinesPage() {
   const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Discipline | null>(null);
-  const [form, setForm] = useState({ name: '' });
+  const [form, setForm] = useState({ name: '', abbreviation: '' });
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [error, setError] = useState('');
@@ -66,7 +67,7 @@ export default function DisciplinesPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: '' });
+    setForm({ name: '', abbreviation: '' });
     setSelectedGroupIds([]);
     setError('');
     setShowModal(true);
@@ -74,7 +75,7 @@ export default function DisciplinesPage() {
 
   const openEdit = (discipline: Discipline) => {
     setEditing(discipline);
-    setForm({ name: discipline.name });
+    setForm({ name: discipline.name, abbreviation: discipline.abbreviation || '' });
     setSelectedGroupIds(discipline.groups.map(g => g.id));
     setError('');
     setShowModal(true);
@@ -184,6 +185,7 @@ export default function DisciplinesPage() {
           <thead>
             <tr>
               <th className="sortable" onClick={() => toggleSort('name')}>{t.name}{sortIcon('name')}</th>
+              <th>{t.abbreviation}</th>
               <th>{t.groups}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
               <th>{t.actions}</th>
@@ -193,6 +195,7 @@ export default function DisciplinesPage() {
             {sortedDisciplines.map(d => (
               <tr key={d.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/disciplines/${d.id}`)}>
                 <td>{d.name}</td>
+                <td>{d.abbreviation}</td>
                 <td>{d.groups.length}</td>
                 <td>
                   <span className={`badge ${d.active ? 'badge-confirmed' : 'badge-declined'}`}>
@@ -221,6 +224,10 @@ export default function DisciplinesPage() {
               <div className="form-group">
                 <label>{t.name}</label>
                 <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>{t.abbreviation}</label>
+                <input value={form.abbreviation} onChange={e => setForm({ ...form, abbreviation: e.target.value })} />
               </div>
               <div className="form-group">
                 <label>{t.groupsWithAccess}</label>

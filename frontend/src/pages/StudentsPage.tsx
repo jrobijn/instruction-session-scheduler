@@ -8,6 +8,7 @@ interface Student {
   first_name: string;
   last_name: string;
   email: string;
+  membership_id: string;
   attended_sessions: number;
   no_show_count: number;
   priority: number;
@@ -31,7 +32,7 @@ export default function StudentsPage() {
   const [clubDays, setClubDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
-  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', preferred_days: '0|1|2|3|4|5|6' });
+  const [form, setForm] = useState({ first_name: '', last_name: '', email: '', membership_id: '', preferred_days: '0|1|2|3|4|5|6' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
@@ -89,7 +90,7 @@ export default function StudentsPage() {
 
   const openCreate = async () => {
     setEditing(null);
-    setForm({ first_name: '', last_name: '', email: '', preferred_days: '0|1|2|3|4|5|6' });
+    setForm({ first_name: '', last_name: '', email: '', membership_id: '', preferred_days: '0|1|2|3|4|5|6' });
     setTimeslotPrefs({});
     setError('');
     await loadTimetables();
@@ -98,7 +99,7 @@ export default function StudentsPage() {
 
   const openEdit = async (student: Student) => {
     setEditing(student);
-    setForm({ first_name: student.first_name, last_name: student.last_name, email: student.email, preferred_days: student.preferred_days });
+    setForm({ first_name: student.first_name, last_name: student.last_name, email: student.email, membership_id: student.membership_id || '', preferred_days: student.preferred_days });
     setError('');
     await loadTimetables();
     try {
@@ -251,6 +252,7 @@ export default function StudentsPage() {
               <th className="sortable" onClick={() => toggleSort('first_name')}>{t.firstName}{sortIcon('first_name')}</th>
               <th className="sortable" onClick={() => toggleSort('last_name')}>{t.lastName}{sortIcon('last_name')}</th>
               <th className="sortable" onClick={() => toggleSort('email')}>{t.email}{sortIcon('email')}</th>
+              <th>{t.membershipId}</th>
               <th className="sortable" onClick={() => toggleSort('attended_sessions')}>{t.sessionsAttended}{sortIcon('attended_sessions')}</th>
               <th className="sortable" onClick={() => toggleSort('no_show_count')}>{t.noShows}{sortIcon('no_show_count')}</th>
               <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
@@ -265,6 +267,7 @@ export default function StudentsPage() {
                 <td>{s.first_name}</td>
                 <td>{s.last_name}</td>
                 <td>{s.email}</td>
+                <td>{s.membership_id}</td>
                 <td>{s.attended_sessions}</td>
                 <td>{s.no_show_count}</td>
                 <td>{s.priority}</td>
@@ -315,6 +318,10 @@ export default function StudentsPage() {
               <div className="form-group">
                 <label>{t.email}</label>
                 <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>{t.membershipId}</label>
+                <input value={form.membership_id} onChange={e => setForm({ ...form, membership_id: e.target.value })} />
               </div>
               <div className="form-group">
                 <label>{t.preferredDays}</label>

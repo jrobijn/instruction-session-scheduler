@@ -32,9 +32,9 @@ router.get('/', (_req: Request, res: Response) => {
 
 // Export disciplines as CSV
 router.get('/export', (_req: Request, res: Response) => {
-  const disciplines = db.prepare('SELECT name, active FROM disciplines ORDER BY name ASC').all() as { name: string; active: number }[];
-  const header = 'name,active';
-  const rows = disciplines.map(d => [d.name, d.active].map(escapeCsvField).join(','));
+  const disciplines = db.prepare('SELECT name, abbreviation, active FROM disciplines ORDER BY name ASC').all() as { name: string; abbreviation: string; active: number }[];
+  const header = 'name,abbreviation,active';
+  const rows = disciplines.map(d => [d.name, d.abbreviation, d.active].map(escapeCsvField).join(','));
   const csv = [header, ...rows].join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="disciplines.csv"');
@@ -51,6 +51,7 @@ router.post('/import', (req: Request, res: Response) => {
 
   const header = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/^"|"$/g, ''));
   const nameIdx = header.indexOf('name');
+  const abbreviationIdx = header.indexOf('abbreviation');
 
   if (nameIdx === -1) {
     res.status(400).json({ error: 'CSV must contain a name column' }); return;
@@ -84,6 +85,7 @@ router.post('/import', (req: Request, res: Response) => {
     for (let i = 1; i < lines.length; i++) {
       const fields = parseCsvLine(lines[i]);
       const name = fields[nameIdx]?.trim();
+      const abbreviation = abbreviationIdx !== -1 ? (fields[abbreviationIdx]?.trim() || '') : '';
 
       if (!name) {
         errors.push(`Row ${i + 1}: missing name`);
@@ -94,9 +96,10 @@ router.post('/import', (req: Request, res: Response) => {
       try {
         const existing = db.prepare('SELECT id FROM disciplines WHERE name = ?').get(name) as { id: number } | undefined;
         if (existing) {
+          db.prepare('UPDATE disciplines SET abbreviation = ? WHERE id = ?').run(abbreviation, existing.id);
           skipped++;
         } else {
-          db.prepare('INSERT INTO disciplines (name) VALUES (?)').run(name);
+          db.prepare('INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)').run(name, abbreviation);
           imported++;
         }
       } catch (err: any) {
@@ -119,11 +122,11 @@ router.get('/:id', (req: Request, res: Response) => {
 
 // Create discipline
 router.post('/', (req: Request, res: Response) => {
-  const { name } = req.body;
+  const { name, abbreviation } = req.body;
   if (!name) { res.status(400).json({ error: 'Name is required' }); return; }
 
   try {
-    const result = db.prepare('INSERT INTO disciplines (name) VALUES (?)').run(name);
+    const result = db.prepare('INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)').run(name, abbreviation || '');
     const discipline = db.prepare('SELECT * FROM disciplines WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(discipline);
   } catch (err: any) {
@@ -137,7 +140,7 @@ router.post('/', (req: Request, res: Response) => {
 
 // Update discipline
 router.put('/:id', (req: Request, res: Response) => {
-  const { name, active } = req.body;
+  const { name, abbreviation, active } = req.body;
   const discipline = db.prepare('SELECT * FROM disciplines WHERE id = ?').get(req.params.id);
   if (!discipline) { res.status(404).json({ error: 'Discipline not found' }); return; }
 
@@ -145,9 +148,10 @@ router.put('/:id', (req: Request, res: Response) => {
     db.prepare(`
       UPDATE disciplines SET
         name = COALESCE(?, name),
+        abbreviation = COALESCE(?, abbreviation),
         active = COALESCE(?, active)
       WHERE id = ?
-    `).run(name ?? null, active ?? null, req.params.id);
+    `).run(name ?? null, abbreviation ?? null, active ?? null, req.params.id);
 
     const updated = db.prepare('SELECT * FROM disciplines WHERE id = ?').get(req.params.id);
     res.json(updated);
