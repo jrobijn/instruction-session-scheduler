@@ -10,6 +10,7 @@ interface Invitation {
   start_time: string;
   status: string;
   discipline_id: number | null;
+  discipline_name: string | null;
 }
 
 interface Discipline {
@@ -68,6 +69,16 @@ export default function InvitationPage() {
     }
   };
 
+  const handleCancel = async () => {
+    try {
+      await api.cancelInvitation(token!);
+      setInvitation({ ...invitation!, status: 'cancelled' });
+      setActionDone('cancelled');
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   if (loading) return <div className="invitation-page"><p>{t.loading}</p></div>;
   if (error) return <div className="invitation-page"><div className="alert alert-error">{error}</div></div>;
   if (!invitation) return <div className="invitation-page"><p>{t.invitationNotFound}</p></div>;
@@ -90,6 +101,7 @@ export default function InvitationPage() {
             <span className={`badge ${
               invitation.status === 'confirmed' ? 'badge-confirmed' :
               invitation.status === 'declined' ? 'badge-declined' :
+              invitation.status === 'cancelled' ? 'badge-declined' :
               invitation.status === 'expired' ? 'badge-declined' :
               'badge-pending'
             }`}>
@@ -110,10 +122,30 @@ export default function InvitationPage() {
           </div>
         )}
 
+        {actionDone === 'cancelled' && (
+          <div className="alert alert-error">
+            {t.invitationCancelledMsg}
+          </div>
+        )}
+
         {invitation.status === 'expired' && !actionDone && (
           <div className="alert alert-error">
             {t.invitationExpiredMsg}
           </div>
+        )}
+
+        {invitation.status === 'confirmed' && !actionDone && (
+          <>
+            <div className="alert alert-success" style={{ marginBottom: '1.5rem' }}>
+              {t.invitationConfirmedMsg}
+            </div>
+            {invitation.discipline_name && (
+              <p style={{ marginBottom: '1rem' }}><strong>{t.discipline}:</strong> {invitation.discipline_name}</p>
+            )}
+            <button className="btn btn-danger" style={{ width: '100%' }} onClick={handleCancel}>
+              {t.cancelParticipation}
+            </button>
+          </>
         )}
 
         {invitation.status === 'invited' && !actionDone && (

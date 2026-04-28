@@ -84,7 +84,7 @@ export function initializeDatabase(): void {
       timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
       instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
-      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired')),
+      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled')),
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
       group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
@@ -288,9 +288,9 @@ export function initializeDatabase(): void {
   // Ensure default group has the correct color
   db.exec("UPDATE groups SET color = '#565656' WHERE is_default = 1 AND color IN ('#3b82f6', '#232323')");
 
-  // Migrate invitations CHECK constraint to include 'expired' status
+  // Migrate invitations CHECK constraint to include 'expired' and 'cancelled' statuses
   const checkInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invitations'").get() as { sql: string } | undefined;
-  if (checkInfo && !checkInfo.sql.includes("'expired'")) {
+  if (checkInfo && !checkInfo.sql.includes("'cancelled'")) {
     db.exec(`
       CREATE TABLE invitations_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,7 +299,7 @@ export function initializeDatabase(): void {
         timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
         instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
         token TEXT NOT NULL UNIQUE,
-        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired')),
+        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled')),
         discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
         group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
         email_sent INTEGER NOT NULL DEFAULT 0,

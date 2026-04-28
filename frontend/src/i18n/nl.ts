@@ -195,6 +195,7 @@ const nl: Translations = {
   summaryInvited: (n: number) => `Uitgenodigd: ${n}`,
   summaryScheduled: (n: number) => `Ingepland: ${n}`,
   summaryDeclined: (n: number) => `Afgewezen: ${n}`,
+  summaryCancelled: (n: number) => `Geannuleerd: ${n}`,
   summaryExpired: (n: number) => `Verlopen: ${n}`,
   timeslot: 'Tijdslot',
   student: 'Leerling',
@@ -212,6 +213,7 @@ const nl: Translations = {
   statusExpired: 'verlopen',
   statusScheduled: 'ingepland',
   statusInvited: 'uitgenodigd',
+  statusCancelled: 'geannuleerd',
   statusDraft: 'concept',
   statusSaved: 'opgeslagen',
   statusCompleted: 'voltooid',
@@ -221,6 +223,7 @@ const nl: Translations = {
     const map: Record<string, string> = {
       confirmed: 'bevestigd',
       declined: 'afgewezen',
+      cancelled: 'geannuleerd',
       expired: 'verlopen',
       scheduled: 'ingepland',
       invited: 'uitgenodigd',
@@ -289,6 +292,8 @@ const nl: Translations = {
   invitationConfirmedMsg: 'Je aanwezigheid is bevestigd. Tot bij de training!',
   invitationDeclinedMsg: 'Je hebt deze uitnodiging afgewezen. Een andere leerling wordt in jouw plaats uitgenodigd.',
   invitationExpiredMsg: 'Deze uitnodiging is verlopen. Een andere leerling is in jouw plaats uitgenodigd.',
+  invitationCancelledMsg: 'Je deelname is geannuleerd. Een andere leerling wordt in jouw plaats uitgenodigd.',
+  cancelParticipation: 'Deelname annuleren',
   invitationNotFound: 'Uitnodiging niet gevonden.',
 };
 

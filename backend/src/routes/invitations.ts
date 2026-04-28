@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import db from '../database.js';
-import { sendInvitationEmail } from '../email.js';
+import { sendInvitationEmail, sendConfirmationEmail } from '../email.js';
 
 const router = Router();
 
@@ -44,7 +44,7 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
       AND id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
-        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired')
+        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled')
       )
     ORDER BY priority ASC, last_name ASC, first_name ASC
   `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), ...alreadyInvited, invitation.session_date) as any[];
@@ -100,11 +100,13 @@ router.get('/:token', (req: Request, res: Response) => {
   const invitation = db.prepare(`
     SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
            ts.date AS session_date, ts.notes AS session_notes, ts.status AS session_status,
-           tslot.start_time AS timeslot_start_time
+           tslot.start_time AS timeslot_start_time,
+           d.name AS discipline_name
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     JOIN training_sessions ts ON ts.id = inv.session_id
     JOIN timeslots tslot ON tslot.id = inv.timeslot_id
+    LEFT JOIN disciplines d ON d.id = inv.discipline_id
     WHERE inv.token = ?
   `).get(req.params.token) as any;
 
@@ -119,17 +121,22 @@ router.get('/:token', (req: Request, res: Response) => {
     notes: invitation.session_notes,
     status: invitation.status,
     session_status: invitation.session_status,
+    discipline_name: invitation.discipline_name || null,
     club_name: clubName,
   });
 });
 
 // Confirm attendance (public)
-router.post('/:token/confirm', (req: Request, res: Response) => {
+router.post('/:token/confirm', async (req: Request, res: Response) => {
   const { discipline_id } = req.body || {};
   const invitation = db.prepare(`
-    SELECT inv.*, ts.status AS session_status
+    SELECT inv.*, ts.status AS session_status, ts.date AS session_date,
+           s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
+           tslot.start_time AS timeslot_start_time
     FROM invitations inv
     JOIN training_sessions ts ON ts.id = inv.session_id
+    JOIN students s ON s.id = inv.student_id
+    JOIN timeslots tslot ON tslot.id = inv.timeslot_id
     WHERE inv.token = ?
   `).get(req.params.token) as any;
 
@@ -141,7 +148,59 @@ router.post('/:token/confirm', (req: Request, res: Response) => {
     UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?
   `).run(discipline_id || null, invitation.id);
 
+  // Send confirmation email with cancellation link
+  try {
+    const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
+    let disciplineName: string | null = null;
+    if (discipline_id) {
+      const disc = db.prepare('SELECT name FROM disciplines WHERE id = ?').get(discipline_id) as { name: string } | undefined;
+      disciplineName = disc?.name || null;
+    }
+    await sendConfirmationEmail({
+      to: invitation.student_email,
+      studentName: invitation.student_name,
+      date: invitation.session_date,
+      startTime: invitation.timeslot_start_time,
+      disciplineName,
+      token: req.params.token as string,
+      clubName,
+      subject: `Confirmation — ${clubName}`,
+    });
+  } catch (err) {
+    console.error('Failed to send confirmation email:', err);
+  }
+
   res.json({ success: true, message: 'Your attendance has been confirmed!' });
+});
+
+// Cancel confirmed attendance (public) — triggers next-in-line invitation
+router.post('/:token/cancel', async (req: Request, res: Response) => {
+  const invitation = db.prepare(`
+    SELECT inv.*, ts.status AS session_status, ts.date AS session_date, ts.id AS session_id
+    FROM invitations inv
+    JOIN training_sessions ts ON ts.id = inv.session_id
+    WHERE inv.token = ?
+  `).get(req.params.token) as any;
+
+  if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
+  if (invitation.session_status === 'completed') { res.status(400).json({ error: 'This session has already passed' }); return; }
+  if (invitation.status !== 'confirmed') { res.status(400).json({ error: `Cannot cancel — invitation is ${invitation.status}` }); return; }
+
+  db.prepare(`
+    UPDATE invitations SET status = 'cancelled', responded_at = datetime('now') WHERE id = ?
+  `).run(invitation.id);
+
+  // Reverse the priority increase that was applied when this student was invited
+  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
+  normalizePriorities();
+
+  const replacement = await findAndInviteReplacement(invitation);
+
+  res.json({
+    success: true,
+    message: 'Your participation has been cancelled.',
+    replacement,
+  });
 });
 
 // Decline attendance (public) — triggers next-in-line invitation

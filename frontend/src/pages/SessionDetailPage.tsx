@@ -229,6 +229,7 @@ export default function SessionDetailPage() {
 
   const confirmed = session.invitations.filter(i => i.status === 'confirmed').length;
   const declined = session.invitations.filter(i => i.status === 'declined').length;
+  const cancelled = session.invitations.filter(i => i.status === 'cancelled').length;
   const expired = session.invitations.filter(i => i.status === 'expired').length;
   const invited = session.invitations.filter(i => i.status === 'invited').length;
   const scheduled = session.invitations.filter(i => i.status === 'scheduled').length;
@@ -239,7 +240,7 @@ export default function SessionDetailPage() {
     scheduleGrid[ts.id] = {};
   }
   for (const inv of session.invitations) {
-    if (inv.status !== 'declined' && inv.status !== 'expired') {
+    if (inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled') {
       scheduleGrid[inv.timeslot_id] ??= {};
       scheduleGrid[inv.timeslot_id][inv.instructor_id] = inv;
     }
@@ -261,7 +262,7 @@ export default function SessionDetailPage() {
         allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: inv, empty: false });
       }
       // If no active (non-declined/expired) invitation occupies this slot, add an empty row
-      const hasActive = slotInvitations.some(inv => inv.status !== 'declined' && inv.status !== 'expired');
+      const hasActive = slotInvitations.some(inv => inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled');
       if (!hasActive) {
         allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: null, empty: true });
       }
@@ -529,6 +530,7 @@ export default function SessionDetailPage() {
                               <span className={`badge ${
                                 inv.status === 'confirmed' ? 'badge-confirmed' :
                                 inv.status === 'declined' ? 'badge-declined' :
+                                inv.status === 'cancelled' ? 'badge-declined' :
                                 inv.status === 'expired' ? 'badge-declined' :
                                 inv.status === 'scheduled' ? 'badge-draft' :
                                 'badge-pending'
@@ -558,6 +560,7 @@ export default function SessionDetailPage() {
             <span className="badge badge-pending">{t.summaryInvited(invited)}</span>
             {scheduled > 0 && <span className="badge badge-draft">{t.summaryScheduled(scheduled)}</span>}
             <span className="badge badge-declined">{t.summaryDeclined(declined)}</span>
+            {cancelled > 0 && <span className="badge badge-declined">{t.summaryCancelled(cancelled)}</span>}
             {expired > 0 && <span className="badge badge-declined">{t.summaryExpired(expired)}</span>}
           </div>
           <table>

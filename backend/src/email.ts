@@ -89,3 +89,68 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+interface ConfirmationEmailParams {
+  to: string;
+  studentName: string;
+  date: string;
+  startTime: string;
+  disciplineName: string | null;
+  token: string;
+  clubName: string;
+  subject: string;
+}
+
+export async function sendConfirmationEmail({ to, studentName, date, startTime, disciplineName, token, clubName, subject }: ConfirmationEmailParams): Promise<void> {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const cancelUrl = `${frontendUrl}/invitation/${token}`;
+
+  const disciplineLine = disciplineName
+    ? `<p><strong>Discipline:</strong> ${escapeHtml(disciplineName)}</p>`
+    : '';
+  const disciplineText = disciplineName ? `Discipline: ${disciplineName}\n` : '';
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2>Hi ${escapeHtml(studentName)},</h2>
+      <p>Your attendance has been confirmed for the coaching session at <strong>${escapeHtml(clubName)}</strong>.</p>
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 16px 0;">
+        <p style="margin: 4px 0;"><strong>Date:</strong> ${escapeHtml(date)}</p>
+        <p style="margin: 4px 0;"><strong>Time:</strong> ${escapeHtml(startTime)}</p>
+        ${disciplineLine}
+      </div>
+      <p>If you can no longer attend, please cancel your participation using the link below so another student can take your place:</p>
+      <p style="margin: 24px 0;">
+        <a href="${escapeHtml(cancelUrl)}"
+           style="background-color: #dc2626; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          Cancel Participation
+        </a>
+      </p>
+      <p style="color: #666; font-size: 14px;">
+        Or copy this link: ${escapeHtml(cancelUrl)}
+      </p>
+      <p>See you at the training!<br/>${escapeHtml(clubName)}</p>
+    </div>
+  `;
+
+  const text = `Hi ${studentName},\n\nYour attendance has been confirmed for the coaching session at ${clubName}.\n\nDate: ${date}\nTime: ${startTime}\n${disciplineText}\nIf you can no longer attend, please cancel using this link:\n${cancelUrl}\n\nSee you at the training!\n${clubName}`;
+
+  if (!transporter) {
+    console.log(`📧 [Confirmation Email Preview] To: ${to} | Subject: ${subject}`);
+    console.log(`   Cancel link: ${cancelUrl}`);
+    return;
+  }
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    text,
+    html,
+  }, (error, info) => {
+      if (error) {
+          return console.log(error);
+      }
+      console.log('Message %s sent: %s', info.messageId, info.response);
+  });
+}

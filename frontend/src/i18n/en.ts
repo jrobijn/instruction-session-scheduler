@@ -193,6 +193,7 @@ const en = {
   summaryInvited: (n: number) => `Invited: ${n}`,
   summaryScheduled: (n: number) => `Scheduled: ${n}`,
   summaryDeclined: (n: number) => `Declined: ${n}`,
+  summaryCancelled: (n: number) => `Cancelled: ${n}`,
   summaryExpired: (n: number) => `Expired: ${n}`,
   timeslot: 'Timeslot',
   student: 'Student',
@@ -210,6 +211,7 @@ const en = {
   statusExpired: 'expired',
   statusScheduled: 'scheduled',
   statusInvited: 'invited',
+  statusCancelled: 'cancelled',
   statusDraft: 'draft',
   statusSaved: 'saved',
   statusCompleted: 'completed',
@@ -219,6 +221,7 @@ const en = {
     const map: Record<string, string> = {
       confirmed: 'confirmed',
       declined: 'declined',
+      cancelled: 'cancelled',
       expired: 'expired',
       scheduled: 'scheduled',
       invited: 'invited',
@@ -287,6 +290,8 @@ const en = {
   invitationConfirmedMsg: 'Your attendance has been confirmed. See you at the training!',
   invitationDeclinedMsg: 'You have declined this invitation. Another student will be invited in your place.',
   invitationExpiredMsg: 'This invitation has expired. Another student has been invited in your place.',
+  invitationCancelledMsg: 'Your participation has been cancelled. Another student will be invited in your place.',
+  cancelParticipation: 'Cancel Participation',
   invitationNotFound: 'Invitation not found.',
 };
 
