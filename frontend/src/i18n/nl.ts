@@ -41,6 +41,7 @@ const nl: Translations = {
   navInstructors: 'Instructeurs',
   navDisciplines: 'Disciplines',
   navGroups: 'Groepen',
+  navBuddyGroups: 'Buddy\'s',
   navSettings: 'Instellingen',
   logout: 'Uitloggen',
 
@@ -130,6 +131,24 @@ const nl: Translations = {
   confirmRemoveMember: 'Deze leerling uit de groep verwijderen?',
   groupNotFound: 'Groep niet gevonden',
   groupNotFoundText: 'Groep niet gevonden.',
+
+  // Buddy groups
+  buddyGroupsTitle: (count: number) => `Buddygroepen (${count})`,
+  addBuddyGroupButton: '+ Buddygroep toevoegen',
+  noBuddyGroupsYet: 'Nog geen buddygroepen',
+  noBuddyGroupsHint: 'Maak buddygroepen aan om leerlingen samen in te plannen op nabijgelegen tijdsloten.',
+  confirmDeleteBuddyGroup: (name: string) => `Weet je zeker dat je de buddygroep "${name}" wilt verwijderen?`,
+  editBuddyGroup: 'Buddygroep bewerken',
+  addBuddyGroupTitle: 'Buddygroep toevoegen',
+
+  // Buddy group detail
+  backToBuddyGroups: '← Terug naar Buddygroepen',
+  buddyGroupMemberCount: (n: number) => `${n} lid/leden`,
+  noBuddyMembers: 'Geen leden',
+  noBuddyMembersHint: 'Voeg leerlingen toe aan deze buddygroep via het zoekveld hierboven.',
+  confirmRemoveBuddyMember: 'Deze leerling uit de buddygroep verwijderen?',
+  buddyGroupNotFound: 'Buddygroep niet gevonden',
+  buddyGroupNotFoundText: 'Buddygroep niet gevonden.',
 
   // Sessions
   sessionsTitle: (count: number) => `Trainingssessies (${count})`,
