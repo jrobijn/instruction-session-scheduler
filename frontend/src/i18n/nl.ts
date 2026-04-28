@@ -268,7 +268,7 @@ const nl: Translations = {
   settingLanguage: 'Taal',
   settingLanguageDesc: 'Weergavetaal voor de interface.',
   settingEmailLocale: 'E-mailtaal',
-  settingEmailLocaleDesc: 'Taal voor uitnodigings- en bevestigingsmails naar leerlingen.',
+  settingEmailLocaleDesc: 'Taal voor e-mails en uitnodigings-/annuleringspagina\'s die aan leerlingen worden getoond.',
   languageNames: { en: 'English', nl: 'Nederlands' } as Record<string, string>,
   settingClubName: 'Clubnaam',
   settingClubNameDesc: 'Naam van de sportclub, gebruikt in e-mails.',
