@@ -138,7 +138,8 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS buddy_group_members (
       buddy_group_id INTEGER NOT NULL REFERENCES buddy_groups(id) ON DELETE CASCADE,
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-      PRIMARY KEY(buddy_group_id, student_id)
+      PRIMARY KEY(buddy_group_id, student_id),
+      UNIQUE(student_id)
     );
 
     -- Default group (all students belong to this)
