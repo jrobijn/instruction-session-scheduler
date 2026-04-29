@@ -322,6 +322,7 @@ const en = {
   confirmRemoveInstructor: (n: number) => `This will withdraw ${n} student invitation${n === 1 ? '' : 's'}. The affected student${n === 1 ? '' : 's'} will be notified by email. Continue?`,
   replaceInstructor: 'Replace instructor',
   replaceWith: 'Replace with...',
+  viewInvitation: 'View invitation page',
   invitationNotFound: 'Invitation not found.',
 };
 

@@ -324,6 +324,7 @@ const nl: Translations = {
   confirmRemoveInstructor: (n: number) => `Dit trekt ${n} uitnodiging${n === 1 ? '' : 'en'} in. De betreffende leerling${n === 1 ? '' : 'en'} ${n === 1 ? 'wordt' : 'worden'} per e-mail op de hoogte gebracht. Doorgaan?`,
   replaceInstructor: 'Instructeur vervangen',
   replaceWith: 'Vervangen door...',
+  viewInvitation: 'Bekijk uitnodigingspagina',
   invitationNotFound: 'Uitnodiging niet gevonden.',
 };
 

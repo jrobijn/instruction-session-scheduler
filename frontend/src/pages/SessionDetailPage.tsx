@@ -42,6 +42,14 @@ interface Invitation {
   group_color: string | null;
 }
 
+interface TimetableGroup {
+  group_id: number;
+  percentage: number;
+  group_name: string;
+  group_color: string;
+  is_default: number;
+}
+
 interface SessionDetail {
   id: number;
   date: string;
@@ -51,6 +59,7 @@ interface SessionDetail {
   instructors: Instructor[];
   timeslots: Timeslot[];
   invitations: Invitation[];
+  timetableGroups: TimetableGroup[];
 }
 
 function formatDate(dateStr: string) {
@@ -568,6 +577,40 @@ export default function SessionDetailPage() {
         <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
           {t.slotsInfo(session.timeslots.length * session.instructors.length)}
         </p>
+        {session.timetableGroups.length > 0 && (
+          <div style={{ marginTop: '1rem' }}>
+            <div style={{
+              display: 'flex', height: '32px', borderRadius: '6px', overflow: 'hidden',
+              border: '1px solid #e5e7eb', background: '#f3f4f6',
+            }}>
+              {session.timetableGroups.map((seg, i) => (
+                seg.percentage > 0 ? (
+                  <div key={i} style={{
+                    width: `${seg.percentage}%`,
+                    background: seg.group_color || '#3b82f6',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'white', fontSize: '0.8rem', fontWeight: 600,
+                    minWidth: '24px',
+                    borderRight: i < session.timetableGroups.length - 1 ? '2px solid white' : 'none',
+                  }}>
+                    {seg.percentage}%
+                  </div>
+                ) : null
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+              {session.timetableGroups.map((seg, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem' }}>
+                  <span style={{
+                    width: '12px', height: '12px', borderRadius: '3px',
+                    background: seg.group_color || '#3b82f6', display: 'inline-block', flexShrink: 0,
+                  }} />
+                  {seg.is_default ? t.default : seg.group_name} ({seg.percentage}%)
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
@@ -757,7 +800,13 @@ export default function SessionDetailPage() {
                       </td>
                     )}
                     {!canEdit && session.status === 'invitations_sent' && (
-                      <td>
+                      <td style={{ display: 'flex', gap: '0.3rem' }}>
+                        <button
+                          className="btn btn-outline"
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
+                          onClick={() => window.open(`/invitation/${inv.token}`, '_blank')}
+                          title={t.viewInvitation}
+                        >↗</button>
                         {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
                           <button
                             className="btn btn-outline"

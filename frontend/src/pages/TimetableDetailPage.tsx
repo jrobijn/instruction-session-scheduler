@@ -148,10 +148,10 @@ export default function TimetableDetailPage() {
   const barSegments = isDraft
     ? groupAssignments.map((ga, idx) => {
         const group = allGroups.find(g => g.id === ga.group_id);
-        return { name: group?.name || `Group ${ga.group_id}`, percentage: ga.percentage, color: group?.color || GROUP_COLORS_FALLBACK[idx % GROUP_COLORS_FALLBACK.length] };
+        return { name: group?.is_default ? t.default : (group?.name || `Group ${ga.group_id}`), percentage: ga.percentage, color: group?.color || GROUP_COLORS_FALLBACK[idx % GROUP_COLORS_FALLBACK.length] };
       })
     : timetable.groups.map((g, idx) => ({
-        name: g.group_name + (g.is_default ? ` ${t.defaultSuffix}` : ''),
+        name: g.is_default ? t.default : g.group_name,
         percentage: g.percentage,
         color: g.group_color || GROUP_COLORS_FALLBACK[idx % GROUP_COLORS_FALLBACK.length],
       }));

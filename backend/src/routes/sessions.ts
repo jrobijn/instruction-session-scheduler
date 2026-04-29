@@ -44,9 +44,17 @@ router.get('/:id', (req: Request, res: Response) => {
   // Get timeslots from the attached timetable
   let timeslots: any[] = [];
   let timetable = null;
+  let timetableGroups: any[] = [];
   if (session.timetable_id) {
     timetable = db.prepare('SELECT * FROM timetables WHERE id = ?').get(session.timetable_id);
     timeslots = db.prepare('SELECT * FROM timeslots WHERE timetable_id = ? ORDER BY start_time ASC').all(session.timetable_id);
+    timetableGroups = db.prepare(`
+      SELECT tg.group_id, tg.percentage, g.name AS group_name, g.color AS group_color, g.is_default
+      FROM timetable_groups tg
+      JOIN groups g ON g.id = tg.group_id
+      WHERE tg.timetable_id = ?
+      ORDER BY g.priority ASC
+    `).all(session.timetable_id);
   }
 
   const invitations = db.prepare(`
@@ -64,7 +72,7 @@ router.get('/:id', (req: Request, res: Response) => {
     ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
-  res.json({ ...session, instructors, timeslots, invitations, timetable });
+  res.json({ ...session, instructors, timeslots, invitations, timetable, timetableGroups });
 });
 
 // Create training session
