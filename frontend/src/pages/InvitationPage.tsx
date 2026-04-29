@@ -29,6 +29,8 @@ export default function InvitationPage() {
   const [confirmingAction, setConfirmingAction] = useState<'confirm' | 'decline' | 'cancel' | null>(null);
   const t = useT();
 
+  useEffect(() => { document.title = t.appTitle; }, [t.appTitle]);
+
   useEffect(() => {
     const load = async () => {
       try {
