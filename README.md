@@ -1,6 +1,6 @@
-# Coaching Session Scheduler
+# Instruction Session Scheduler
 
-A web application for scheduling coaching sessions at a sports club. Features an admin panel for managing students, instructors, and training sessions — with automated scheduling that prioritizes students with the fewest attended sessions.
+A web application for scheduling instruction sessions at a sports club. Features an admin panel for managing students, instructors, and training sessions — with automated scheduling that prioritizes students with the fewest attended sessions.
 
 ## Features
 
@@ -55,7 +55,6 @@ Edit `backend/.env`:
 In-app settings (via Settings page):
 - **Club Name**: Shown in emails and invitation page
 - **Sessions per Instructor**: How many students each instructor coaches per session
-- **Invitation Email Subject**: Email subject line
 
 ## How It Works
 

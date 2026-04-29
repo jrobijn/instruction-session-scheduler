@@ -142,7 +142,7 @@ export default function TimetablesPage() {
             {error && <div className="alert alert-error">{error}</div>}
             <div className="form-group">
               <label>{t.name}</label>
-              <input value={name} onChange={e => setName(e.target.value)} placeholder={t.timetableNamePlaceholder} required />
+              <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={t.timetableNamePlaceholder} required />
             </div>
             <div className="modal-actions">
               <button className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>

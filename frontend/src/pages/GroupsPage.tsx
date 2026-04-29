@@ -179,7 +179,7 @@ export default function GroupsPage() {
           <tbody>
             {sortedGroups.map(g => (
               <tr key={g.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/groups/${g.id}`)}>
-                <td>{g.name}{g.is_default ? ` ${t.defaultSuffix}` : ''}</td>
+                <td>{g.is_default ? `${t.default} ${t.defaultSuffix}` : g.name}</td>
                 <td>
                   <input
                     type="color"
@@ -225,7 +225,7 @@ export default function GroupsPage() {
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label>{t.name}</label>
-                <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+                <input autoFocus={!editing} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
               </div>
               <div className="form-group">
                 <label>{t.priorityFieldLabel}</label>

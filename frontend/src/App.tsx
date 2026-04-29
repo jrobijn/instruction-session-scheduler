@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
 import { isAuthenticated, clearToken } from './api';
 import { useT } from './i18n';
@@ -22,6 +22,8 @@ function AdminLayout() {
   const navigate = useNavigate();
   const [, forceUpdate] = useState(0);
   const t = useT();
+
+  useEffect(() => { document.title = t.appTitle; }, [t.appTitle]);
 
   const handleLogout = () => {
     clearToken();

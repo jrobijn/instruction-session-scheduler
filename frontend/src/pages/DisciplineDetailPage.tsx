@@ -183,7 +183,7 @@ export default function DisciplineDetailPage() {
           <tbody>
             {groups.map(g => (
               <tr key={g.id}>
-                <td>{g.name}{g.is_default ? ` ${t.defaultSuffix}` : ''}</td>
+                <td>{g.is_default ? `${t.default} ${t.defaultSuffix}` : g.name}</td>
                 <td>{g.priority}</td>
                 <td>
                   <span className={`badge ${g.active ? 'badge-confirmed' : 'badge-declined'}`}>

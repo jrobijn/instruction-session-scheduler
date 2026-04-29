@@ -47,44 +47,47 @@ interface EmailStrings {
   confirmationSubject: (clubName: string) => string;
   cancellationBody: (clubName: string) => string;
   cancellationSubject: (clubName: string) => string;
+  invitationSubject: (clubName: string) => string;
 }
 
 const emailStrings: Record<string, EmailStrings> = {
   en: {
     greeting: (name) => `Hi ${name},`,
-    invitationBody: (clubName, date) => `You have been invited to a coaching session at <strong>${clubName}</strong> on <strong>${date}</strong>.`,
+    invitationBody: (clubName, date) => `You have been invited to an instruction session at <strong>${clubName}</strong> on <strong>${date}</strong>.`,
     invitationCta: 'Please click the link below to confirm or decline your attendance:',
     respondButton: 'Respond to Invitation',
     copyLink: 'Or copy this link:',
     bestRegards: 'Best regards,',
-    confirmationBody: (clubName) => `Your attendance has been confirmed for the coaching session at <strong>${clubName}</strong>.`,
+    confirmationBody: (clubName) => `Your attendance has been confirmed for the instruction session at <strong>${clubName}</strong>.`,
     dateLabel: 'Date:',
     timeLabel: 'Time:',
     disciplineLabel: 'Discipline:',
     cancelExplanation: 'If you can no longer attend, please cancel your participation using the link below so another student can take your place:',
     cancelButton: 'Cancel Participation',
     seeYou: 'See you at the training!',
-    confirmationSubject: (clubName) => `Confirmation — ${clubName}`,
-    cancellationBody: (clubName) => `Your participation in the coaching session at <strong>${clubName}</strong> has been cancelled.`,
-    cancellationSubject: (clubName) => `Cancellation — ${clubName}`,
+    confirmationSubject: (clubName) => `Instruction Session Confirmed — ${clubName}`,
+    cancellationBody: (clubName) => `Your participation in the instruction session at <strong>${clubName}</strong> has been cancelled.`,
+    cancellationSubject: (clubName) => `Instruction Session Cancelled — ${clubName}`,
+    invitationSubject: (clubName) => `Instruction Session Invitation — ${clubName}`,
   },
   nl: {
     greeting: (name) => `Hoi ${name},`,
-    invitationBody: (clubName, date) => `Je bent uitgenodigd voor een coachingsessie bij <strong>${clubName}</strong> op <strong>${date}</strong>.`,
+    invitationBody: (clubName, date) => `Je bent uitgenodigd voor een instructiesessie bij <strong>${clubName}</strong> op <strong>${date}</strong>.`,
     invitationCta: 'Klik op de link hieronder om je aanwezigheid te bevestigen of af te wijzen:',
     respondButton: 'Reageer op uitnodiging',
     copyLink: 'Of kopieer deze link:',
     bestRegards: 'Met vriendelijke groet,',
-    confirmationBody: (clubName) => `Je aanwezigheid is bevestigd voor de coachingsessie bij <strong>${clubName}</strong>.`,
+    confirmationBody: (clubName) => `Je aanwezigheid is bevestigd voor de instructiesessie bij <strong>${clubName}</strong>.`,
     dateLabel: 'Datum:',
     timeLabel: 'Tijd:',
     disciplineLabel: 'Discipline:',
     cancelExplanation: 'Als je toch niet kunt komen, annuleer dan je deelname via de link hieronder zodat een andere leerling jouw plek kan innemen:',
     cancelButton: 'Deelname annuleren',
     seeYou: 'Tot bij de training!',
-    confirmationSubject: (clubName) => `Bevestiging — ${clubName}`,
-    cancellationBody: (clubName) => `Je deelname aan de coachingsessie bij <strong>${clubName}</strong> is geannuleerd.`,
-    cancellationSubject: (clubName) => `Annulering — ${clubName}`,
+    confirmationSubject: (clubName) => `Instructiesessie bevestigd — ${clubName}`,
+    cancellationBody: (clubName) => `Je deelname aan de instructiesessie bij <strong>${clubName}</strong> is geannuleerd.`,
+    cancellationSubject: (clubName) => `Instructiesessie geannuleerd — ${clubName}`,
+    invitationSubject: (clubName) => `Uitnodiging instructiesessie — ${clubName}`,
   },
 };
 
@@ -98,14 +101,14 @@ interface InvitationEmailParams {
   date: string;
   token: string;
   clubName: string;
-  subject: string;
   locale?: string;
 }
 
-export async function sendInvitationEmail({ to, studentName, date, token, clubName, subject, locale }: InvitationEmailParams): Promise<void> {
+export async function sendInvitationEmail({ to, studentName, date, token, clubName, locale }: InvitationEmailParams): Promise<void> {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const invitationUrl = `${frontendUrl}/invitation/${token}`;
   const s = getEmailStrings(locale || 'en');
+  const subject = s.invitationSubject(clubName);
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

@@ -16,15 +16,15 @@ router.get('/', (_req: Request, res: Response) => {
   const students = db.prepare('SELECT * FROM students ORDER BY last_name ASC, first_name ASC').all() as any[];
   // Attach group names for each student
   const groupMemberships = db.prepare(`
-    SELECT sg.student_id, g.id AS group_id, g.name AS group_name
+    SELECT sg.student_id, g.id AS group_id, g.name AS group_name, g.color AS group_color
     FROM student_groups sg
     JOIN groups g ON g.id = sg.group_id
     ORDER BY g.priority ASC
-  `).all() as Array<{ student_id: number; group_id: number; group_name: string }>;
-  const groupsByStudent = new Map<number, Array<{ id: number; name: string }>>();
+  `).all() as Array<{ student_id: number; group_id: number; group_name: string; group_color: string | null }>;
+  const groupsByStudent = new Map<number, Array<{ id: number; name: string; color: string | null }>>();
   for (const m of groupMemberships) {
     if (!groupsByStudent.has(m.student_id)) groupsByStudent.set(m.student_id, []);
-    groupsByStudent.get(m.student_id)!.push({ id: m.group_id, name: m.group_name });
+    groupsByStudent.get(m.student_id)!.push({ id: m.group_id, name: m.group_name, color: m.group_color });
   }
   const result = students.map(s => ({ ...s, groups: groupsByStudent.get(s.id) || [] }));
   res.json(result);

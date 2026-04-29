@@ -138,7 +138,8 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS buddy_group_members (
       buddy_group_id INTEGER NOT NULL REFERENCES buddy_groups(id) ON DELETE CASCADE,
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-      PRIMARY KEY(buddy_group_id, student_id)
+      PRIMARY KEY(buddy_group_id, student_id),
+      UNIQUE(student_id)
     );
 
     -- Default group (all students belong to this)
@@ -151,7 +152,6 @@ export function initializeDatabase(): void {
 
     -- Default settings
     INSERT OR IGNORE INTO settings (key, value) VALUES ('club_name', 'Sports Club');
-    INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_email_subject', 'You are invited to a coaching session!');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('club_days', '0|1|2|3|4|5|6');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_expiry_minutes', '120');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_check_interval_minutes', '15');

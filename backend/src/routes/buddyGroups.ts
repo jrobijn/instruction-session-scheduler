@@ -72,6 +72,9 @@ router.post('/:id/members', (req: Request, res: Response) => {
   const student = db.prepare('SELECT id FROM students WHERE id = ?').get(student_id) as any;
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
+  const existing = db.prepare('SELECT buddy_group_id FROM buddy_group_members WHERE student_id = ?').get(student_id) as any;
+  if (existing) { res.status(400).json({ error: 'Student is already in a buddy group' }); return; }
+
   try {
     db.prepare('INSERT OR IGNORE INTO buddy_group_members (buddy_group_id, student_id) VALUES (?, ?)').run(req.params.id, student_id);
     res.json({ success: true });
@@ -101,11 +104,11 @@ router.get('/:id/non-members', (req: Request, res: Response) => {
     SELECT s.id, s.first_name, s.last_name, s.email
     FROM students s
     WHERE s.active = 1
-      AND s.id NOT IN (SELECT student_id FROM buddy_group_members WHERE buddy_group_id = ?)
+      AND s.id NOT IN (SELECT student_id FROM buddy_group_members)
       AND (s.first_name || ' ' || s.last_name LIKE ? OR s.email LIKE ?)
     ORDER BY s.last_name ASC, s.first_name ASC
     LIMIT 20
-  `).all(req.params.id, `%${q}%`, `%${q}%`);
+  `).all(`%${q}%`, `%${q}%`);
   res.json(students);
 });
 
