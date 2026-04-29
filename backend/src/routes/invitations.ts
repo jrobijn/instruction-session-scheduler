@@ -76,8 +76,6 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
 
   try {
     const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
-    const subject = (db.prepare("SELECT value FROM settings WHERE key = 'invitation_email_subject'").get() as any)?.value
-      || 'You are invited to a coaching session!';
     const emailLocale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
 
     await sendInvitationEmail({
@@ -86,7 +84,6 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
       date: invitation.session_date,
       token,
       clubName,
-      subject,
       locale: emailLocale,
     });
     db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE token = ?").run(token);

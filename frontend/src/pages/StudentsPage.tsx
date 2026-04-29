@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
-import { useT } from '../i18n';
+import { useT, getLocale } from '../i18n';
 
 interface Student {
   id: number;
@@ -15,6 +15,7 @@ interface Student {
   preferred_days: string;
   active: number;
   cooldown_until: string | null;
+  groups?: Array<{ id: number; name: string; color: string | null }>;
 }
 
 interface Timetable {
@@ -25,7 +26,6 @@ interface Timetable {
   timeslots?: Array<{ id: number; start_time: string }>;
 }
 
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -46,6 +46,9 @@ export default function StudentsPage() {
   const [priorityMode, setPriorityMode] = useState(false);
   const [editedPriorities, setEditedPriorities] = useState<Record<number, number>>({});
   const [showPrioritySavePrompt, setShowPrioritySavePrompt] = useState(false);
+  const [expandedStudent, setExpandedStudent] = useState<number | null>(null);
+  const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
+  const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
   const t = useT();
 
   const toggleSort = (col: keyof Student) => {
@@ -135,6 +138,13 @@ export default function StudentsPage() {
       }
       setShowModal(false);
       load();
+      // Refresh detail prefs if the edited student is currently expanded
+      if (expandedStudent === studentId) {
+        try {
+          const prefs = await api.getStudentPreferredTimeslots(studentId);
+          setDetailTimeslotPrefs(prefs);
+        } catch { setDetailTimeslotPrefs({}); }
+      }
     } catch (err: any) {
       setError(err.message);
     }
@@ -190,11 +200,12 @@ export default function StudentsPage() {
 
   const hasActiveCooldown = (s: Student) => s.cooldown_until && new Date(s.cooldown_until + 'Z') > new Date();
 
-  const formatCooldown = (s: Student) => {
+  const getCooldownInfo = (s: Student) => {
     if (!hasActiveCooldown(s)) return null;
     const until = new Date(s.cooldown_until + 'Z');
     const days = Math.ceil((until.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    return `${days}d (until ${until.toLocaleDateString()})`;
+    const dateLocale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
+    return { days, date: until.toLocaleDateString(dateLocale) };
   };
 
   const handleSetCooldown = async () => {
@@ -305,33 +316,49 @@ export default function StudentsPage() {
         <table>
           <thead>
             <tr>
-              <th className="sortable" onClick={() => toggleSort('first_name')}>{t.firstName}{sortIcon('first_name')}</th>
-              <th className="sortable" onClick={() => toggleSort('last_name')}>{t.lastName}{sortIcon('last_name')}</th>
-              <th className="sortable" onClick={() => toggleSort('email')}>{t.email}{sortIcon('email')}</th>
-              <th>{t.membershipId}</th>
+              <th className="sortable" onClick={() => toggleSort('last_name')}>{t.name}{sortIcon('last_name')}</th>
+              <th className="sortable" onClick={() => toggleSort('membership_id')}>{t.membershipId}{sortIcon('membership_id')}</th>
               <th className="sortable" onClick={() => toggleSort('attended_sessions')}>{t.sessionsAttended}{sortIcon('attended_sessions')}</th>
               <th className="sortable" onClick={() => toggleSort('no_show_count')}>{t.noShows}{sortIcon('no_show_count')}</th>
               <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
-              <th>{t.cooldown}</th>
+              <th></th>
               <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
-            {sortedStudents.map(s => (
-              <tr key={s.id}>
-                <td>{s.first_name}</td>
-                <td>{s.last_name}</td>
-                <td>{s.email}</td>
+            {sortedStudents.map(s => {
+              const cooldownInfo = getCooldownInfo(s);
+              const isExpanded = expandedStudent === s.id;
+              return (
+              <>
+              <tr key={s.id} onClick={async () => {
+                if (isExpanded) { setExpandedStudent(null); }
+                else {
+                  setExpandedStudent(s.id);
+                  try {
+                    const allTt = await api.getTimetables();
+                    const active = allTt.filter((tt: Timetable) => tt.active && tt.status === 'saved');
+                    const withTs = await Promise.all(active.map(async (tt: Timetable) => {
+                      const detail = await api.getTimetable(tt.id);
+                      return { ...tt, timeslots: detail.timeslots };
+                    }));
+                    setDetailTimetables(withTs);
+                    const prefs = await api.getStudentPreferredTimeslots(s.id);
+                    setDetailTimeslotPrefs(prefs);
+                  } catch { setDetailTimetables([]); setDetailTimeslotPrefs({}); }
+                }
+              }} style={{ cursor: 'pointer' }}>
+                <td>{s.first_name} {s.last_name}</td>
                 <td>{s.membership_id}</td>
                 <td>{s.attended_sessions}</td>
                 <td>{s.no_show_count}</td>
                 <td>
                   {priorityMode ? (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [s.id]: Math.max(0, getStudentPriority(s) - 1) })}>−</button>
+                      <button className="btn btn-outline btn-sm" onClick={(e) => { e.stopPropagation(); setEditedPriorities({ ...editedPriorities, [s.id]: Math.max(0, getStudentPriority(s) - 1) }); }}>−</button>
                       <span style={{ minWidth: '2ch', textAlign: 'center', fontWeight: getStudentPriority(s) !== s.priority ? 700 : 400, color: getStudentPriority(s) !== s.priority ? '#2563eb' : undefined }}>{getStudentPriority(s)}</span>
-                      <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [s.id]: getStudentPriority(s) + 1 })}>+</button>
+                      <button className="btn btn-outline btn-sm" onClick={(e) => { e.stopPropagation(); setEditedPriorities({ ...editedPriorities, [s.id]: getStudentPriority(s) + 1 }); }}>+</button>
                     </span>
                   ) : (
                     s.priority
@@ -343,15 +370,20 @@ export default function StudentsPage() {
                   </span>
                 </td>
                 <td>
-                  {hasActiveCooldown(s) ? (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span className="badge badge-declined" title={`Until ${new Date(s.cooldown_until + 'Z').toLocaleString()}`}>
-                        {formatCooldown(s)}
-                      </span>
-                      <button className="btn btn-outline btn-sm" onClick={() => handleClearCooldown(s.id)} title={t.removeCooldownTooltip}>✕</button>
-                    </span>
+                  {cooldownInfo ? (
+                    <button
+                      className="btn btn-sm"
+                      style={{ background: '#dc2626', color: 'white', border: 'none', padding: '0.25rem 0.5rem', lineHeight: 1 }}
+                      title={t.cooldownTooltip(cooldownInfo.days)}
+                      onClick={(e) => { e.stopPropagation(); handleClearCooldown(s.id); }}
+                    >⏱</button>
                   ) : (
-                    <button className="btn btn-outline btn-sm" onClick={() => { setCooldownModal(s); setCooldownDays(7); }}>{t.setCooldown}</button>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      style={{ padding: '0.25rem 0.5rem', lineHeight: 1 }}
+                      title={t.setCooldown}
+                      onClick={(e) => { e.stopPropagation(); setCooldownModal(s); setCooldownDays(7); }}
+                    >⏱</button>
                   )}
                 </td>
                 <td>
@@ -362,7 +394,70 @@ export default function StudentsPage() {
                   ]} />
                 </td>
               </tr>
-            ))}
+              {isExpanded && (
+                <tr key={`${s.id}-details`}>
+                  <td colSpan={8} style={{ background: '#f9fafb', padding: '1rem 1.5rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem 2rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
+                        <strong>{t.firstName}:</strong> <span>{s.first_name}</span>
+                        <strong>{t.lastName}:</strong> <span>{s.last_name}</span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
+                        <strong>{t.email}:</strong> <span>{s.email}</span>
+                        <strong>{t.membershipId}:</strong> <span>{s.membership_id || t.noData}</span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
+                        <strong>{t.sessionsAttended}:</strong> <span>{s.attended_sessions}</span>
+                        <strong>{t.noShows}:</strong> <span>{s.no_show_count}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem 2rem', marginTop: '0.75rem' }}>
+                      <div>
+                        <div>
+                          <strong>{t.preferredDays}:</strong>
+                          <div style={{ marginTop: '0.25rem' }}>{s.preferred_days ? s.preferred_days.split('|').filter(d => clubDays.includes(Number(d))).map(d => t.days[Number(d)]).join(', ') || t.noData : t.noData}</div>
+                        </div>
+                        {detailTimetables.length > 0 && (
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <strong>{t.preferredTimeslots}:</strong>
+                            {detailTimetables.map(tt => {
+                              const slots = tt.timeslots || [];
+                              const prefIds = detailTimeslotPrefs[tt.id];
+                              const display = prefIds && prefIds.length > 0
+                                ? slots.filter(sl => prefIds.includes(sl.id)).map(sl => sl.start_time.slice(0, 5)).join(', ')
+                                : null;
+                              return (
+                                <div key={tt.id} style={{ marginTop: '0.25rem' }}>
+                                  <em>{tt.name}:</em> {display || t.noData}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <strong>{t.groups}:</strong>
+                        {s.groups && s.groups.length > 0 ? s.groups.map(g => (
+                          <div key={g.id} style={{ marginLeft: '0.25rem', marginTop: '0.25rem', display: 'flex', alignItems: 'center' }}>
+                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: g.color || '#999', marginRight: 8, flexShrink: 0 }} />{g.name}
+                          </div>
+                        )) : <span> {t.noData}</span>}
+                      </div>
+                      <div>
+                        {cooldownInfo && (
+                          <div style={{ color: '#991b1b' }}>
+                            <strong>{t.cooldown}:</strong>
+                            <div style={{ marginTop: '0.25rem' }}>{t.cooldownDetail(cooldownInfo.days, cooldownInfo.date)}</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -375,7 +470,7 @@ export default function StudentsPage() {
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label>{t.firstName}</label>
-                <input value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required />
+                <input autoFocus={!editing} value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required />
               </div>
               <div className="form-group">
                 <label>{t.lastName}</label>
@@ -392,7 +487,7 @@ export default function StudentsPage() {
               <div className="form-group">
                 <label>{t.preferredDays}</label>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {DAY_LABELS.map((label, idx) => {
+                  {[0, 1, 2, 3, 4, 5, 6].map(idx => {
                     const days = form.preferred_days ? form.preferred_days.split('|').filter(Boolean) : [];
                     const checked = days.includes(String(idx));
                     const isClubDay = clubDays.includes(idx);
@@ -409,7 +504,7 @@ export default function StudentsPage() {
                             setForm({ ...form, preferred_days: newDays.join('|') });
                           }}
                         />
-                        {label}
+                        {t.days[idx]}
                       </label>
                     );
                   })}
@@ -500,7 +595,7 @@ export default function StudentsPage() {
               <input type="number" min={1} value={cooldownDays} onChange={e => setCooldownDays(Number(e.target.value))} />
               {cooldownDays > 0 && (
                 <small style={{ color: '#666', marginTop: '0.25rem', display: 'block' }}>
-                  {t.cooldownUntil(new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toLocaleDateString())}
+                  {t.cooldownUntil(new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB'))}
                 </small>
               )}
             </div>

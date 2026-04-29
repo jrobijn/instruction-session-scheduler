@@ -122,7 +122,7 @@ export default function BuddyGroupsPage() {
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label>{t.name}</label>
-                <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+                <input autoFocus={!editing} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>

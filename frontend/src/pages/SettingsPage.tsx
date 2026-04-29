@@ -6,7 +6,6 @@ interface Settings {
   [key: string]: string;
 }
 
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({});
@@ -40,7 +39,6 @@ export default function SettingsPage() {
 
   const settingsConfig = [
     { key: 'club_name', label: t.settingClubName, type: 'text', description: t.settingClubNameDesc },
-    { key: 'invitation_email_subject', label: t.settingEmailSubject, type: 'text', description: t.settingEmailSubjectDesc },
     { key: 'invitation_expiry_minutes', label: t.settingExpiryMinutes, type: 'number', description: t.settingExpiryMinutesDesc },
     { key: 'invitation_check_interval_minutes', label: t.settingCheckInterval, type: 'number', description: t.settingCheckIntervalDesc },
   ];
@@ -96,7 +94,7 @@ export default function SettingsPage() {
         <div className="form-group">
           <label>{t.settingClubDays}</label>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            {DAY_LABELS.map((label, idx) => {
+            {[0, 1, 2, 3, 4, 5, 6].map(idx => {
               const days = (settings.club_days || '0|1|2|3|4|5|6').split('|').filter(Boolean);
               const checked = days.includes(String(idx));
               const isLastChecked = checked && days.length <= 1;
@@ -115,7 +113,7 @@ export default function SettingsPage() {
                       saveSetting('club_days', newValue);
                     }}
                   />
-                  {label}
+                  {t.days[idx]}
                 </label>
               );
             })}

@@ -223,7 +223,7 @@ export default function DisciplinesPage() {
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label>{t.name}</label>
-                <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+                <input autoFocus={!editing} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
               </div>
               <div className="form-group">
                 <label>{t.abbreviation}</label>

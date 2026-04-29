@@ -21,6 +21,7 @@ export default function InstructorsPage() {
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [expandedInstructor, setExpandedInstructor] = useState<number | null>(null);
   const [sortCol, setSortCol] = useState<keyof Instructor>('last_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -164,19 +165,18 @@ export default function InstructorsPage() {
         <table>
           <thead>
             <tr>
-              <th className="sortable" onClick={() => toggleSort('first_name')}>{t.firstName}{sortIcon('first_name')}</th>
-              <th className="sortable" onClick={() => toggleSort('last_name')}>{t.lastName}{sortIcon('last_name')}</th>
-              <th className="sortable" onClick={() => toggleSort('email')}>{t.email}{sortIcon('email')}</th>
+              <th className="sortable" onClick={() => toggleSort('last_name')}>{t.name}{sortIcon('last_name')}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
               <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
-            {sortedInstructors.map(i => (
-              <tr key={i.id}>
-                <td>{i.first_name}</td>
-                <td>{i.last_name}</td>
-                <td>{i.email}</td>
+            {sortedInstructors.map(i => {
+              const isExpanded = expandedInstructor === i.id;
+              return (
+              <>
+              <tr key={i.id} onClick={() => setExpandedInstructor(isExpanded ? null : i.id)} style={{ cursor: 'pointer' }}>
+                <td>{i.first_name} {i.last_name}</td>
                 <td>
                   <span className={`badge ${i.active ? 'badge-confirmed' : 'badge-declined'}`}>
                     {i.active ? t.active : t.inactive}
@@ -190,7 +190,25 @@ export default function InstructorsPage() {
                   ]} />
                 </td>
               </tr>
-            ))}
+              {isExpanded && (
+                <tr key={`${i.id}-details`}>
+                  <td colSpan={3} style={{ background: '#f9fafb', padding: '1rem 1.5rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem 2rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
+                        <strong>{t.firstName}:</strong> <span>{i.first_name}</span>
+                        <strong>{t.lastName}:</strong> <span>{i.last_name}</span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
+                        <strong>{t.email}:</strong> <span>{i.email}</span>
+                      </div>
+                      <div></div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -203,7 +221,7 @@ export default function InstructorsPage() {
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label>{t.firstName}</label>
-                <input value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required />
+                <input autoFocus={!editing} value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required />
               </div>
               <div className="form-group">
                 <label>{t.lastName}</label>

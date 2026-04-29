@@ -121,7 +121,7 @@ export default function GroupDetailPage() {
       </button>
 
       <div className="page-header">
-        <h1>{group.name}{group.is_default ? ` ${t.defaultSuffix}` : ''}</h1>
+        <h1>{group.is_default ? `${t.default} ${t.defaultSuffix}` : group.name}</h1>
         <span style={{ color: '#666', fontSize: '0.9rem' }}>{t.groupInfo(group.priority, members.length)}</span>
       </div>
 
