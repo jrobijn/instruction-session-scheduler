@@ -44,7 +44,7 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
       AND id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
-        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled')
+        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')
       )
     ORDER BY priority ASC, last_name ASC, first_name ASC
   `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), ...alreadyInvited, invitation.session_date) as any[];

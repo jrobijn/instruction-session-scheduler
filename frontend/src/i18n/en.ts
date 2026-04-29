@@ -2,6 +2,7 @@ const en = {
   // Common
   loading: 'Loading...',
   save: 'Save',
+  confirm: 'Confirm',
   cancel: 'Cancel',
   create: 'Create',
   edit: 'Edit',
@@ -192,6 +193,11 @@ const en = {
   markCompleted: 'Mark as Completed',
   completing: 'Completing...',
   confirmComplete: 'Mark this session as completed? This will update attendance counts.',
+  cancelSession: 'Cancel Session',
+  cancelling: 'Cancelling...',
+  confirmCancelSession: (n: number) => n > 0
+    ? `Cancel this session? ${n} student(s) will be notified that their invitation has been withdrawn.`
+    : 'Cancel this session? No students have been invited yet.',
   confirmTimetableChange: 'Changing the timetable will clear the generated schedule and reset the session to draft. Continue?',
   scheduleOverview: 'Schedule Overview',
   exportPdf: 'Export PDF',
@@ -202,6 +208,7 @@ const en = {
   summaryScheduled: (n: number) => `Scheduled: ${n}`,
   summaryDeclined: (n: number) => `Declined: ${n}`,
   summaryCancelled: (n: number) => `Cancelled: ${n}`,
+  summaryWithdrawn: (n: number) => `Withdrawn: ${n}`,
   summaryExpired: (n: number) => `Expired: ${n}`,
   timeslot: 'Timeslot',
   student: 'Student',
@@ -230,6 +237,7 @@ const en = {
       confirmed: 'confirmed',
       declined: 'declined',
       cancelled: 'cancelled',
+      admin_cancelled: 'withdrawn',
       expired: 'expired',
       scheduled: 'scheduled',
       invited: 'invited',
@@ -299,6 +307,7 @@ const en = {
   invitationDeclinedMsg: 'You have declined this invitation. Another student will be invited in your place.',
   invitationExpiredMsg: 'This invitation has expired. Another student has been invited in your place.',
   invitationCancelledMsg: 'Your participation has been cancelled. Another student will be invited in your place.',
+  invitationWithdrawnMsg: 'Your invitation has been withdrawn by the organiser.',
   cancelParticipation: 'Cancel Participation',
   confirmPromptConfirm: 'Are you sure you want to confirm your attendance?',
   confirmPromptDecline: 'Are you sure you want to decline this invitation?',
@@ -307,6 +316,12 @@ const en = {
   yesDecline: 'Yes, decline',
   yesCancel: 'Yes, cancel',
   goBack: 'Go back',
+  adminCancelInvitation: 'Withdraw Invitation',
+  confirmAdminCancel: 'Are you sure you want to withdraw this invitation? The student will be notified by email.',
+  confirmAddAndInvite: 'This will immediately send an invitation email to the student. Continue?',
+  confirmRemoveInstructor: (n: number) => `This will withdraw ${n} student invitation${n === 1 ? '' : 's'}. The affected student${n === 1 ? '' : 's'} will be notified by email. Continue?`,
+  replaceInstructor: 'Replace instructor',
+  replaceWith: 'Replace with...',
   invitationNotFound: 'Invitation not found.',
 };
 

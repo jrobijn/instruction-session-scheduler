@@ -75,6 +75,9 @@ export default function SessionDetailPage() {
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLImageElement | null>(null);
+  const [replacingInstructorId, setReplacingInstructorId] = useState<number | null>(null);
+  const [replacementTargetId, setReplacementTargetId] = useState<number | null>(null);
+  const [showAddInstructor, setShowAddInstructor] = useState(false);
 
   useEffect(() => {
     const img = new Image();
@@ -128,6 +131,9 @@ export default function SessionDetailPage() {
 
   const addStudentToSlot = async (studentId: number) => {
     if (!addSlot) return;
+    if (session?.status === 'invitations_sent') {
+      if (!confirm(t.confirmAddAndInvite)) return;
+    }
     try {
       await api.addSessionInvitation(Number(id), {
         student_id: studentId,
@@ -154,8 +160,29 @@ export default function SessionDetailPage() {
   };
 
   const removeInstructor = async (instructorId: number) => {
+    // Count active invitations that will be cancelled for this instructor
+    const activeInvs = session?.invitations.filter(
+      inv => inv.instructor_id === instructorId &&
+        inv.status !== 'declined' && inv.status !== 'expired' &&
+        inv.status !== 'cancelled' && inv.status !== 'admin_cancelled'
+    ) || [];
+    const sentInvs = activeInvs.filter(inv => inv.status === 'invited' || inv.status === 'confirmed');
+    if (sentInvs.length > 0) {
+      if (!confirm(t.confirmRemoveInstructor(sentInvs.length))) return;
+    }
     try {
       await api.removeInstructor(Number(id), instructorId);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const replaceInstructor = async (oldInstructorId: number, newInstructorId: number) => {
+    try {
+      await api.replaceInstructor(Number(id), oldInstructorId, newInstructorId);
+      setReplacingInstructorId(null);
+      setReplacementTargetId(null);
       load();
     } catch (err: any) {
       alert(err.message);
@@ -208,11 +235,35 @@ export default function SessionDetailPage() {
     }
   };
 
+  const adminCancelInvitation = async (invitationId: number) => {
+    if (!confirm(t.confirmAdminCancel)) return;
+    try {
+      await api.adminCancelInvitation(Number(id), invitationId);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const completeSession = async () => {
     if (!confirm(t.confirmComplete)) return;
     setActionLoading('completing');
     try {
       await api.completeSession(Number(id));
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const cancelSession = async () => {
+    const activeCount = session?.invitations.filter(inv => inv.status === 'invited' || inv.status === 'confirmed').length || 0;
+    if (!confirm(t.confirmCancelSession(activeCount))) return;
+    setActionLoading('cancelling');
+    try {
+      await api.cancelSession(Number(id));
       load();
     } catch (err: any) {
       alert(err.message);
@@ -230,6 +281,7 @@ export default function SessionDetailPage() {
   const confirmed = session.invitations.filter(i => i.status === 'confirmed').length;
   const declined = session.invitations.filter(i => i.status === 'declined').length;
   const cancelled = session.invitations.filter(i => i.status === 'cancelled').length;
+  const adminCancelled = session.invitations.filter(i => i.status === 'admin_cancelled').length;
   const expired = session.invitations.filter(i => i.status === 'expired').length;
   const invited = session.invitations.filter(i => i.status === 'invited').length;
   const scheduled = session.invitations.filter(i => i.status === 'scheduled').length;
@@ -240,7 +292,7 @@ export default function SessionDetailPage() {
     scheduleGrid[ts.id] = {};
   }
   for (const inv of session.invitations) {
-    if (inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled') {
+    if (inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled') {
       scheduleGrid[inv.timeslot_id] ??= {};
       scheduleGrid[inv.timeslot_id][inv.instructor_id] = inv;
     }
@@ -252,6 +304,7 @@ export default function SessionDetailPage() {
   // existing invitations (including declined) plus an empty add-row if the slot is unoccupied
   type SlotEntry = { timeslotId: number; instructorId: number; startTime: string; invitation: Invitation | null; empty: boolean };
   const allSlots: SlotEntry[] = [];
+  const assignedInstructorIds = new Set(session.instructors.map(i => i.id));
   for (const ts of session.timeslots) {
     for (const instr of session.instructors) {
       const slotInvitations = session.invitations.filter(
@@ -262,11 +315,18 @@ export default function SessionDetailPage() {
         allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: inv, empty: false });
       }
       // If no active (non-declined/expired) invitation occupies this slot, add an empty row
-      const hasActive = slotInvitations.some(inv => inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled');
+      const hasActive = slotInvitations.some(inv => inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled');
       if (!hasActive) {
         allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: null, empty: true });
       }
     }
+  }
+  // Add orphaned invitations (instructor was removed from session)
+  const orphanedInvitations = session.invitations.filter(
+    inv => !assignedInstructorIds.has(inv.instructor_id)
+  );
+  for (const inv of orphanedInvitations) {
+    allSlots.push({ timeslotId: inv.timeslot_id, instructorId: inv.instructor_id, startTime: inv.timeslot_start_time, invitation: inv, empty: false });
   }
 
   const exportPdf = () => {
@@ -382,38 +442,91 @@ export default function SessionDetailPage() {
       {/* Instructors Section */}
       <div className="card" style={{ marginBottom: '2rem' }}>
         <h2>{t.instructorsCount(session.instructors.length)}</h2>
-        {session.status === 'draft' && (
-          <div style={{ marginBottom: '1rem' }}>
-            <select value="" onChange={async e => {
-              const val = e.target.value;
-              if (!val) return;
-              try {
-                await api.assignInstructor(Number(id), Number(val));
-                load();
-              } catch (err: any) {
-                alert(err.message);
-              }
-            }}>
-              <option value="">{t.selectInstructor}</option>
-              {availableInstructors.map(i => (
-                <option key={i.id} value={i.id}>{i.first_name} {i.last_name}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        {session.instructors.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>{t.noInstructorsAssigned}</p>
-        ) : (
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
             {session.instructors.map(i => (
-              <span key={i.id} className="badge badge-confirmed" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem' }}>
-                {i.first_name} {i.last_name}
-                {session.status === 'draft' && (
-                  <button onClick={() => removeInstructor(i.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>
+              <span key={i.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                {replacingInstructorId === i.id ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: '#475569', color: '#ffffff', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600 }}>
+                    <span>{i.first_name} {i.last_name}</span>
+                    <span style={{ color: '#cbd5e1' }}>→</span>
+                    <select
+                      autoFocus
+                      value={replacementTargetId ?? ''}
+                      onChange={e => setReplacementTargetId(e.target.value ? Number(e.target.value) : null)}
+                      style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid #94a3b8', background: '#334155', color: '#ffffff' }}
+                    >
+                      <option value="">{t.replaceWith}</option>
+                      {allInstructors.filter(inst => !assignedIds.has(inst.id)).map(inst => (
+                        <option key={inst.id} value={inst.id}>{inst.first_name} {inst.last_name}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => { if (replacementTargetId) replaceInstructor(i.id, replacementTargetId); }}
+                      disabled={!replacementTargetId}
+                      title={t.confirm}
+                      style={{ background: 'none', border: 'none', cursor: replacementTargetId ? 'pointer' : 'default', fontSize: '1.1rem', color: replacementTargetId ? '#4ade80' : '#64748b', padding: '0 0.2rem' }}
+                    >✓</button>
+                    <button
+                      onClick={() => { setReplacingInstructorId(null); setReplacementTargetId(null); }}
+                      title={t.cancel}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem', color: '#f87171', padding: '0 0.2rem' }}
+                    >✗</button>
+                  </span>
+                ) : (
+                  <span className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: '#475569', color: '#ffffff' }}>
+                    {i.first_name} {i.last_name}
+                    {session.status !== 'completed' && session.status !== 'cancelled' && (
+                      <>
+                        <button onClick={() => { setReplacingInstructorId(i.id); setReplacementTargetId(null); }} title={t.replaceInstructor} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1.05rem' }}>⇄</button>
+                        <button onClick={() => removeInstructor(i.id)} style={{ marginLeft: '0.4rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1.05rem' }}>×</button>
+                      </>
+                    )}
+                  </span>
                 )}
               </span>
             ))}
-          </div>
+            {(session.status === 'draft' || session.status === 'scheduled' || session.status === 'invitations_sent') && availableInstructors.length > 0 && (
+              showAddInstructor ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: '#f1f5f9', color: '#1e293b', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600, border: '1px solid #cbd5e1' }}>
+                  <select
+                    autoFocus
+                    value=""
+                    onChange={async e => {
+                      const val = e.target.value;
+                      if (!val) return;
+                      try {
+                        await api.assignInstructor(Number(id), Number(val));
+                        setShowAddInstructor(false);
+                        load();
+                      } catch (err: any) {
+                        alert(err.message);
+                      }
+                    }}
+                    onBlur={() => setShowAddInstructor(false)}
+                    style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                  >
+                    <option value="">{t.selectInstructor}</option>
+                    {availableInstructors.map(inst => (
+                      <option key={inst.id} value={inst.id}>{inst.first_name} {inst.last_name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => setShowAddInstructor(false)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem', color: '#64748b', padding: '0 0.2rem' }}
+                  >✗</button>
+                </span>
+              ) : (
+                <span
+                  style={{ fontSize: '0.95rem', padding: '0.4rem 0.9rem', background: '#f1f5f9', color: '#1e293b', border: '1px solid #cbd5e1', cursor: 'pointer', borderRadius: '12px', display: 'inline-flex', alignItems: 'center', fontWeight: 600 }}
+                  onClick={() => setShowAddInstructor(true)}
+                >
+                  +
+                </span>
+              )
+            )}
+        </div>
+        {session.instructors.length === 0 && !(session.status === 'draft' || session.status === 'scheduled' || session.status === 'invitations_sent') && (
+          <p style={{ color: '#6b7280' }}>{t.noInstructorsAssigned}</p>
         )}
       </div>
 
@@ -446,7 +559,7 @@ export default function SessionDetailPage() {
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {session.timeslots.map(ts => (
-              <span key={ts.id} className="badge badge-pending" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem' }}>
+              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: '#475569', color: '#ffffff' }}>
                 {ts.start_time}
               </span>
             ))}
@@ -465,6 +578,9 @@ export default function SessionDetailPage() {
             <button className="btn btn-primary" onClick={generateSchedule} disabled={actionLoading === 'generating'}>
               {actionLoading === 'generating' ? t.generating : t.generateSchedule}
             </button>
+            <button className="btn btn-danger" onClick={cancelSession} disabled={actionLoading === 'cancelling'}>
+              {actionLoading === 'cancelling' ? t.cancelling : t.cancelSession}
+            </button>
           </div>
           <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
             {t.scheduleHint}
@@ -482,6 +598,9 @@ export default function SessionDetailPage() {
             <button className="btn btn-outline" onClick={generateSchedule} disabled={actionLoading === 'generating'}>
               {actionLoading === 'generating' ? t.regenerating : t.regenerateSchedule}
             </button>
+            <button className="btn btn-danger" onClick={cancelSession} disabled={actionLoading === 'cancelling'}>
+              {actionLoading === 'cancelling' ? t.cancelling : t.cancelSession}
+            </button>
           </div>
         </div>
       )}
@@ -489,9 +608,14 @@ export default function SessionDetailPage() {
       {session.status === 'invitations_sent' && (
         <div className="card" style={{ marginBottom: '2rem' }}>
           <h2>{t.actions}</h2>
-          <button className="btn btn-primary" onClick={completeSession} disabled={actionLoading === 'completing'}>
-            {actionLoading === 'completing' ? t.completing : t.markCompleted}
-          </button>
+          <div className="btn-group">
+            <button className="btn btn-primary" onClick={completeSession} disabled={actionLoading === 'completing'}>
+              {actionLoading === 'completing' ? t.completing : t.markCompleted}
+            </button>
+            <button className="btn btn-danger" onClick={cancelSession} disabled={actionLoading === 'cancelling'}>
+              {actionLoading === 'cancelling' ? t.cancelling : t.cancelSession}
+            </button>
+          </div>
         </div>
       )}
 
@@ -531,6 +655,7 @@ export default function SessionDetailPage() {
                                 inv.status === 'confirmed' ? 'badge-confirmed' :
                                 inv.status === 'declined' ? 'badge-declined' :
                                 inv.status === 'cancelled' ? 'badge-declined' :
+                                inv.status === 'admin_cancelled' ? 'badge-declined' :
                                 inv.status === 'expired' ? 'badge-declined' :
                                 inv.status === 'scheduled' ? 'badge-draft' :
                                 'badge-pending'
@@ -561,6 +686,7 @@ export default function SessionDetailPage() {
             {scheduled > 0 && <span className="badge badge-draft">{t.summaryScheduled(scheduled)}</span>}
             <span className="badge badge-declined">{t.summaryDeclined(declined)}</span>
             {cancelled > 0 && <span className="badge badge-declined">{t.summaryCancelled(cancelled)}</span>}
+            {adminCancelled > 0 && <span className="badge badge-declined">{t.summaryWithdrawn(adminCancelled)}</span>}
             {expired > 0 && <span className="badge badge-declined">{t.summaryExpired(expired)}</span>}
           </div>
           <table>
@@ -570,7 +696,7 @@ export default function SessionDetailPage() {
                 <th>{t.student}</th>
                 <th>{t.discipline}</th>
                 <th>{t.status}</th>
-                {canEdit && <th></th>}
+                {(canEdit || session.status === 'invitations_sent') && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -593,6 +719,8 @@ export default function SessionDetailPage() {
                       <span className={`badge ${
                         inv.status === 'confirmed' ? 'badge-confirmed' :
                         inv.status === 'declined' ? 'badge-declined' :
+                        inv.status === 'cancelled' ? 'badge-declined' :
+                        inv.status === 'admin_cancelled' ? 'badge-declined' :
                         inv.status === 'expired' ? 'badge-declined' :
                         inv.status === 'scheduled' ? 'badge-draft' :
                         'badge-pending'
@@ -619,7 +747,7 @@ export default function SessionDetailPage() {
                     </td>
                     {canEdit && (
                       <td>
-                        {inv.status !== 'declined' && inv.status !== 'expired' && (
+                        {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
                           <button
                             className="btn btn-outline"
                             style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
@@ -628,9 +756,20 @@ export default function SessionDetailPage() {
                         )}
                       </td>
                     )}
+                    {!canEdit && session.status === 'invitations_sent' && (
+                      <td>
+                        {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
+                          <button
+                            className="btn btn-outline"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
+                            onClick={() => adminCancelInvitation(inv.id)}
+                          >×</button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
-                if (!slot.empty || !canEdit) return null;
+                if (!slot.empty || !(canEdit || session.status === 'invitations_sent')) return null;
                 return (
                   <tr key={`empty-${slot.timeslotId}-${slot.instructorId}`}>
                     <td>{slot.startTime}</td>
@@ -674,7 +813,7 @@ export default function SessionDetailPage() {
                       )}
                     </td>
                     <td></td>
-                    {canEdit && <td></td>}
+                    {(canEdit || session.status === 'invitations_sent') && <td></td>}
                   </tr>
                 );
               })}

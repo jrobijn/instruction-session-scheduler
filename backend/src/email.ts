@@ -48,6 +48,8 @@ interface EmailStrings {
   cancellationBody: (clubName: string) => string;
   cancellationSubject: (clubName: string) => string;
   invitationSubject: (clubName: string) => string;
+  adminCancellationBody: (clubName: string) => string;
+  adminCancellationSubject: (clubName: string) => string;
 }
 
 const emailStrings: Record<string, EmailStrings> = {
@@ -69,6 +71,8 @@ const emailStrings: Record<string, EmailStrings> = {
     cancellationBody: (clubName) => `Your participation in the instruction session at <strong>${clubName}</strong> has been cancelled.`,
     cancellationSubject: (clubName) => `Instruction Session Cancelled — ${clubName}`,
     invitationSubject: (clubName) => `Instruction Session Invitation — ${clubName}`,
+    adminCancellationBody: (clubName) => `Your invitation for the instruction session at <strong>${clubName}</strong> has been withdrawn by the organiser.`,
+    adminCancellationSubject: (clubName) => `Instruction Session Invitation Withdrawn — ${clubName}`,
   },
   nl: {
     greeting: (name) => `Hoi ${name},`,
@@ -88,6 +92,8 @@ const emailStrings: Record<string, EmailStrings> = {
     cancellationBody: (clubName) => `Je deelname aan de instructiesessie bij <strong>${clubName}</strong> is geannuleerd.`,
     cancellationSubject: (clubName) => `Instructiesessie geannuleerd — ${clubName}`,
     invitationSubject: (clubName) => `Uitnodiging instructiesessie — ${clubName}`,
+    adminCancellationBody: (clubName) => `Je uitnodiging voor de instructiesessie bij <strong>${clubName}</strong> is ingetrokken door de organisatie.`,
+    adminCancellationSubject: (clubName) => `Instructiesessie uitnodiging ingetrokken — ${clubName}`,
   },
 };
 
@@ -265,6 +271,59 @@ export async function sendCancellationEmail({ to, studentName, date, startTime, 
 
   if (!transporter) {
     console.log(`📧 [Cancellation Email Preview] To: ${to} | Subject: ${subject}`);
+    return;
+  }
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    text,
+    html,
+  }, (error, info) => {
+      if (error) {
+          return console.log(error);
+      }
+      console.log('Message %s sent: %s', info.messageId, info.response);
+  });
+}
+
+interface AdminCancellationEmailParams {
+  to: string;
+  studentName: string;
+  date: string;
+  startTime: string;
+  disciplineName: string | null;
+  clubName: string;
+  locale?: string;
+}
+
+export async function sendAdminCancellationEmail({ to, studentName, date, startTime, disciplineName, clubName, locale }: AdminCancellationEmailParams): Promise<void> {
+  const s = getEmailStrings(locale || 'en');
+  const subject = s.adminCancellationSubject(clubName);
+
+  const disciplineLine = disciplineName
+    ? `<p style="margin: 4px 0;"><strong>${escapeHtml(s.disciplineLabel)}</strong> ${escapeHtml(disciplineName)}</p>`
+    : '';
+  const disciplineText = disciplineName ? `${s.disciplineLabel} ${disciplineName}\n` : '';
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2>${escapeHtml(s.greeting(studentName))}</h2>
+      <p>${s.adminCancellationBody(escapeHtml(clubName))}</p>
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 16px 0;">
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(date)}</p>
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.timeLabel)}</strong> ${escapeHtml(startTime)}</p>
+        ${disciplineLine}
+      </div>
+      <p>${escapeHtml(s.bestRegards)}<br/>${escapeHtml(clubName)}</p>
+    </div>
+  `;
+
+  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.adminCancellationBody(clubName))}\n\n${s.dateLabel} ${date}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.bestRegards}\n${clubName}`;
+
+  if (!transporter) {
+    console.log(`📧 [Admin Cancellation Email Preview] To: ${to} | Subject: ${subject}`);
     return;
   }
 

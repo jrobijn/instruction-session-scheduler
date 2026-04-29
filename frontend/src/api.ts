@@ -77,6 +77,7 @@ export const api = {
   deleteSession: (id: number) => request(`/sessions/${id}`, { method: 'DELETE' }),
   assignInstructor: (sessionId: string, instructorId: string) => request(`/sessions/${sessionId}/instructors`, { method: 'POST', body: JSON.stringify({ instructor_id: instructorId }) }),
   removeInstructor: (sessionId: string, instructorId: number) => request(`/sessions/${sessionId}/instructors/${instructorId}`, { method: 'DELETE' }),
+  replaceInstructor: (sessionId: number, oldInstructorId: number, newInstructorId: number) => request(`/sessions/${sessionId}/instructors/${oldInstructorId}/replace`, { method: 'POST', body: JSON.stringify({ new_instructor_id: newInstructorId }) }),
   generateSchedule: (sessionId: string) => request(`/sessions/${sessionId}/generate-schedule`, { method: 'POST' }),
   sendInvitations: (sessionId: string) => request(`/sessions/${sessionId}/send-invitations`, { method: 'POST' }),
   completeSession: (sessionId: string) => request(`/sessions/${sessionId}/complete`, { method: 'POST' }),
@@ -84,6 +85,8 @@ export const api = {
   searchAvailableStudents: (sessionId: number, q: string) => request(`/sessions/${sessionId}/available-students?q=${encodeURIComponent(q)}`),
   addSessionInvitation: (sessionId: number, data: { student_id: number; timeslot_id: number; instructor_id: number }) => request(`/sessions/${sessionId}/invitations`, { method: 'POST', body: JSON.stringify(data) }),
   removeSessionInvitation: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}`, { method: 'DELETE' }),
+  adminCancelInvitation: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}/admin-cancel`, { method: 'POST' }),
+  cancelSession: (sessionId: number) => request(`/sessions/${sessionId}/cancel`, { method: 'POST' }),
 
   // Timetables
   getTimetables: () => request('/timetables'),
