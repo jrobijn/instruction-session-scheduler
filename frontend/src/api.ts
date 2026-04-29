@@ -58,6 +58,7 @@ export const api = {
   setStudentPreferredTimeslots: (studentId: number, timetableId: number, timeslotIds: number[]) => request(`/students/${studentId}/preferred-timeslots/${timetableId}`, { method: 'PUT', body: JSON.stringify({ timeslot_ids: timeslotIds }) }),
   setStudentCooldown: (id: number, days: number) => request(`/students/${id}/cooldown`, { method: 'PUT', body: JSON.stringify({ days }) }),
   clearStudentCooldown: (id: number) => request(`/students/${id}/cooldown`, { method: 'DELETE' }),
+  bulkUpdatePriorities: (updates: Array<{ id: number; priority: number }>) => request('/students/priorities', { method: 'PUT', body: JSON.stringify({ updates }) }),
 
   // Instructors
   getInstructors: () => request('/instructors'),

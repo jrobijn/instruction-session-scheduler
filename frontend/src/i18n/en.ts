@@ -71,6 +71,12 @@ const en = {
   setCooldownText: (name: string) => `Prevent ${name} from being automatically scheduled for a number of days.`,
   cooldownDays: 'Days',
   setCooldownButton: 'Set Cooldown',
+  adjustPriorities: 'Adjust Priorities',
+  finishAdjusting: '✓ Done Adjusting',
+  priorityModeHint: 'Use + and − to adjust priorities, then click Done to save or discard.',
+  prioritySavePrompt: (count: number) => `${count} student${count === 1 ? "'s" : "s'"} priority was adjusted. Save changes?`,
+  saveChanges: 'Save',
+  discardChanges: 'Discard',
 
   // Instructors
   instructorsTitle: (count: number) => `Instructors (${count})`,

@@ -73,6 +73,12 @@ const nl: Translations = {
   setCooldownText: (name: string) => `Voorkom dat ${name} automatisch wordt ingepland voor een aantal dagen.`,
   cooldownDays: 'Dagen',
   setCooldownButton: 'Pauze instellen',
+  adjustPriorities: 'Prioriteiten aanpassen',
+  finishAdjusting: '✓ Klaar met aanpassen',
+  priorityModeHint: 'Gebruik + en − om prioriteiten aan te passen en klik daarna op Klaar om op te slaan of te verwerpen.',
+  prioritySavePrompt: (count: number) => `De prioriteit van ${count} leerling${count === 1 ? '' : 'en'} is aangepast. Wijzigingen opslaan?`,
+  saveChanges: 'Opslaan',
+  discardChanges: 'Verwerpen',
 
   // Instructors
   instructorsTitle: (count: number) => `Instructeurs (${count})`,

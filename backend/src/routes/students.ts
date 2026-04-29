@@ -41,6 +41,30 @@ router.get('/export', (_req: Request, res: Response) => {
   res.send(csv);
 });
 
+// Bulk update student priorities
+router.put('/priorities', (req: Request, res: Response) => {
+  const { updates } = req.body;
+  if (!Array.isArray(updates)) { res.status(400).json({ error: 'updates array is required' }); return; }
+
+  const update = db.prepare('UPDATE students SET priority = ? WHERE id = ?');
+  const run = db.transaction(() => {
+    for (const { id, priority } of updates) {
+      if (typeof id === 'number' && typeof priority === 'number' && priority >= 0) {
+        update.run(priority, id);
+      }
+    }
+    // Normalize so the minimum active student has priority 1
+    const minPriority = (db.prepare(
+      "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
+    ).get() as any)?.m;
+    if (minPriority != null && minPriority !== 1) {
+      db.prepare('UPDATE students SET priority = priority - ?').run(minPriority - 1);
+    }
+  });
+  run();
+  res.json({ success: true, count: updates.length });
+});
+
 // Import students from CSV
 router.post('/import', (req: Request, res: Response) => {
   const { csv } = req.body;
