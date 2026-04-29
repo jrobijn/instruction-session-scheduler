@@ -78,6 +78,11 @@ router.post('/import', (req: Request, res: Response) => {
   const lastNameIdx = header.indexOf('last_name');
   const emailIdx = header.indexOf('email');
   const membershipIdIdx = header.indexOf('membership_id');
+  const attendedSessionsIdx = header.indexOf('attended_sessions');
+  const noShowCountIdx = header.indexOf('no_show_count');
+  const priorityIdx = header.indexOf('priority');
+  const preferredDaysIdx = header.indexOf('preferred_days');
+  const activeIdx = header.indexOf('active');
 
   if (firstNameIdx === -1 || lastNameIdx === -1 || emailIdx === -1) {
     res.status(400).json({ error: 'CSV must contain first_name, last_name, and email columns' }); return;
@@ -116,6 +121,11 @@ router.post('/import', (req: Request, res: Response) => {
       const last_name = fields[lastNameIdx]?.trim();
       const email = fields[emailIdx]?.trim();
       const membership_id = membershipIdIdx !== -1 ? (fields[membershipIdIdx]?.trim() || '') : '';
+      const attended_sessions = attendedSessionsIdx !== -1 ? parseInt(fields[attendedSessionsIdx]?.trim(), 10) : undefined;
+      const no_show_count = noShowCountIdx !== -1 ? parseInt(fields[noShowCountIdx]?.trim(), 10) : undefined;
+      const priority = priorityIdx !== -1 ? parseInt(fields[priorityIdx]?.trim(), 10) : undefined;
+      const preferred_days = preferredDaysIdx !== -1 ? (fields[preferredDaysIdx]?.trim() || '') : '';
+      const active = activeIdx !== -1 ? parseInt(fields[activeIdx]?.trim(), 10) : undefined;
 
       if (!first_name || !last_name || !email) {
         errors.push(`Row ${i + 1}: missing required fields`);
@@ -126,12 +136,45 @@ router.post('/import', (req: Request, res: Response) => {
       try {
         const existing = db.prepare('SELECT id FROM students WHERE email = ?').get(email) as { id: number } | undefined;
         if (existing) {
-          db.prepare('UPDATE students SET first_name = ?, last_name = ?, membership_id = ? WHERE id = ?').run(first_name, last_name, membership_id, existing.id);
+          db.prepare(`UPDATE students SET first_name = ?, last_name = ?, membership_id = ?${
+            attended_sessions != null && !isNaN(attended_sessions) ? ', attended_sessions = ?' : ''
+          }${no_show_count != null && !isNaN(no_show_count) ? ', no_show_count = ?' : ''
+          }${priority != null && !isNaN(priority) ? ', priority = ?' : ''
+          }${preferred_days ? ', preferred_days = ?' : ''
+          }${active != null && !isNaN(active) ? ', active = ?' : ''
+          } WHERE id = ?`).run(
+            first_name, last_name, membership_id,
+            ...(attended_sessions != null && !isNaN(attended_sessions) ? [attended_sessions] : []),
+            ...(no_show_count != null && !isNaN(no_show_count) ? [no_show_count] : []),
+            ...(priority != null && !isNaN(priority) ? [priority] : []),
+            ...(preferred_days ? [preferred_days] : []),
+            ...(active != null && !isNaN(active) ? [active] : []),
+            existing.id
+          );
           if (defaultGroup) {
             db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(existing.id, defaultGroup.id);
           }
         } else {
-          const result = db.prepare('INSERT INTO students (first_name, last_name, email, membership_id) VALUES (?, ?, ?, ?)').run(first_name, last_name, email, membership_id);
+          const result = db.prepare(`INSERT INTO students (first_name, last_name, email, membership_id${
+            attended_sessions != null && !isNaN(attended_sessions) ? ', attended_sessions' : ''
+          }${no_show_count != null && !isNaN(no_show_count) ? ', no_show_count' : ''
+          }${priority != null && !isNaN(priority) ? ', priority' : ''
+          }${preferred_days ? ', preferred_days' : ''
+          }${active != null && !isNaN(active) ? ', active' : ''
+          }) VALUES (?, ?, ?, ?${
+            attended_sessions != null && !isNaN(attended_sessions) ? ', ?' : ''
+          }${no_show_count != null && !isNaN(no_show_count) ? ', ?' : ''
+          }${priority != null && !isNaN(priority) ? ', ?' : ''
+          }${preferred_days ? ', ?' : ''
+          }${active != null && !isNaN(active) ? ', ?' : ''
+          })`).run(
+            first_name, last_name, email, membership_id,
+            ...(attended_sessions != null && !isNaN(attended_sessions) ? [attended_sessions] : []),
+            ...(no_show_count != null && !isNaN(no_show_count) ? [no_show_count] : []),
+            ...(priority != null && !isNaN(priority) ? [priority] : []),
+            ...(preferred_days ? [preferred_days] : []),
+            ...(active != null && !isNaN(active) ? [active] : []),
+          );
           if (defaultGroup) {
             db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(result.lastInsertRowid, defaultGroup.id);
           }
