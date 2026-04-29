@@ -49,7 +49,7 @@ export function initializeDatabase(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL UNIQUE,
       day_of_week INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','invitations_sent','completed')),
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','invitations_sent','completed','cancelled')),
       timetable_id INTEGER REFERENCES timetables(id) ON DELETE SET NULL,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -84,7 +84,7 @@ export function initializeDatabase(): void {
       timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
       instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
-      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled')),
+      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled','admin_cancelled')),
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
       group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
@@ -291,7 +291,7 @@ export function initializeDatabase(): void {
 
   // Migrate invitations CHECK constraint to include 'expired' and 'cancelled' statuses
   const checkInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invitations'").get() as { sql: string } | undefined;
-  if (checkInfo && !checkInfo.sql.includes("'cancelled'")) {
+  if (checkInfo && !checkInfo.sql.includes("'admin_cancelled'")) {
     db.exec(`
       CREATE TABLE invitations_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -300,7 +300,7 @@ export function initializeDatabase(): void {
         timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
         instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
         token TEXT NOT NULL UNIQUE,
-        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled')),
+        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled','admin_cancelled')),
         discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
         group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
         email_sent INTEGER NOT NULL DEFAULT 0,
@@ -330,6 +330,26 @@ export function initializeDatabase(): void {
     if (minP > 1) {
       db.exec(`UPDATE students SET priority = priority - ${minP - 1}`);
     }
+  }
+  // Migrate training_sessions CHECK constraint to include 'cancelled' status
+  const sessCheckInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='training_sessions'").get() as { sql: string } | undefined;
+  if (sessCheckInfo && !sessCheckInfo.sql.includes("'cancelled'")) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE training_sessions_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL UNIQUE,
+        day_of_week INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','scheduled','invitations_sent','completed','cancelled')),
+        timetable_id INTEGER REFERENCES timetables(id) ON DELETE SET NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO training_sessions_new SELECT * FROM training_sessions;
+      DROP TABLE training_sessions;
+      ALTER TABLE training_sessions_new RENAME TO training_sessions;
+    `);
+    db.pragma('foreign_keys = ON');
   }
 }
 

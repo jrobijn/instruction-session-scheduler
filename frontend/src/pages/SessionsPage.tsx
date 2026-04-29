@@ -128,6 +128,7 @@ export default function SessionsPage() {
                     s.status === 'invitations_sent' ? 'badge-pending' :
                     s.status === 'scheduled' ? 'badge-pending' :
                     s.status === 'draft' ? 'badge-draft' :
+                    s.status === 'cancelled' ? 'badge-declined' :
                     'badge-declined'
                   }`}>
                     {t.statusMap(s.status)}

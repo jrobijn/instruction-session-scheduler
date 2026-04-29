@@ -4,6 +4,7 @@ const nl: Translations = {
   // Common
   loading: 'Laden...',
   save: 'Opslaan',
+  confirm: 'Bevestigen',
   cancel: 'Annuleren',
   create: 'Aanmaken',
   edit: 'Bewerken',
@@ -194,6 +195,11 @@ const nl: Translations = {
   markCompleted: 'Markeer als voltooid',
   completing: 'Voltooien...',
   confirmComplete: 'Deze sessie als voltooid markeren? Dit werkt de aanwezigheidstellers bij.',
+  cancelSession: 'Sessie annuleren',
+  cancelling: 'Annuleren...',
+  confirmCancelSession: (n: number) => n > 0
+    ? `Deze sessie annuleren? ${n} leerling(en) worden geïnformeerd dat hun uitnodiging is ingetrokken.`
+    : 'Deze sessie annuleren? Er zijn nog geen leerlingen uitgenodigd.',
   confirmTimetableChange: 'Het wijzigen van het rooster wist de gegenereerde planning en zet de sessie terug naar concept. Doorgaan?',
   scheduleOverview: 'Planningsoverzicht',
   exportPdf: 'Exporteer PDF',
@@ -204,6 +210,7 @@ const nl: Translations = {
   summaryScheduled: (n: number) => `Ingepland: ${n}`,
   summaryDeclined: (n: number) => `Afgewezen: ${n}`,
   summaryCancelled: (n: number) => `Geannuleerd: ${n}`,
+  summaryWithdrawn: (n: number) => `Ingetrokken: ${n}`,
   summaryExpired: (n: number) => `Verlopen: ${n}`,
   timeslot: 'Tijdslot',
   student: 'Leerling',
@@ -232,6 +239,7 @@ const nl: Translations = {
       confirmed: 'bevestigd',
       declined: 'afgewezen',
       cancelled: 'geannuleerd',
+      admin_cancelled: 'ingetrokken',
       expired: 'verlopen',
       scheduled: 'ingepland',
       invited: 'uitgenodigd',
@@ -301,6 +309,7 @@ const nl: Translations = {
   invitationDeclinedMsg: 'Je hebt deze uitnodiging afgewezen. Een andere leerling wordt in jouw plaats uitgenodigd.',
   invitationExpiredMsg: 'Deze uitnodiging is verlopen. Een andere leerling is in jouw plaats uitgenodigd.',
   invitationCancelledMsg: 'Je deelname is geannuleerd. Een andere leerling wordt in jouw plaats uitgenodigd.',
+  invitationWithdrawnMsg: 'Je uitnodiging is ingetrokken door de organisatie.',
   cancelParticipation: 'Deelname annuleren',
   confirmPromptConfirm: 'Weet je zeker dat je je aanwezigheid wilt bevestigen?',
   confirmPromptDecline: 'Weet je zeker dat je deze uitnodiging wilt afwijzen?',
@@ -309,6 +318,13 @@ const nl: Translations = {
   yesDecline: 'Ja, afwijzen',
   yesCancel: 'Ja, annuleren',
   goBack: 'Terug',
+  adminCancelInvitation: 'Uitnodiging intrekken',
+  confirmAdminCancel: 'Weet je zeker dat je deze uitnodiging wilt intrekken? De leerling wordt per e-mail op de hoogte gebracht.',
+  confirmAddAndInvite: 'Dit stuurt direct een uitnodigingsmail naar de leerling. Doorgaan?',
+  confirmRemoveInstructor: (n: number) => `Dit trekt ${n} uitnodiging${n === 1 ? '' : 'en'} in. De betreffende leerling${n === 1 ? '' : 'en'} ${n === 1 ? 'wordt' : 'worden'} per e-mail op de hoogte gebracht. Doorgaan?`,
+  replaceInstructor: 'Instructeur vervangen',
+  replaceWith: 'Vervangen door...',
+  viewInvitation: 'Bekijk uitnodigingspagina',
   invitationNotFound: 'Uitnodiging niet gevonden.',
 };
 

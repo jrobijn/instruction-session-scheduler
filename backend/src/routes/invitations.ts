@@ -44,7 +44,7 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
       AND id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
-        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled')
+        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')
       )
     ORDER BY priority ASC, last_name ASC, first_name ASC
   `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), ...alreadyInvited, invitation.session_date) as any[];
@@ -144,6 +144,14 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
   if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
   if (invitation.session_status === 'completed') { res.status(400).json({ error: 'This session has already passed' }); return; }
   if (invitation.status !== 'invited') { res.status(400).json({ error: `Invitation already ${invitation.status}` }); return; }
+
+  // Validate discipline belongs to the invitation's group
+  if (discipline_id && invitation.group_id) {
+    const allowed = db.prepare(
+      'SELECT 1 FROM discipline_groups WHERE discipline_id = ? AND group_id = ?'
+    ).get(discipline_id, invitation.group_id);
+    if (!allowed) { res.status(400).json({ error: 'Selected discipline is not available for your group' }); return; }
+  }
 
   db.prepare(`
     UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?
