@@ -269,21 +269,27 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     disciplineGroupIds.add(dg.group_id);
   }
 
-  // For each student, check if they have at least one available discipline through their groups
+  // Determine the timetable group IDs (the groups assigned to this timetable)
+  const timetableGroupIds = new Set(timetableGroups.map(tg => tg.group_id));
+
+  // Build a priority lookup for timetable groups (lower number = higher priority)
+  const timetableGroupPriority = new Map<number, number>();
+  for (const tg of timetableGroups) {
+    timetableGroupPriority.set(tg.group_id, tg.priority);
+  }
+
+  // For each student, check if they have at least one available discipline through their timetable groups
   const studentHasDisciplines = (studentId: number): boolean => {
     const groups = membershipsByStudent.get(studentId);
     if (!groups) return false;
     for (const gid of groups) {
-      if (disciplineGroupIds.has(gid)) return true;
+      if (timetableGroupIds.has(gid) && disciplineGroupIds.has(gid)) return true;
     }
     return false;
   };
 
-  // Determine the timetable group IDs (the groups assigned to this timetable)
-  const timetableGroupIds = new Set(timetableGroups.map(tg => tg.group_id));
-
-  // Assign each student to exactly one timetable group (lowest priority number = highest priority)
-  // A student belongs to a group if they have membership AND the group is assigned to this timetable
+  // For each student, find their best (highest priority = lowest number) timetable group
+  // Only considers groups that are both: (1) assigned to this timetable and (2) the student is a member of
   const studentsByGroup = new Map<number, any[]>();
   for (const gsc of groupSlotCounts) {
     studentsByGroup.set(gsc.group_id, []);
@@ -291,21 +297,34 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   const assignedStudents = new Set<number>();
   const manualStudentIds = new Set(manualInvitations.map((mi: any) => mi.student_id as number));
+
+  for (const student of allEligibleStudents) {
+    if (manualStudentIds.has(student.id)) continue;
+    const groups = membershipsByStudent.get(student.id);
+    if (!groups) continue;
+
+    // Find the highest-priority timetable group this student belongs to
+    let bestGroupId: number | null = null;
+    let bestPriority = Infinity;
+    for (const gid of groups) {
+      if (!timetableGroupIds.has(gid)) continue;
+      const p = timetableGroupPriority.get(gid)!;
+      if (p < bestPriority) {
+        bestPriority = p;
+        bestGroupId = gid;
+      }
+    }
+    if (bestGroupId === null) continue; // student isn't in any timetable group
+
+    // Skip students with no available disciplines through their timetable groups
+    if (!studentHasDisciplines(student.id)) continue;
+
+    studentsByGroup.get(bestGroupId)!.push(student);
+    assignedStudents.add(student.id);
+  }
+
   // Sort timetable groups by priority (lowest first = highest priority)
   const sortedGroups = [...groupSlotCounts].sort((a, b) => a.priority - b.priority);
-
-  for (const group of sortedGroups) {
-    for (const student of allEligibleStudents) {
-      if (assignedStudents.has(student.id)) continue;
-      if (manualStudentIds.has(student.id)) continue;
-      const groups = membershipsByStudent.get(student.id);
-      if (!groups || !groups.has(group.group_id)) continue;
-      // Skip students with no available disciplines
-      if (!studentHasDisciplines(student.id)) continue;
-      studentsByGroup.get(group.group_id)!.push(student);
-      assignedStudents.add(student.id);
-    }
-  }
 
   // Check if there are any eligible students at all (manual students still count)
   if (assignedStudents.size === 0 && manualInvitations.length === 0) {
