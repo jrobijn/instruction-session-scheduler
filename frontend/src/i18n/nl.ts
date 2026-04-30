@@ -190,6 +190,7 @@ const nl: Translations = {
   generating: 'Genereren...',
   scheduleHint: 'Dit selecteert leerlingen met de minste bijgewoonde sessies en maakt uitnodigingen aan.',
   sendInvitations: 'Uitnodigingen versturen',
+  confirmSendInvitations: 'Uitnodigingsmails versturen naar alle ingeplande leerlingen?',
   sending: 'Versturen...',
   regenerateSchedule: 'Planning opnieuw genereren',
   regenerating: 'Opnieuw genereren...',
@@ -198,6 +199,9 @@ const nl: Translations = {
   confirmComplete: 'Deze sessie als voltooid markeren? Dit werkt de aanwezigheidstellers bij.',
   cancelSession: 'Sessie annuleren',
   cancelling: 'Annuleren...',
+  reactivateSession: 'Sessie heractiveren',
+  reactivating: 'Heractiveren...',
+  confirmReactivateSession: 'Deze sessie heractiveren? Alle bestaande uitnodigingen worden verwijderd.',
   confirmCancelSession: (n: number) => n > 0
     ? `Deze sessie annuleren? ${n} leerling(en) worden geïnformeerd dat hun uitnodiging is ingetrokken.`
     : 'Deze sessie annuleren? Er zijn nog geen leerlingen uitgenodigd.',

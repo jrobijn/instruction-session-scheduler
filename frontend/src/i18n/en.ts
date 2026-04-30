@@ -188,6 +188,7 @@ const en = {
   generating: 'Generating...',
   scheduleHint: 'This will select students with the fewest attended sessions and create invitations.',
   sendInvitations: 'Send Invitations',
+  confirmSendInvitations: 'Send invitation emails to all scheduled students?',
   sending: 'Sending...',
   regenerateSchedule: 'Regenerate Schedule',
   regenerating: 'Regenerating...',
@@ -196,6 +197,9 @@ const en = {
   confirmComplete: 'Mark this session as completed? This will update attendance counts.',
   cancelSession: 'Cancel Session',
   cancelling: 'Cancelling...',
+  reactivateSession: 'Reactivate Session',
+  reactivating: 'Reactivating...',
+  confirmReactivateSession: 'Reactivate this session? All existing invitations will be cleared.',
   confirmCancelSession: (n: number) => n > 0
     ? `Cancel this session? ${n} student(s) will be notified that their invitation has been withdrawn.`
     : 'Cancel this session? No students have been invited yet.',

@@ -988,4 +988,19 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   res.json({ success: true, cancelled_invitations: activeInvitations.length });
 });
 
+// ===== Reactivate cancelled session =====
+router.post('/:id/reactivate', (req: Request, res: Response) => {
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
+  if (session.status !== 'cancelled') { res.status(400).json({ error: 'Only cancelled sessions can be reactivated' }); return; }
+
+  // Delete all invitations belonging to this session
+  db.prepare('DELETE FROM invitations WHERE session_id = ?').run(req.params.id);
+
+  // Update session status to draft to start fresh
+  db.prepare("UPDATE training_sessions SET status = 'draft' WHERE id = ?").run(req.params.id);
+
+  res.json({ success: true, new_status: 'draft' });
+});
+
 export default router;

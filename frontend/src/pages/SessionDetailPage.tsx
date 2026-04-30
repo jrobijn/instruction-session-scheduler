@@ -224,6 +224,7 @@ export default function SessionDetailPage() {
   };
 
   const sendInvitations = async () => {
+    if (!confirm(t.confirmSendInvitations)) return;
     setActionLoading('sending');
     try {
       await api.sendInvitations(Number(id));
@@ -273,6 +274,19 @@ export default function SessionDetailPage() {
     setActionLoading('cancelling');
     try {
       await api.cancelSession(Number(id));
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const reactivateSession = async () => {
+    if (!confirm(t.confirmReactivateSession)) return;
+    setActionLoading('reactivating');
+    try {
+      await api.reactivateSession(Number(id));
       load();
     } catch (err: any) {
       alert(err.message);
@@ -657,6 +671,17 @@ export default function SessionDetailPage() {
             </button>
             <button className="btn btn-danger" onClick={cancelSession} disabled={actionLoading === 'cancelling'}>
               {actionLoading === 'cancelling' ? t.cancelling : t.cancelSession}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {session.status === 'cancelled' && (
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <h2>{t.actions}</h2>
+          <div className="btn-group">
+            <button className="btn btn-primary" onClick={reactivateSession} disabled={actionLoading === 'reactivating'}>
+              {actionLoading === 'reactivating' ? t.reactivating : t.reactivateSession}
             </button>
           </div>
         </div>
