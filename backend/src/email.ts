@@ -115,11 +115,12 @@ export async function sendInvitationEmail({ to, studentName, date, token, clubNa
   const invitationUrl = `${frontendUrl}/invitation/${token}`;
   const s = getEmailStrings(locale || 'en');
   const subject = s.invitationSubject(clubName);
+  const formattedDate = formatDateForEmail(date, locale || 'en');
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2>${escapeHtml(s.greeting(studentName))}</h2>
-      <p>${s.invitationBody(escapeHtml(clubName), escapeHtml(date))}</p>
+      <p>${s.invitationBody(escapeHtml(clubName), escapeHtml(formattedDate))}</p>
       <p>${escapeHtml(s.invitationCta)}</p>
       <p style="margin: 24px 0;">
         <a href="${escapeHtml(invitationUrl)}"
@@ -134,7 +135,7 @@ export async function sendInvitationEmail({ to, studentName, date, token, clubNa
     </div>
   `;
 
-  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.invitationBody(clubName, date))}\n\n${s.invitationCta}\n${invitationUrl}\n\n${s.bestRegards}\n${clubName}`;
+  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.invitationBody(clubName, formattedDate))}\n\n${s.invitationCta}\n${invitationUrl}\n\n${s.bestRegards}\n${clubName}`;
 
   if (!transporter) {
     console.log(`📧 [Email Preview] To: ${to} | Subject: ${subject}`);
@@ -168,6 +169,13 @@ function stripHtml(str: string): string {
   return String(str).replace(/<[^>]*>/g, '');
 }
 
+function formatDateForEmail(dateStr: string, locale: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString(locale === 'nl' ? 'nl-NL' : 'en-GB', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+}
+
 interface ConfirmationEmailParams {
   to: string;
   studentName: string;
@@ -184,6 +192,7 @@ export async function sendConfirmationEmail({ to, studentName, date, startTime, 
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const cancelUrl = `${frontendUrl}/invitation/${token}`;
   const s = getEmailStrings(locale || 'en');
+  const formattedDate = formatDateForEmail(date, locale || 'en');
 
   const disciplineLine = disciplineName
     ? `<p style="margin: 4px 0;"><strong>${escapeHtml(s.disciplineLabel)}</strong> ${escapeHtml(disciplineName)}</p>`
@@ -195,7 +204,7 @@ export async function sendConfirmationEmail({ to, studentName, date, startTime, 
       <h2>${escapeHtml(s.greeting(studentName))}</h2>
       <p>${s.confirmationBody(escapeHtml(clubName))}</p>
       <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 16px 0;">
-        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(date)}</p>
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(formattedDate)}</p>
         <p style="margin: 4px 0;"><strong>${escapeHtml(s.timeLabel)}</strong> ${escapeHtml(startTime)}</p>
         ${disciplineLine}
       </div>
@@ -213,7 +222,7 @@ export async function sendConfirmationEmail({ to, studentName, date, startTime, 
     </div>
   `;
 
-  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.confirmationBody(clubName))}\n\n${s.dateLabel} ${date}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.cancelExplanation}\n${cancelUrl}\n\n${s.seeYou}\n${clubName}`;
+  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.confirmationBody(clubName))}\n\n${s.dateLabel} ${formattedDate}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.cancelExplanation}\n${cancelUrl}\n\n${s.seeYou}\n${clubName}`;
 
   if (!transporter) {
     console.log(`📧 [Confirmation Email Preview] To: ${to} | Subject: ${subject}`);
@@ -248,6 +257,7 @@ interface CancellationEmailParams {
 
 export async function sendCancellationEmail({ to, studentName, date, startTime, disciplineName, clubName, subject, locale }: CancellationEmailParams): Promise<void> {
   const s = getEmailStrings(locale || 'en');
+  const formattedDate = formatDateForEmail(date, locale || 'en');
 
   const disciplineLine = disciplineName
     ? `<p style="margin: 4px 0;"><strong>${escapeHtml(s.disciplineLabel)}</strong> ${escapeHtml(disciplineName)}</p>`
@@ -259,7 +269,7 @@ export async function sendCancellationEmail({ to, studentName, date, startTime, 
       <h2>${escapeHtml(s.greeting(studentName))}</h2>
       <p>${s.cancellationBody(escapeHtml(clubName))}</p>
       <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 16px 0;">
-        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(date)}</p>
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(formattedDate)}</p>
         <p style="margin: 4px 0;"><strong>${escapeHtml(s.timeLabel)}</strong> ${escapeHtml(startTime)}</p>
         ${disciplineLine}
       </div>
@@ -267,7 +277,7 @@ export async function sendCancellationEmail({ to, studentName, date, startTime, 
     </div>
   `;
 
-  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.cancellationBody(clubName))}\n\n${s.dateLabel} ${date}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.bestRegards}\n${clubName}`;
+  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.cancellationBody(clubName))}\n\n${s.dateLabel} ${formattedDate}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.bestRegards}\n${clubName}`;
 
   if (!transporter) {
     console.log(`📧 [Cancellation Email Preview] To: ${to} | Subject: ${subject}`);
@@ -301,6 +311,7 @@ interface AdminCancellationEmailParams {
 export async function sendAdminCancellationEmail({ to, studentName, date, startTime, disciplineName, clubName, locale }: AdminCancellationEmailParams): Promise<void> {
   const s = getEmailStrings(locale || 'en');
   const subject = s.adminCancellationSubject(clubName);
+  const formattedDate = formatDateForEmail(date, locale || 'en');
 
   const disciplineLine = disciplineName
     ? `<p style="margin: 4px 0;"><strong>${escapeHtml(s.disciplineLabel)}</strong> ${escapeHtml(disciplineName)}</p>`
@@ -312,7 +323,7 @@ export async function sendAdminCancellationEmail({ to, studentName, date, startT
       <h2>${escapeHtml(s.greeting(studentName))}</h2>
       <p>${s.adminCancellationBody(escapeHtml(clubName))}</p>
       <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 16px 0;">
-        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(date)}</p>
+        <p style="margin: 4px 0;"><strong>${escapeHtml(s.dateLabel)}</strong> ${escapeHtml(formattedDate)}</p>
         <p style="margin: 4px 0;"><strong>${escapeHtml(s.timeLabel)}</strong> ${escapeHtml(startTime)}</p>
         ${disciplineLine}
       </div>
@@ -320,7 +331,7 @@ export async function sendAdminCancellationEmail({ to, studentName, date, startT
     </div>
   `;
 
-  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.adminCancellationBody(clubName))}\n\n${s.dateLabel} ${date}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.bestRegards}\n${clubName}`;
+  const text = `${s.greeting(studentName)}\n\n${stripHtml(s.adminCancellationBody(clubName))}\n\n${s.dateLabel} ${formattedDate}\n${s.timeLabel} ${startTime}\n${disciplineText}\n${s.bestRegards}\n${clubName}`;
 
   if (!transporter) {
     console.log(`📧 [Admin Cancellation Email Preview] To: ${to} | Subject: ${subject}`);
