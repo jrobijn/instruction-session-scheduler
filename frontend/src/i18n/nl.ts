@@ -171,6 +171,7 @@ const nl: Translations = {
   confirmDeleteSession: 'Weet je zeker dat je deze sessie wilt verwijderen?',
   newSessionTitle: 'Nieuwe trainingssessie',
   selectDate: 'Selecteer een datum...',
+  datePickerFormat: 'dd-MM-yyyy',
   noTimetable: 'Geen rooster',
 
   // Session detail

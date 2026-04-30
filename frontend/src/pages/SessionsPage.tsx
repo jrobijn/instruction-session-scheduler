@@ -160,7 +160,7 @@ export default function SessionsPage() {
                 selected={selectedDate}
                 onChange={(d: Date | null) => setSelectedDate(d)}
                 filterDate={isClubDay}
-                dateFormat="yyyy-MM-dd"
+                dateFormat={t.datePickerFormat}
                 placeholderText={t.selectDate}
                 className="datepicker-input"
               />

@@ -169,6 +169,7 @@ const en = {
   confirmDeleteSession: 'Are you sure you want to delete this session?',
   newSessionTitle: 'New Training Session',
   selectDate: 'Select a date...',
+  datePickerFormat: 'dd/MM/yyyy',
   noTimetable: 'No timetable',
 
   // Session detail
