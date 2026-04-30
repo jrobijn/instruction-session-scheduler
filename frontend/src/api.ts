@@ -87,6 +87,7 @@ export const api = {
   removeSessionInvitation: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}`, { method: 'DELETE' }),
   adminCancelInvitation: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}/admin-cancel`, { method: 'POST' }),
   cancelSession: (sessionId: number) => request(`/sessions/${sessionId}/cancel`, { method: 'POST' }),
+  reactivateSession: (sessionId: number) => request(`/sessions/${sessionId}/reactivate`, { method: 'POST' }),
 
   // Timetables
   getTimetables: () => request('/timetables'),
