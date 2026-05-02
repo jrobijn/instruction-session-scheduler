@@ -11,6 +11,7 @@ interface Invitation {
   status: string;
   discipline_id: number | null;
   discipline_name: string | null;
+  expires_at: string | null;
 }
 
 interface Discipline {
@@ -115,6 +116,14 @@ export default function InvitationPage() {
               {t.statusMap(invitation.status)}
             </span>
           </p>
+          {invitation.status === 'invited' && invitation.expires_at && (
+            <div className="alert" style={{ marginTop: '1rem', background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' }}>
+              {t.expiresAt(
+                new Date(invitation.expires_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
+                new Date(invitation.expires_at).toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+              )}
+            </div>
+          )}
         </div>
 
         {actionDone === 'confirmed' && (

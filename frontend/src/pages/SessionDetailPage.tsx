@@ -40,6 +40,7 @@ interface Invitation {
   no_show: number;
   group_name: string | null;
   group_color: string | null;
+  invited_at: string | null;
 }
 
 interface TimetableGroup {
@@ -60,11 +61,25 @@ interface SessionDetail {
   timeslots: Timeslot[];
   invitations: Invitation[];
   timetableGroups: TimetableGroup[];
+  invitation_expiry_minutes: number;
 }
 
 function formatDate(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function Countdown({ expiresAt }: { expiresAt: Date }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+  const diff = Math.max(0, Math.round((expiresAt.getTime() - Date.now()) / 1000));
+  const h = String(Math.floor(diff / 3600)).padStart(2, '0');
+  const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+  const s = String(diff % 60).padStart(2, '0');
+  return <>{h}:{m}:{s}</>;
 }
 
 export default function SessionDetailPage() {
@@ -783,7 +798,8 @@ export default function SessionDetailPage() {
                       </span>
                     </td>
                     <td>{inv.discipline_name || t.noData}</td>
-                    <td>
+                    <td style={{ verticalAlign: 'middle' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                       <span className={`badge ${
                         inv.status === 'confirmed' ? 'badge-confirmed' :
                         inv.status === 'declined' ? 'badge-declined' :
@@ -795,10 +811,20 @@ export default function SessionDetailPage() {
                       }`}>
                         {t.statusMap(inv.status)}
                       </span>
+                      {inv.status === 'invited' && session.invitation_expiry_minutes > 0 && inv.invited_at && (() => {
+                        const expiresAt = new Date(inv.invited_at + 'Z');
+                        expiresAt.setMinutes(expiresAt.getMinutes() + session.invitation_expiry_minutes);
+                        return (
+                          <span className="badge badge-draft" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontVariantNumeric: 'tabular-nums', minWidth: '5.5em', justifyContent: 'center' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3l2 2"/><path d="M19 3l-2 2"/><line x1="12" y1="1" x2="12" y2="3"/></svg>
+                            <Countdown expiresAt={expiresAt} />
+                          </span>
+                        );
+                      })()}
                       {inv.status === 'confirmed' && session.status !== 'completed' && (
                         <span
                           className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
-                          style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
+                          style={{ cursor: 'pointer' }}
                           onClick={() => toggleNoShow(inv.id)}
                         >
                           {inv.no_show ? t.noShow : t.show}
@@ -807,11 +833,11 @@ export default function SessionDetailPage() {
                       {inv.status === 'confirmed' && session.status === 'completed' && (
                         <span
                           className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
-                          style={{ marginLeft: '0.5rem' }}
                         >
                           {inv.no_show ? t.noShow : t.show}
                         </span>
                       )}
+                      </span>
                     </td>
                     {canEdit && (
                       <td>

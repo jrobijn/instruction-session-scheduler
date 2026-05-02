@@ -132,6 +132,16 @@ router.get('/:token', (req: Request, res: Response) => {
 
   const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
   const locale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
+  const expiryMinutes = Number(
+    (db.prepare("SELECT value FROM settings WHERE key = 'invitation_expiry_minutes'").get() as any)?.value || '120'
+  );
+
+  let expires_at: string | null = null;
+  if (invitation.status === 'invited' && expiryMinutes > 0 && invitation.invited_at) {
+    const expiresDate = new Date(invitation.invited_at + 'Z');
+    expiresDate.setMinutes(expiresDate.getMinutes() + expiryMinutes);
+    expires_at = expiresDate.toISOString();
+  }
 
   res.json({
     student_name: invitation.student_name,
@@ -143,6 +153,7 @@ router.get('/:token', (req: Request, res: Response) => {
     discipline_name: invitation.discipline_name || null,
     club_name: clubName,
     locale,
+    expires_at,
   });
 });
 

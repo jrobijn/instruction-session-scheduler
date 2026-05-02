@@ -329,6 +329,8 @@ const en = {
   replaceWith: 'Replace with...',
   viewInvitation: 'View invitation page',
   invitationNotFound: 'Invitation not found.',
+  expiresAt: (time: string, date: string) => `This invitation expires at ${time} on ${date}.`,
+  expiresIn: (minutes: number) => minutes <= 0 ? 'Expiring soon' : minutes < 60 ? `Expires in ${minutes}m` : `Expires in ${Math.floor(minutes / 60)}h ${minutes % 60}m`,
 };
 
 export default en;

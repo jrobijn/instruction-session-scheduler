@@ -331,6 +331,8 @@ const nl: Translations = {
   replaceWith: 'Vervangen door...',
   viewInvitation: 'Bekijk uitnodigingspagina',
   invitationNotFound: 'Uitnodiging niet gevonden.',
+  expiresAt: (time: string, date: string) => `Deze uitnodiging verloopt om ${time} op ${date}.`,
+  expiresIn: (minutes: number) => minutes <= 0 ? 'Verloopt binnenkort' : minutes < 60 ? `Verloopt over ${minutes}m` : `Verloopt over ${Math.floor(minutes / 60)}u ${minutes % 60}m`,
 };
 
 export default nl;

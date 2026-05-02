@@ -72,7 +72,11 @@ router.get('/:id', (req: Request, res: Response) => {
     ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
-  res.json({ ...session, instructors, timeslots, invitations, timetable, timetableGroups });
+  const expiryMinutes = Number(
+    (db.prepare("SELECT value FROM settings WHERE key = 'invitation_expiry_minutes'").get() as any)?.value || '120'
+  );
+
+  res.json({ ...session, instructors, timeslots, invitations, timetable, timetableGroups, invitation_expiry_minutes: expiryMinutes });
 });
 
 // Create training session
