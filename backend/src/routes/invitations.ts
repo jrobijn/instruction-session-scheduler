@@ -51,6 +51,9 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
 
   const originalGroupId = invitation.group_id as number | null;
   let replacementStudent = null;
+  let replacementGroupId = originalGroupId;
+
+  // First pass: find a replacement in the same group
   for (const student of nextStudent) {
     const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
       .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
@@ -64,11 +67,27 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
     }
   }
 
+  // Second pass: if no same-group replacement found, try any timetable group
+  if (!replacementStudent && originalGroupId && timetableGroupIds.length > 0) {
+    for (const student of nextStudent) {
+      const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
+        .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
+      const inAnyTimetableGroup = studentGroupIds.some(gid => timetableGroupIds.includes(gid));
+      const hasDisciplines = studentGroupIds.some(gid => discGroupIds.has(gid));
+      if (inAnyTimetableGroup && hasDisciplines) {
+        replacementStudent = student;
+        // Use the student's timetable group as the invitation group
+        replacementGroupId = studentGroupIds.find(gid => timetableGroupIds.includes(gid)) ?? originalGroupId;
+        break;
+      }
+    }
+  }
+
   if (!replacementStudent) return null;
 
   const token = crypto.randomUUID();
   db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, group_id, token) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.instructor_id, originalGroupId, token);
+    .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.instructor_id, replacementGroupId, token);
 
   // Increment priority for the replacement student
   db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?').run(replacementStudent.id);
