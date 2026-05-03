@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import jwt from 'jsonwebtoken';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeDatabase } from './database.js';
@@ -10,43 +12,93 @@ import studentsRouter from './routes/students.js';
 import instructorsRouter from './routes/instructors.js';
 import sessionsRouter from './routes/sessions.js';
 import timetablesRouter from './routes/timetables.js';
-import invitationsRouter, { processExpiredInvitations } from './routes/invitations.js';
+import invitationsRouter, { processExpiredInvitation } from './routes/invitations.js';
 import settingsRouter from './routes/settings.js';
-import { setCheckIntervalChangedCallback } from './routes/settings.js';
+import { setExpirySettingsChangedCallback } from './routes/settings.js';
+import { initExpiryTimers, rehydrateTimers } from './expiryTimers.js';
+import { subscribe, broadcast } from './sseClients.js';
 import disciplinesRouter from './routes/disciplines.js';
 import groupsRouter from './routes/groups.js';
 import buddyGroupsRouter from './routes/buddyGroups.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_PASSWORD || 'change-me';
 
 // Middleware
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true,
+}));
 app.use(express.json());
+app.use(cookieParser());
 
-// Simple admin auth middleware
+// Admin auth middleware (reads JWT from cookie)
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = req.cookies?.auth_token;
+  if (!token) {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
-  const token = authHeader.slice(7);
-  if (token !== process.env.ADMIN_PASSWORD) {
-    res.status(403).json({ error: 'Invalid credentials' });
-    return;
+  try {
+    jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token' });
   }
-  next();
 }
 
 // Auth endpoint
 app.post('/api/auth/login', (req: Request, res: Response) => {
   const { password } = req.body;
   if (password === process.env.ADMIN_PASSWORD) {
-    res.json({ success: true, token: process.env.ADMIN_PASSWORD });
+    const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+    res.json({ success: true });
   } else {
     res.status(401).json({ error: 'Invalid password' });
   }
+});
+
+// Logout endpoint
+app.post('/api/auth/logout', (_req: Request, res: Response) => {
+  res.clearCookie('auth_token');
+  res.json({ success: true });
+});
+
+// Check auth status
+app.get('/api/auth/me', (req: Request, res: Response) => {
+  const token = req.cookies?.auth_token;
+  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
+  try {
+    jwt.verify(token, JWT_SECRET);
+    res.json({ authenticated: true });
+  } catch {
+    res.status(401).json({ error: 'Not authenticated' });
+  }
+});
+
+// SSE: real-time session updates (admin, authenticated via cookie)
+app.get('/api/sessions/:id/events', (req: Request, res: Response) => {
+  const token = req.cookies?.auth_token;
+  if (!token) { res.status(401).json({ error: 'Authentication required' }); return; }
+  try {
+    jwt.verify(token, JWT_SECRET);
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token' }); return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('\n');
+  subscribe(`session:${req.params.id}`, res);
 });
 
 // Protected admin routes
@@ -100,6 +152,22 @@ app.get('/api/public/disciplines/:token', (req: Request, res: Response) => {
   }
 });
 
+// SSE: real-time invitation updates (public, keyed by token)
+app.get('/api/invitations/:token/events', (req: Request, res: Response) => {
+  const invitation = db.prepare(
+    'SELECT session_id FROM invitations WHERE token = ?'
+  ).get(req.params.token) as { session_id: number } | undefined;
+  if (!invitation) { res.status(404).json({ error: 'Not found' }); return; }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('\n');
+  subscribe(`invitation:${req.params.token}`, res);
+});
+
 // Health check
 app.get('/api/health', (_req: Request, res: Response) => res.json({ status: 'ok' }));
 
@@ -115,37 +183,10 @@ app.get('*', (_req: Request, res: Response) => {
 initializeDatabase();
 initializeMailer();
 
-// Check for expired invitations on a configurable interval
-let expirationTimer: ReturnType<typeof setTimeout> | null = null;
-
-function getCheckIntervalMs(): number {
-  try {
-    const val = (db.prepare("SELECT value FROM settings WHERE key = 'invitation_check_interval_minutes'").get() as any)?.value;
-    const minutes = Number(val || '15');
-    return Math.max(1, minutes) * 60 * 1000;
-  } catch {
-    return 15 * 60 * 1000;
-  }
-}
-
-export function rescheduleExpirationCheck() {
-  if (expirationTimer) clearTimeout(expirationTimer);
-  expirationTimer = setTimeout(async () => {
-    try {
-      const count = await processExpiredInvitations();
-      if (count > 0) console.log(`Expired ${count} invitation(s) and invited replacements`);
-    } catch (err) {
-      console.error('Error processing expired invitations:', err);
-    }
-    rescheduleExpirationCheck();
-  }, getCheckIntervalMs());
-}
-
-rescheduleExpirationCheck();
-setCheckIntervalChangedCallback(() => rescheduleExpirationCheck());
-
-// Also run once at startup
-processExpiredInvitations().catch(err => console.error('Error processing expired invitations at startup:', err));
+// Initialize per-invitation expiry timers
+initExpiryTimers(processExpiredInvitation);
+rehydrateTimers();
+setExpirySettingsChangedCallback(() => rehydrateTimers());
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

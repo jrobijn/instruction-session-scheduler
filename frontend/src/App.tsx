@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
-import { isAuthenticated, clearToken } from './api';
-import { useT } from './i18n';
+import { useAuth } from './AuthContext';
+import { useTheme, ThemeProvider } from './ThemeContext';
+import { useT, getLocale, setLocale, getAvailableLocales } from './i18n';
 import LoginPage from './pages/LoginPage';
 import StudentsPage from './pages/StudentsPage';
 import InstructorsPage from './pages/InstructorsPage';
@@ -20,24 +21,24 @@ import InvitationPage from './pages/InvitationPage';
 
 function AdminLayout() {
   const navigate = useNavigate();
-  const [, forceUpdate] = useState(0);
+  const { authenticated, logout } = useAuth();
+  const { mode, setMode } = useTheme();
   const t = useT();
 
   useEffect(() => { document.title = t.appTitle; }, [t.appTitle]);
 
   const handleLogout = () => {
-    clearToken();
-    forceUpdate(n => n + 1);
+    logout();
     navigate('/login');
   };
 
-  if (!isAuthenticated()) return <Navigate to="/login" />;
+  if (!authenticated) return <Navigate to="/login" />;
 
   return (
     <div className="app">
       <nav>
         <NavLink to="/sessions" className="logo" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <img src="/logo.png" alt="Logo" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
+          <img src={mode === 'dark' || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? '/logo-white.png' : '/logo.png'} alt="Logo" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
           {t.appTitle}
         </NavLink>
         <NavLink to="/sessions">{t.navSchedule}</NavLink>
@@ -49,6 +50,34 @@ function AdminLayout() {
         <NavLink to="/buddy-groups">{t.navBuddyGroups}</NavLink>
         <NavLink to="/settings">{t.navSettings}</NavLink>
         <div className="spacer" />
+        <div className="theme-wrapper">
+          <svg className="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+          <select
+            className="theme-select"
+            value={mode}
+            onChange={e => setMode(e.target.value as 'light' | 'dark' | 'auto')}
+          >
+            <option value="light">{t.themeLight}</option>
+            <option value="dark">{t.themeDark}</option>
+            <option value="auto">{t.themeAuto}</option>
+          </select>
+        </div>
+        <div className="locale-wrapper">
+          <svg className="locale-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          <select
+            className="locale-select"
+            value={getLocale()}
+            onChange={e => setLocale(e.target.value)}
+          >
+            {getAvailableLocales().map(code => (
+              <option key={code} value={code}>{t.languageNames[code] || code}</option>
+            ))}
+          </select>
+        </div>
         <button className="logout-btn" onClick={handleLogout}>{t.logout}</button>
       </nav>
       <Routes>
@@ -73,10 +102,12 @@ function AdminLayout() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/invitation/:token" element={<InvitationPage />} />
-      <Route path="/*" element={<AdminLayout />} />
-    </Routes>
+    <ThemeProvider>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/invitation/:token" element={<InvitationPage />} />
+        <Route path="/*" element={<AdminLayout />} />
+      </Routes>
+    </ThemeProvider>
   );
 }

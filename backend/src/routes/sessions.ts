@@ -2,6 +2,11 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import db from '../database.js';
 import { sendInvitationEmail, sendAdminCancellationEmail, getEmailStrings } from '../email.js';
+import {
+  scheduleInvitationExpiry, cancelInvitationExpiry, cancelAllSessionTimers,
+  getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
+} from '../expiryTimers.js';
+import { broadcastSession, broadcast } from '../sseClients.js';
 
 const router = Router();
 
@@ -19,7 +24,7 @@ function normalizePriorities() {
 router.get('/', (_req: Request, res: Response) => {
   const sessions = db.prepare(`
     SELECT ts.*,
-      (SELECT COUNT(*) FROM session_instructors WHERE session_id = ts.id) AS instructor_count,
+      (SELECT COUNT(*) FROM session_slots WHERE session_id = ts.id AND removed = 0) AS instructor_count,
       (SELECT COUNT(*) FROM invitations WHERE session_id = ts.id) AS invitation_count,
       tt.name AS timetable_name
     FROM training_sessions ts
@@ -36,8 +41,8 @@ router.get('/:id', (req: Request, res: Response) => {
 
   const instructors = db.prepare(`
     SELECT i.* FROM instructors i
-    JOIN session_instructors si ON si.instructor_id = i.id
-    WHERE si.session_id = ?
+    JOIN session_slots si ON si.instructor_id = i.id
+    WHERE si.session_id = ? AND si.removed = 0
     ORDER BY i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
@@ -60,19 +65,35 @@ router.get('/:id', (req: Request, res: Response) => {
   const invitations = db.prepare(`
     SELECT inv.*, inv.no_show, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.membership_id AS student_membership_id, s.attended_sessions,
            d.name AS discipline_name, d.abbreviation AS discipline_abbreviation, ts.start_time AS timeslot_start_time,
-           i.first_name || ' ' || i.last_name AS instructor_name,
-           g.name AS group_name, g.color AS group_color
+           ss.instructor_id AS instructor_id, i.first_name || ' ' || i.last_name AS instructor_name,
+           g.name AS group_name, g.color AS group_color,
+           bgm.buddy_group_id AS buddy_group_id, bg.name AS buddy_group_name
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     JOIN timeslots ts ON ts.id = inv.timeslot_id
-    JOIN instructors i ON i.id = inv.instructor_id
+    JOIN session_slots ss ON ss.id = inv.slot_id
+    JOIN instructors i ON i.id = ss.instructor_id
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
     LEFT JOIN groups g ON g.id = inv.group_id
+    LEFT JOIN buddy_group_members bgm ON bgm.student_id = inv.student_id
+    LEFT JOIN buddy_groups bg ON bg.id = bgm.buddy_group_id
     WHERE inv.session_id = ?
-    ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
+    ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC, inv.id ASC
   `).all(req.params.id);
 
-  res.json({ ...session, instructors, timeslots, invitations, timetable, timetableGroups });
+  const expiryMinutes = getExpiryMinutes();
+
+  // Compute effective status for invitations (lazy expiry check)
+  const effectiveInvitations = (invitations as any[]).map(inv => {
+    if (inv.status === 'invited' && expiryMinutes > 0 && inv.invited_at) {
+      if (isInvitationLogicallyExpired(inv.invited_at, expiryMinutes)) {
+        return { ...inv, status: 'expired' };
+      }
+    }
+    return inv;
+  });
+
+  res.json({ ...session, instructors, timeslots, invitations: effectiveInvitations, timetable, timetableGroups, invitation_expiry_minutes: expiryMinutes });
 });
 
 // Create training session
@@ -150,8 +171,17 @@ router.post('/:id/instructors', (req: Request, res: Response) => {
   const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id);
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
 
+  // Check if there's a removed slot for this instructor (re-assign case)
+  const removedSlot = db.prepare('SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1')
+    .get(req.params.id, instructor_id) as { id: number } | undefined;
+  if (removedSlot) {
+    db.prepare('UPDATE session_slots SET removed = 0 WHERE id = ?').run(removedSlot.id);
+    res.status(201).json({ success: true });
+    return;
+  }
+
   try {
-    db.prepare('INSERT INTO session_instructors (session_id, instructor_id) VALUES (?, ?)').run(req.params.id, instructor_id);
+    db.prepare('INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)').run(req.params.id, instructor_id);
     res.status(201).json({ success: true });
   } catch (err: any) {
     if (err.message.includes('UNIQUE constraint')) {
@@ -172,11 +202,11 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
   if (session.status === 'completed') { res.status(400).json({ error: 'Cannot modify a completed session' }); return; }
 
-  const assignment = db.prepare('SELECT * FROM session_instructors WHERE session_id = ? AND instructor_id = ?')
+  const assignment = db.prepare('SELECT * FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0')
     .get(req.params.id, req.params.instructorId) as any;
   if (!assignment) { res.status(404).json({ error: 'Assignment not found' }); return; }
 
-  // Find all invitations for this instructor in this session
+  // Find all invitations for this instructor's slot in this session
   const affectedInvitations = db.prepare(`
     SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
            tslot.start_time AS timeslot_start_time, d.name AS discipline_name
@@ -184,8 +214,8 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
     JOIN students s ON s.id = inv.student_id
     JOIN timeslots tslot ON tslot.id = inv.timeslot_id
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
-    WHERE inv.session_id = ? AND inv.instructor_id = ?
-  `).all(req.params.id, req.params.instructorId) as any[];
+    WHERE inv.slot_id = ?
+  `).all(assignment.id) as any[];
 
   const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
   const emailLocale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
@@ -194,6 +224,8 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
     if (inv.status === 'invited' || inv.status === 'confirmed') {
       // Admin-cancel active invitations and notify
       db.prepare("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?").run(inv.id);
+      cancelInvitationExpiry(inv.id);
+      broadcast(`invitation:${inv.token}`, 'invitation_updated', { status: 'admin_cancelled' });
       db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
       if (inv.email_sent) {
         try {
@@ -219,11 +251,13 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
   }
   normalizePriorities();
 
-  // Remove the instructor assignment
-  db.prepare('DELETE FROM session_instructors WHERE session_id = ? AND instructor_id = ?')
-    .run(req.params.id, req.params.instructorId);
+  // Mark the instructor slot as removed (invitations remain linked for history)
+  db.prepare('UPDATE session_slots SET removed = 1 WHERE id = ?').run(assignment.id);
 
   res.json({ success: true, cancelled: affectedInvitations.filter(i => i.status === 'invited' || i.status === 'confirmed').length });
+
+  // Broadcast structural change
+  broadcastSession(Number(req.params.id), 'reload', {});
 });
 
 // Replace instructor: reassign all active invitations to a new instructor
@@ -240,7 +274,7 @@ router.post('/:id/instructors/:instructorId/replace', (req: Request, res: Respon
   if (oldInstructorId === newInstructorId) { res.status(400).json({ error: 'New instructor must be different' }); return; }
 
   // Verify old instructor is assigned
-  const oldAssignment = db.prepare('SELECT * FROM session_instructors WHERE session_id = ? AND instructor_id = ?')
+  const oldAssignment = db.prepare('SELECT * FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0')
     .get(req.params.id, oldInstructorId) as any;
   if (!oldAssignment) { res.status(404).json({ error: 'Original instructor not assigned to this session' }); return; }
 
@@ -248,23 +282,27 @@ router.post('/:id/instructors/:instructorId/replace', (req: Request, res: Respon
   const newInstructor = db.prepare('SELECT * FROM instructors WHERE id = ?').get(newInstructorId) as any;
   if (!newInstructor) { res.status(400).json({ error: 'New instructor not found' }); return; }
 
-  // Verify new instructor is not already assigned
-  const existingAssignment = db.prepare('SELECT * FROM session_instructors WHERE session_id = ? AND instructor_id = ?')
+  // Verify new instructor is not already actively assigned
+  const existingAssignment = db.prepare('SELECT * FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0')
     .get(req.params.id, newInstructorId) as any;
   if (existingAssignment) { res.status(409).json({ error: 'New instructor is already assigned to this session' }); return; }
 
-  // Reassign only active invitations to new instructor; cancelled/declined/expired ones become orphaned
-  const reassigned = db.prepare(
-    `UPDATE invitations SET instructor_id = ? WHERE session_id = ? AND instructor_id = ? AND status IN ('scheduled','invited','confirmed')`
-  ).run(newInstructorId, req.params.id, oldInstructorId);
+  // If the new instructor has a removed slot, move its invitations to the old slot then delete it
+  const removedSlot = db.prepare('SELECT * FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1')
+    .get(req.params.id, newInstructorId) as any;
+  if (removedSlot) {
+    db.prepare('UPDATE invitations SET slot_id = ? WHERE slot_id = ?').run(oldAssignment.id, removedSlot.id);
+    db.prepare('DELETE FROM session_slots WHERE id = ?').run(removedSlot.id);
+  }
 
-  // Swap the instructor assignment
-  db.prepare('DELETE FROM session_instructors WHERE session_id = ? AND instructor_id = ?')
-    .run(req.params.id, oldInstructorId);
-  db.prepare('INSERT INTO session_instructors (session_id, instructor_id) VALUES (?, ?)')
-    .run(req.params.id, newInstructorId);
+  // Update the slot's instructor — all invitations automatically point to the new instructor
+  db.prepare('UPDATE session_slots SET instructor_id = ? WHERE id = ?')
+    .run(newInstructorId, oldAssignment.id);
 
-  res.json({ success: true, reassigned: reassigned.changes });
+  res.json({ success: true });
+
+  // Broadcast structural change
+  broadcastSession(Number(req.params.id), 'reload', {});
 });
 
 // ===== Schedule Generation =====
@@ -276,7 +314,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   if (!session.timetable_id) { res.status(400).json({ error: 'No timetable attached to this session' }); return; }
 
-  const instructorCount = (db.prepare('SELECT COUNT(*) AS cnt FROM session_instructors WHERE session_id = ?')
+  const instructorCount = (db.prepare('SELECT COUNT(*) AS cnt FROM session_slots WHERE session_id = ? AND removed = 0')
     .get(req.params.id) as any).cnt;
   if (instructorCount === 0) { res.status(400).json({ error: 'No instructors assigned for this session' }); return; }
 
@@ -434,9 +472,9 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   }
 
   const instructors = db.prepare(`
-    SELECT i.id FROM instructors i
-    JOIN session_instructors si ON si.instructor_id = i.id
-    WHERE si.session_id = ?
+    SELECT i.id, ss.id AS slot_id FROM instructors i
+    JOIN session_slots ss ON ss.instructor_id = i.id
+    WHERE ss.session_id = ? AND ss.removed = 0
     ORDER BY i.last_name ASC, i.first_name ASC
   `).all(req.params.id) as any[];
 
@@ -451,7 +489,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   // Mark slots occupied by manually-added students as unavailable
   for (const mi of manualInvitations) {
-    const idx = slotGrid.findIndex(s => s.timeslot.id === mi.timeslot_id && s.instructor.id === mi.instructor_id);
+    const idx = slotGrid.findIndex(s => s.timeslot.id === mi.timeslot_id && s.instructor.slot_id === mi.slot_id);
     if (idx !== -1) slotAvailable[idx] = false;
   }
 
@@ -565,12 +603,12 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     slotAvailable[assignedIdx] = false;
     const slot = slotGrid[assignedIdx];
     const token = crypto.randomUUID();
-    insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.id, token, groupId);
-    return { ...student, token, timeslot_id: slot.timeslot.id, instructor_id: slot.instructor.id, start_time: slot.timeslot.start_time, group_id: groupId, timeslotIdx: slot.timeslotIdx };
+    insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.slot_id, token, groupId);
+    return { ...student, token, timeslot_id: slot.timeslot.id, slot_id: slot.instructor.slot_id, start_time: slot.timeslot.start_time, group_id: groupId, timeslotIdx: slot.timeslotIdx };
   }
 
   const insertInvitation = db.prepare(`
-    INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token, group_id)
+    INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
@@ -642,6 +680,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   // Update session status to scheduled
   db.prepare("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?").run(req.params.id);
 
+  broadcastSession(Number(req.params.id), 'reload', {});
+
   res.json({
     session_id: req.params.id,
     total_slots: totalSlots,
@@ -684,7 +724,16 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
         clubName,
         locale: emailLocale,
       });
-      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE id = ?").run(inv.id);
+      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE id = ?").run(inv.id);
+      // Schedule expiry timer
+      const expiryMinutes = getExpiryMinutes();
+      if (expiryMinutes > 0) {
+        const updated = db.prepare("SELECT invited_at FROM invitations WHERE id = ?").get(inv.id) as any;
+        if (updated) {
+          const expiresAt = computeExpiresAt(updated.invited_at, expiryMinutes);
+          scheduleInvitationExpiry(inv.id, expiresAt.getTime());
+        }
+      }
       sent++;
     } catch (err: any) {
       errors.push({ student: inv.student_name, error: err.message });
@@ -695,6 +744,8 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
   if (sent > 0) {
     db.prepare("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?").run(req.params.id);
   }
+
+  broadcastSession(Number(req.params.id), 'reload', {});
 
   res.json({ sent, errors });
 });
@@ -712,6 +763,9 @@ router.post('/:id/invitations/:invitationId/toggle-no-show', (req: Request, res:
 
   const newValue = invitation.no_show ? 0 : 1;
   db.prepare('UPDATE invitations SET no_show = ? WHERE id = ?').run(newValue, invitation.id);
+
+  broadcastSession(Number(req.params.id), 'invitation_updated', { id: invitation.id, no_show: newValue });
+
   res.json({ success: true, no_show: newValue });
 });
 
@@ -744,6 +798,9 @@ router.post('/:id/complete', (req: Request, res: Response) => {
   });
 
   completeTransaction();
+
+  broadcastSession(Number(req.params.id), 'session_updated', { status: 'completed' });
+
   res.json({ success: true, students_credited: confirmedStudents.length });
 });
 
@@ -791,6 +848,11 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'student_id, timeslot_id, and instructor_id are required' }); return;
   }
 
+  // Look up the session slot for this instructor
+  const slot = db.prepare('SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0')
+    .get(req.params.id, instructor_id) as { id: number } | undefined;
+  if (!slot) { res.status(400).json({ error: 'Instructor is not assigned to this session' }); return; }
+
   // Check student is not already in this session
   const existing = db.prepare(
     'SELECT id FROM invitations WHERE session_id = ? AND student_id = ?'
@@ -799,14 +861,14 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
 
   // Check slot is not occupied
   const slotTaken = db.prepare(
-    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND instructor_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')"
-  ).get(req.params.id, timeslot_id, instructor_id);
+    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')"
+  ).get(req.params.id, timeslot_id, slot.id);
   if (slotTaken) { res.status(409).json({ error: 'This slot is already occupied' }); return; }
 
   const token = crypto.randomUUID();
   db.prepare(
-    'INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, token) VALUES (?, ?, ?, ?, ?)'
-  ).run(req.params.id, student_id, timeslot_id, instructor_id, token);
+    'INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token) VALUES (?, ?, ?, ?, ?)'
+  ).run(req.params.id, student_id, timeslot_id, slot.id, token);
 
   // Increment priority for the manually added student
   db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?').run(student_id);
@@ -831,13 +893,25 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
         clubName,
         locale: emailLocale,
       });
-      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE token = ?").run(token);
+      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE token = ?").run(token);
+      // Schedule expiry timer
+      const expiryMinutes = getExpiryMinutes();
+      if (expiryMinutes > 0) {
+        const newInv = db.prepare("SELECT id, invited_at FROM invitations WHERE token = ?").get(token) as any;
+        if (newInv) {
+          const expiresAt = computeExpiresAt(newInv.invited_at, expiryMinutes);
+          scheduleInvitationExpiry(newInv.id, expiresAt.getTime());
+        }
+      }
     } catch (err) {
       console.error('Failed to send invitation email for manually added student:', err);
     }
   }
 
   res.status(201).json({ success: true });
+
+  // Broadcast after response — new invitation added
+  broadcastSession(Number(req.params.id), 'reload', {});
 });
 
 // Remove an invitation from a session
@@ -897,6 +971,13 @@ router.post('/:id/invitations/:invitationId/admin-cancel', async (req: Request, 
     UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?
   `).run(invitation.id);
 
+  // Cancel expiry timer if pending
+  cancelInvitationExpiry(invitation.id);
+
+  // Broadcast admin cancellation
+  broadcastSession(Number(req.params.id), 'invitation_updated', { id: invitation.id, status: 'admin_cancelled' });
+  broadcast(`invitation:${invitation.token}`, 'invitation_updated', { status: 'admin_cancelled' });
+
   // Reverse the priority increase that was applied when this student was invited
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
   normalizePriorities();
@@ -929,6 +1010,9 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
   if (session.status === 'completed') { res.status(400).json({ error: 'Cannot cancel a completed session' }); return; }
   if (session.status === 'cancelled') { res.status(400).json({ error: 'Session is already cancelled' }); return; }
+
+  // Cancel all expiry timers for this session
+  cancelAllSessionTimers(Number(req.params.id));
 
   // Find all active invitations (for emails)
   const activeInvitations = db.prepare(`
@@ -986,6 +1070,12 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, cancelled_invitations: activeInvitations.length });
+
+  // Broadcast session cancellation
+  broadcastSession(Number(req.params.id), 'reload', {});
+  for (const inv of activeInvitations) {
+    broadcast(`invitation:${inv.token}`, 'invitation_updated', { status: 'admin_cancelled' });
+  }
 });
 
 // ===== Reactivate cancelled session =====
@@ -994,6 +1084,9 @@ router.post('/:id/reactivate', (req: Request, res: Response) => {
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
   if (session.status !== 'cancelled') { res.status(400).json({ error: 'Only cancelled sessions can be reactivated' }); return; }
 
+  // Cancel all expiry timers for this session
+  cancelAllSessionTimers(Number(req.params.id));
+
   // Delete all invitations belonging to this session
   db.prepare('DELETE FROM invitations WHERE session_id = ?').run(req.params.id);
 
@@ -1001,6 +1094,9 @@ router.post('/:id/reactivate', (req: Request, res: Response) => {
   db.prepare("UPDATE training_sessions SET status = 'draft' WHERE id = ?").run(req.params.id);
 
   res.json({ success: true, new_status: 'draft' });
+
+  // Broadcast structural change
+  broadcastSession(Number(req.params.id), 'reload', {});
 });
 
 export default router;

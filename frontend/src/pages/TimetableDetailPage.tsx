@@ -163,7 +163,7 @@ export default function TimetableDetailPage() {
       <div style={{ marginBottom: '1rem' }}>
         <div style={{
           display: 'flex', height: '32px', borderRadius: '6px', overflow: 'hidden',
-          border: '1px solid #e5e7eb', background: '#f3f4f6',
+          border: '1px solid var(--border)', background: 'var(--bg)',
         }}>
           {barSegments.map((seg, i) => (
             seg.percentage > 0 ? (
@@ -174,7 +174,7 @@ export default function TimetableDetailPage() {
                 color: 'white', fontSize: '0.8rem', fontWeight: 600,
                 transition: 'width 0.3s ease',
                 minWidth: seg.percentage > 0 ? '24px' : 0,
-                borderRight: i < barSegments.length - 1 ? '2px solid white' : 'none',
+                borderRight: i < barSegments.length - 1 ? '2px solid var(--surface)' : 'none',
               }}>
                 {seg.percentage}%
               </div>
@@ -238,11 +238,11 @@ export default function TimetableDetailPage() {
           </div>
         )}
         {timetable.timeslots.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>{t.noTimeslotsDefined}</p>
+          <p style={{ color: 'var(--text-muted)' }}>{t.noTimeslotsDefined}</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {timetable.timeslots.map(ts => (
-              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: '#475569', color: '#ffffff' }}>
+              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)' }}>
                 {ts.start_time}
                 {isDraft && (
                   <button onClick={() => deleteTimeslot(ts.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>

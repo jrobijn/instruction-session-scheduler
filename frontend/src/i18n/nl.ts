@@ -291,12 +291,13 @@ const nl: Translations = {
   settingEmailLocale: 'E-mailtaal',
   settingEmailLocaleDesc: 'Taal voor e-mails en uitnodigings-/annuleringspagina\'s die aan leerlingen worden getoond.',
   languageNames: { en: 'English', nl: 'Nederlands' } as Record<string, string>,
+  themeLight: 'Licht',
+  themeDark: 'Donker',
+  themeAuto: 'Auto',
   settingClubName: 'Clubnaam',
   settingClubNameDesc: 'Naam van de sportclub, gebruikt in e-mails.',
   settingExpiryMinutes: 'Verloopduur uitnodiging (minuten)',
   settingExpiryMinutesDesc: 'Minuten voordat een onbeantwoorde uitnodiging verloopt en een vervanger wordt uitgenodigd. Stel in op 0 om uit te schakelen.',
-  settingCheckInterval: 'Controle-interval verlopen (minuten)',
-  settingCheckIntervalDesc: 'Hoe vaak de server controleert op verlopen uitnodigingen. Wijzigingen worden van kracht na het huidige interval.',
   settingClubDays: 'Clubdagen',
   settingClubDaysDesc: 'Dagen van de week waarop de club actief is. Er moet minimaal één dag geselecteerd zijn.',
 
@@ -309,6 +310,8 @@ const nl: Translations = {
   confirmAttendance: 'Aanwezigheid bevestigen',
   decline: 'Afwijzen',
   preferredDiscipline: 'Voorkeursdiscipline',
+  chooseDiscipline: 'Kies discipline',
+  selectDiscipline: 'Selecteer een discipline…',
   noPreference: 'Geen voorkeur',
   invitationConfirmedMsg: 'Je aanwezigheid is bevestigd. Tot bij de training!',
   invitationDeclinedMsg: 'Je hebt deze uitnodiging afgewezen. Een andere leerling wordt in jouw plaats uitgenodigd.',
@@ -331,6 +334,8 @@ const nl: Translations = {
   replaceWith: 'Vervangen door...',
   viewInvitation: 'Bekijk uitnodigingspagina',
   invitationNotFound: 'Uitnodiging niet gevonden.',
+  expiresAt: (time: string, date: string) => `Deze uitnodiging verloopt om ${time} op ${date}.`,
+  expiresIn: (minutes: number) => minutes <= 0 ? 'Verloopt binnenkort' : minutes < 60 ? `Verloopt over ${minutes}m` : `Verloopt over ${Math.floor(minutes / 60)}u ${minutes % 60}m`,
 };
 
 export default nl;

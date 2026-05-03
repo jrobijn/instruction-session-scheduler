@@ -1,40 +1,28 @@
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
+export { API_BASE };
 
-function getToken(): string | null {
-  return localStorage.getItem('admin_token');
-}
+let authErrorCallback: (() => void) | null = null;
 
-export function setToken(token: string): void {
-  localStorage.setItem('admin_token', token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem('admin_token');
-}
-
-export function isAuthenticated(): boolean {
-  return !!getToken();
+export function onAuthError(cb: () => void) {
+  authErrorCallback = cb;
 }
 
 async function request(path: string, options: RequestInit = {}): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as Record<string, string>) };
-  const token = getToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' });
+  if (res.status === 401 || res.status === 403) {
+    authErrorCallback?.();
   }
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
 }
 
 async function requestCsv(path: string): Promise<string> {
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
+  if (res.status === 401 || res.status === 403) {
+    authErrorCallback?.();
   }
-  const res = await fetch(`${API_BASE}${path}`, { headers });
   if (!res.ok) {
     const data = await res.json();
     throw new Error(data.error || 'Request failed');
@@ -45,6 +33,8 @@ async function requestCsv(path: string): Promise<string> {
 export const api = {
   // Auth
   login: (password: string) => request('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  checkAuth: () => request('/auth/me'),
 
   // Students
   getStudents: () => request('/students'),

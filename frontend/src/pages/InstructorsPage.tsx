@@ -192,7 +192,7 @@ export default function InstructorsPage() {
               </tr>
               {isExpanded && (
                 <tr key={`${i.id}-details`}>
-                  <td colSpan={3} style={{ background: '#f9fafb', padding: '1rem 1.5rem' }}>
+                  <td colSpan={3} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem 2rem' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
                         <strong>{t.firstName}:</strong> <span>{i.first_name}</span>

@@ -289,12 +289,13 @@ const en = {
   settingEmailLocale: 'Email Language',
   settingEmailLocaleDesc: 'Language used for emails and invitation/cancellation pages shown to students.',
   languageNames: { en: 'English', nl: 'Nederlands' } as Record<string, string>,
+  themeLight: 'Light',
+  themeDark: 'Dark',
+  themeAuto: 'Auto',
   settingClubName: 'Club Name',
   settingClubNameDesc: 'Name of the sports club, used in emails.',
   settingExpiryMinutes: 'Invitation Expiry (minutes)',
   settingExpiryMinutesDesc: 'Minutes before an unanswered invitation expires and a replacement is invited. Set to 0 to disable.',
-  settingCheckInterval: 'Expiry Check Interval (minutes)',
-  settingCheckIntervalDesc: 'How often the server checks for expired invitations. Changes take effect after the current interval completes.',
   settingClubDays: 'Club Days',
   settingClubDaysDesc: 'Days of the week the club operates. At least one must be selected.',
 
@@ -307,6 +308,8 @@ const en = {
   confirmAttendance: 'Confirm Attendance',
   decline: 'Decline',
   preferredDiscipline: 'Preferred Discipline',
+  chooseDiscipline: 'Choose Discipline',
+  selectDiscipline: 'Select a discipline…',
   noPreference: 'No preference',
   invitationConfirmedMsg: 'Your attendance has been confirmed. See you at the training!',
   invitationDeclinedMsg: 'You have declined this invitation. Another student will be invited in your place.',
@@ -329,6 +332,8 @@ const en = {
   replaceWith: 'Replace with...',
   viewInvitation: 'View invitation page',
   invitationNotFound: 'Invitation not found.',
+  expiresAt: (time: string, date: string) => `This invitation expires at ${time} on ${date}.`,
+  expiresIn: (minutes: number) => minutes <= 0 ? 'Expiring soon' : minutes < 60 ? `Expires in ${minutes}m` : `Expires in ${Math.floor(minutes / 60)}h ${minutes % 60}m`,
 };
 
 export default en;

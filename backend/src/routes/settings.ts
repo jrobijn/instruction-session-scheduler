@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
 import db from '../database.js';
 
-let onCheckIntervalChanged: (() => void) | null = null;
-export function setCheckIntervalChangedCallback(cb: () => void) {
-  onCheckIntervalChanged = cb;
+let onExpirySettingsChanged: (() => void) | null = null;
+export function setExpirySettingsChangedCallback(cb: () => void) {
+  onExpirySettingsChanged = cb;
 }
 
 const router = Router();
@@ -25,8 +25,8 @@ router.put('/:key', (req: Request, res: Response) => {
 
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(req.params.key, String(value));
 
-  if (req.params.key === 'invitation_check_interval_minutes' && onCheckIntervalChanged) {
-    onCheckIntervalChanged();
+  if (req.params.key === 'invitation_expiry_minutes' && onExpirySettingsChanged) {
+    onExpirySettingsChanged();
   }
 
   res.json({ key: req.params.key, value: String(value) });

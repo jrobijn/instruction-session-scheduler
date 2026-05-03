@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api } from '../api';
+import { api, API_BASE } from '../api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useT } from '../i18n';
+import Countdown from '../components/Countdown';
 
 interface Instructor {
   id: number;
@@ -26,6 +27,7 @@ interface TimetableInfo {
 
 interface Invitation {
   id: number;
+  student_id: number;
   student_name: string;
   student_email: string;
   student_membership_id: string;
@@ -40,6 +42,9 @@ interface Invitation {
   no_show: number;
   group_name: string | null;
   group_color: string | null;
+  invited_at: string | null;
+  buddy_group_id: number | null;
+  buddy_group_name: string | null;
 }
 
 interface TimetableGroup {
@@ -60,6 +65,7 @@ interface SessionDetail {
   timeslots: Timeslot[];
   invitations: Invitation[];
   timetableGroups: TimetableGroup[];
+  invitation_expiry_minutes: number;
 }
 
 function formatDate(dateStr: string) {
@@ -113,6 +119,42 @@ export default function SessionDetailPage() {
   };
 
   useEffect(() => { load(); }, [id]);
+
+  // SSE: real-time updates
+  useEffect(() => {
+    if (!id) return;
+    const es = new EventSource(`${API_BASE}/sessions/${id}/events`, { withCredentials: true });
+
+    es.addEventListener('invitation_updated', (e) => {
+      const data = JSON.parse(e.data);
+      setSession(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          invitations: prev.invitations.map(inv =>
+            inv.id === data.id ? { ...inv, ...data } : inv
+          ),
+        };
+      });
+    });
+
+    es.addEventListener('invitation_added', (e) => {
+      const data = JSON.parse(e.data);
+      setSession(prev => {
+        if (!prev) return prev;
+        return { ...prev, invitations: [...prev.invitations, data] };
+      });
+    });
+
+    es.addEventListener('session_updated', (e) => {
+      const data = JSON.parse(e.data);
+      setSession(prev => prev ? { ...prev, ...data } : prev);
+    });
+
+    es.addEventListener('reload', () => { load(); });
+
+    return () => es.close();
+  }, [id]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -325,32 +367,58 @@ export default function SessionDetailPage() {
 
   // Build unified slot list for invitations table: every timeslot×instructor gets rows for
   // existing invitations (including declined) plus an empty add-row if the slot is unoccupied
-  type SlotEntry = { timeslotId: number; instructorId: number; startTime: string; invitation: Invitation | null; empty: boolean };
-  const allSlots: SlotEntry[] = [];
+  type SlotEntry = { timeslotId: number; instructorId: number; startTime: string; instructorName: string; invitation: Invitation | null; empty: boolean };
+  type SlotGroup = { timeslotId: number; instructorId: number; startTime: string; instructorName: string; entries: SlotEntry[] };
+  const slotGroups: SlotGroup[] = [];
   const assignedInstructorIds = new Set(session.instructors.map(i => i.id));
   for (const ts of session.timeslots) {
     for (const instr of session.instructors) {
+      const instrName = `${instr.first_name} ${instr.last_name}`;
       const slotInvitations = session.invitations.filter(
         inv => inv.timeslot_id === ts.id && inv.instructor_id === instr.id
       );
+      const entries: SlotEntry[] = [];
       // Add all invitations for this slot (active + declined)
       for (const inv of slotInvitations) {
-        allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: inv, empty: false });
+        entries.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, instructorName: instrName, invitation: inv, empty: false });
       }
       // If no active (non-declined/expired) invitation occupies this slot, add an empty row
       const hasActive = slotInvitations.some(inv => inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled');
       if (!hasActive) {
-        allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: null, empty: true });
+        entries.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, instructorName: instrName, invitation: null, empty: true });
       }
+      slotGroups.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, instructorName: instrName, entries });
     }
   }
   // Add orphaned invitations (instructor was removed from session)
   const orphanedInvitations = session.invitations.filter(
     inv => !assignedInstructorIds.has(inv.instructor_id)
   );
-  for (const inv of orphanedInvitations) {
-    allSlots.push({ timeslotId: inv.timeslot_id, instructorId: inv.instructor_id, startTime: inv.timeslot_start_time, invitation: inv, empty: false });
+  if (orphanedInvitations.length > 0) {
+    // Group orphans by timeslot+instructor
+    const orphanMap = new Map<string, SlotEntry[]>();
+    for (const inv of orphanedInvitations) {
+      const key = `${inv.timeslot_id}-${inv.instructor_id}`;
+      if (!orphanMap.has(key)) orphanMap.set(key, []);
+      orphanMap.get(key)!.push({ timeslotId: inv.timeslot_id, instructorId: inv.instructor_id, startTime: inv.timeslot_start_time, instructorName: inv.instructor_name, invitation: inv, empty: false });
+    }
+    for (const [, entries] of orphanMap) {
+      const first = entries[0];
+      slotGroups.push({ timeslotId: first.timeslotId, instructorId: first.instructorId, startTime: first.startTime, instructorName: first.instructorName, entries });
+    }
   }
+
+  // Buddy group indicators: assign colors to buddy groups with 2+ members in this session
+  const BUDDY_COLORS = ['#e11d48', '#7c3aed', '#0891b2', '#c026d3', '#ea580c', '#4f46e5', '#059669'];
+  const buddyGroupCounts = new Map<number, number>();
+  for (const inv of session.invitations) {
+    if (inv.buddy_group_id && inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled') {
+      buddyGroupCounts.set(inv.buddy_group_id, (buddyGroupCounts.get(inv.buddy_group_id) || 0) + 1);
+    }
+  }
+  const activeBuddyGroups = [...buddyGroupCounts.entries()].filter(([, c]) => c >= 2).map(([id]) => id);
+  const buddyColorMap = new Map<number, string>();
+  activeBuddyGroups.forEach((bgId, i) => buddyColorMap.set(bgId, BUDDY_COLORS[i % BUDDY_COLORS.length]));
 
   const exportPdf = () => {
     const doc = new jsPDF({ orientation: 'landscape' });
@@ -469,14 +537,14 @@ export default function SessionDetailPage() {
             {session.instructors.map(i => (
               <span key={i.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                 {replacingInstructorId === i.id ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: '#475569', color: '#ffffff', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600 }}>
                     <span>{i.first_name} {i.last_name}</span>
-                    <span style={{ color: '#cbd5e1' }}>→</span>
+                    <span style={{ color: 'var(--text-muted)' }}>→</span>
                     <select
                       autoFocus
                       value={replacementTargetId ?? ''}
                       onChange={e => setReplacementTargetId(e.target.value ? Number(e.target.value) : null)}
-                      style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid #94a3b8', background: '#334155', color: '#ffffff' }}
+                      style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                     >
                       <option value="">{t.replaceWith}</option>
                       {allInstructors.filter(inst => !assignedIds.has(inst.id)).map(inst => (
@@ -496,7 +564,7 @@ export default function SessionDetailPage() {
                     >✗</button>
                   </span>
                 ) : (
-                  <span className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: '#475569', color: '#ffffff' }}>
+                  <span className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)' }}>
                     {i.first_name} {i.last_name}
                     {session.status !== 'completed' && session.status !== 'cancelled' && (
                       <>
@@ -526,7 +594,7 @@ export default function SessionDetailPage() {
                       }
                     }}
                     onBlur={() => setShowAddInstructor(false)}
-                    style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                    style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                   >
                     <option value="">{t.selectInstructor}</option>
                     {availableInstructors.map(inst => (
@@ -578,11 +646,11 @@ export default function SessionDetailPage() {
           </p>
         )}
         {session.timeslots.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</p>
+          <p style={{ color: 'var(--text-muted)' }}>{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {session.timeslots.map(ts => (
-              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: '#475569', color: '#ffffff' }}>
+              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)' }}>
                 {ts.start_time}
               </span>
             ))}
@@ -595,7 +663,7 @@ export default function SessionDetailPage() {
           <div style={{ marginTop: '1rem' }}>
             <div style={{
               display: 'flex', height: '32px', borderRadius: '6px', overflow: 'hidden',
-              border: '1px solid #e5e7eb', background: '#f3f4f6',
+              border: '1px solid var(--border)', background: 'var(--bg)',
             }}>
               {session.timetableGroups.map((seg, i) => (
                 seg.percentage > 0 ? (
@@ -605,7 +673,7 @@ export default function SessionDetailPage() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', fontSize: '0.8rem', fontWeight: 600,
                     minWidth: '24px',
-                    borderRight: i < session.timetableGroups.length - 1 ? '2px solid white' : 'none',
+                    borderRight: i < session.timetableGroups.length - 1 ? '2px solid var(--surface)' : 'none',
                   }}>
                     {seg.percentage}%
                   </div>
@@ -719,6 +787,12 @@ export default function SessionDetailPage() {
                                 background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
                               }} />
                               <span>{inv.student_name}</span>
+                              {inv.buddy_group_id && buddyColorMap.has(inv.buddy_group_id) && (
+                                <svg style={{ width: '14px', height: '14px', flexShrink: 0 }} viewBox="0 0 24 24" fill={buddyColorMap.get(inv.buddy_group_id)} xmlns="http://www.w3.org/2000/svg">
+                                  <title>{inv.buddy_group_name}</title>
+                                  <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                                </svg>
+                              )}
                               <span className={`badge ${
                                 inv.status === 'confirmed' ? 'badge-confirmed' :
                                 inv.status === 'declined' ? 'badge-declined' :
@@ -768,11 +842,16 @@ export default function SessionDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {allSlots.map((slot, idx) => {
+              {slotGroups.map((group, groupIdx) => (
+                group.entries.map((slot, idx) => {
+                const isFirstInGroup = idx === 0;
+                const groupBorderStyle = isFirstInGroup && groupIdx > 0 ? '2px solid var(--border)' : undefined;
                 const inv = slot.invitation;
                 if (inv) return (
-                  <tr key={inv.id}>
-                    <td>{inv.timeslot_start_time}</td>
+                  <tr key={inv.id} style={groupBorderStyle ? { borderTop: groupBorderStyle } : undefined}>
+                    <td style={isFirstInGroup ? { fontWeight: 500 } : { color: 'transparent', userSelect: 'none' }}>
+                      {inv.timeslot_start_time}
+                    </td>
                     <td>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
                         <span title={inv.group_name || ''} style={{
@@ -780,10 +859,17 @@ export default function SessionDetailPage() {
                           background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
                         }} />
                         {inv.student_name}
+                        {inv.buddy_group_id && buddyColorMap.has(inv.buddy_group_id) && (
+                          <svg style={{ width: '14px', height: '14px', flexShrink: 0 }} viewBox="0 0 24 24" fill={buddyColorMap.get(inv.buddy_group_id)} xmlns="http://www.w3.org/2000/svg">
+                            <title>{inv.buddy_group_name}</title>
+                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                          </svg>
+                        )}
                       </span>
                     </td>
                     <td>{inv.discipline_name || t.noData}</td>
-                    <td>
+                    <td style={{ verticalAlign: 'middle' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                       <span className={`badge ${
                         inv.status === 'confirmed' ? 'badge-confirmed' :
                         inv.status === 'declined' ? 'badge-declined' :
@@ -795,10 +881,20 @@ export default function SessionDetailPage() {
                       }`}>
                         {t.statusMap(inv.status)}
                       </span>
+                      {inv.status === 'invited' && session.invitation_expiry_minutes > 0 && inv.invited_at && (() => {
+                        const expiresAt = new Date(inv.invited_at + 'Z');
+                        expiresAt.setMinutes(expiresAt.getMinutes() + session.invitation_expiry_minutes);
+                        return (
+                          <span className="badge badge-draft" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontVariantNumeric: 'tabular-nums', minWidth: '5.5em', justifyContent: 'center' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3l2 2"/><path d="M19 3l-2 2"/><line x1="12" y1="1" x2="12" y2="3"/></svg>
+                            <Countdown expiresAt={expiresAt} />
+                          </span>
+                        );
+                      })()}
                       {inv.status === 'confirmed' && session.status !== 'completed' && (
                         <span
                           className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
-                          style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
+                          style={{ cursor: 'pointer' }}
                           onClick={() => toggleNoShow(inv.id)}
                         >
                           {inv.no_show ? t.noShow : t.show}
@@ -807,11 +903,11 @@ export default function SessionDetailPage() {
                       {inv.status === 'confirmed' && session.status === 'completed' && (
                         <span
                           className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
-                          style={{ marginLeft: '0.5rem' }}
                         >
                           {inv.no_show ? t.noShow : t.show}
                         </span>
                       )}
+                      </span>
                     </td>
                     {canEdit && (
                       <td>
@@ -845,8 +941,10 @@ export default function SessionDetailPage() {
                 );
                 if (!slot.empty || !(canEdit || session.status === 'invitations_sent')) return null;
                 return (
-                  <tr key={`empty-${slot.timeslotId}-${slot.instructorId}`}>
-                    <td>{slot.startTime}</td>
+                  <tr key={`empty-${slot.timeslotId}-${slot.instructorId}-${idx}`} style={groupBorderStyle ? { borderTop: groupBorderStyle } : undefined}>
+                    <td style={isFirstInGroup ? { fontWeight: 500 } : { color: 'transparent', userSelect: 'none' }}>
+                      {slot.startTime}
+                    </td>
                     <td colSpan={2}>
                       {addSlot?.timeslotId === slot.timeslotId && addSlot?.instructorId === slot.instructorId ? (
                         <div ref={dropdownRef} style={{ position: 'relative' }}>
@@ -861,18 +959,18 @@ export default function SessionDetailPage() {
                           {showStudentDropdown && (
                             <div style={{
                               position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                              background: 'white', border: '1px solid #d1d5db', borderRadius: '0.375rem',
-                              maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.375rem',
+                              maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px var(--shadow)',
                             }}>
                               {studentResults.map(s => (
                                 <div
                                   key={s.id}
                                   onClick={() => addStudentToSlot(s.id)}
-                                  style={{ padding: '0.5rem', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
-                                  onMouseOver={e => (e.currentTarget.style.background = '#f3f4f6')}
-                                  onMouseOut={e => (e.currentTarget.style.background = 'white')}
+                                  style={{ padding: '0.5rem', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                                  onMouseOver={e => (e.currentTarget.style.background = 'var(--bg)')}
+                                  onMouseOut={e => (e.currentTarget.style.background = 'var(--surface)')}
                                 >
-                                  {s.first_name} {s.last_name} <span style={{ color: '#6b7280', fontSize: '0.8rem' }}>({s.email})</span>
+                                  {s.first_name} {s.last_name} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>({s.email})</span>
                                 </div>
                               ))}
                             </div>
@@ -890,7 +988,8 @@ export default function SessionDetailPage() {
                     {(canEdit || session.status === 'invitations_sent') && <td></td>}
                   </tr>
                 );
-              })}
+                })
+              ))}
             </tbody>
           </table>
         </div>

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, API_BASE } from '../api';
 import { useT, setLocale } from '../i18n';
+import Countdown from '../components/Countdown';
 
 interface Invitation {
   id: number;
@@ -11,6 +12,7 @@ interface Invitation {
   status: string;
   discipline_id: number | null;
   discipline_name: string | null;
+  expires_at: string | null;
 }
 
 interface Discipline {
@@ -45,6 +47,8 @@ export default function InvitationPage() {
         }
         if (inv.discipline_id) {
           setSelectedDiscipline(String(inv.discipline_id));
+        } else if (discs.length === 1) {
+          setSelectedDiscipline(String(discs[0].id));
         }
       } catch (err: any) {
         setError(err.message);
@@ -53,6 +57,23 @@ export default function InvitationPage() {
       }
     };
     load();
+  }, [token]);
+
+  // SSE: real-time updates for this invitation
+  useEffect(() => {
+    if (!token) return;
+    const es = new EventSource(`${API_BASE}/invitations/${token}/events`);
+
+    es.addEventListener('invitation_updated', async () => {
+      try {
+        const inv = await api.getInvitation(token);
+        setInvitation(inv);
+        setConfirmingAction(null);
+        if (inv.locale) setLocale(inv.locale);
+      } catch { /* ignore */ }
+    });
+
+    return () => es.close();
   }, [token]);
 
   const handleConfirm = async () => {
@@ -95,7 +116,7 @@ export default function InvitationPage() {
   return (
     <div className="invitation-page">
       <div className="card" style={{ width: '100%', maxWidth: 560, margin: '2rem auto', padding: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-start', justifyContent: 'center' }}>
-        <img src="/logo.png" alt="Logo" style={{ width: 128, height: 128, objectFit: 'contain', flexShrink: 0 }} />
+        <img src={document.documentElement.getAttribute('data-theme') === 'dark' ? '/logo-white.png' : '/logo.png'} alt="Logo" style={{ width: 128, height: 128, objectFit: 'contain', flexShrink: 0 }} />
         <div style={{ flex: '1 1 280px' }}>
         <h1 style={{ margin: '0 0 1.5rem 0' }}>{t.trainingInvitation}</h1>
 
@@ -104,6 +125,7 @@ export default function InvitationPage() {
           <p><strong>{t.dateLabel}</strong> {dateStr}</p>
           <p><strong>{t.timeLabel}</strong> {invitation.start_time}</p>
           <p><strong>{t.statusLabel}</strong>{' '}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
             <span className={`badge ${
               invitation.status === 'confirmed' ? 'badge-confirmed' :
               invitation.status === 'declined' ? 'badge-declined' :
@@ -113,6 +135,16 @@ export default function InvitationPage() {
               'badge-pending'
             }`}>
               {t.statusMap(invitation.status)}
+            </span>
+            {invitation.status === 'invited' && invitation.expires_at && (() => {
+              const expiresAt = new Date(invitation.expires_at);
+              return (
+                <span className="badge badge-draft" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontVariantNumeric: 'tabular-nums', minWidth: '5.5em', justifyContent: 'center' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3l2 2"/><path d="M19 3l-2 2"/><line x1="12" y1="1" x2="12" y2="3"/></svg>
+                  <Countdown expiresAt={expiresAt} />
+                </span>
+              );
+            })()}
             </span>
           </p>
         </div>
@@ -156,7 +188,7 @@ export default function InvitationPage() {
               <p style={{ marginBottom: '1rem' }}><strong>{t.discipline}:</strong> {invitation.discipline_name}</p>
             )}
             {confirmingAction === 'cancel' ? (
-              <div style={{ padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+              <div style={{ padding: '1rem', background: 'var(--decline-prompt-bg)', border: '1px solid var(--decline-prompt-border)', borderRadius: 8 }}>
                 <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptCancel}</p>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleCancel}>{t.yesCancel}</button>
@@ -173,11 +205,14 @@ export default function InvitationPage() {
 
         {invitation.status === 'invited' && !actionDone && (
           <>
-            {disciplines.length > 0 && !confirmingAction && (
+            {disciplines.length === 1 && !confirmingAction && (
+              <p style={{ marginBottom: '1.5rem' }}><strong>{t.discipline}:</strong> {disciplines[0].name}</p>
+            )}
+            {disciplines.length > 1 && !confirmingAction && (
               <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>{t.preferredDiscipline}</label>
+                <label>{t.chooseDiscipline}</label>
                 <select value={selectedDiscipline} onChange={e => setSelectedDiscipline(e.target.value)}>
-                  <option value="">{t.noPreference}</option>
+                  <option value="" disabled>{t.selectDiscipline}</option>
                   {disciplines.map(d => (
                     <option key={d.id} value={d.id}>{d.name}</option>
                   ))}
@@ -185,15 +220,15 @@ export default function InvitationPage() {
               </div>
             )}
             {confirmingAction === 'confirm' ? (
-              <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8 }}>
+              <div style={{ padding: '1rem', background: 'var(--confirm-prompt-bg)', border: '1px solid var(--confirm-prompt-border)', borderRadius: 8 }}>
                 <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptConfirm}</p>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm}>{t.yesConfirm}</button>
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm} disabled={disciplines.length > 1 && !selectedDiscipline}>{t.yesConfirm}</button>
                   <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmingAction(null)}>{t.goBack}</button>
                 </div>
               </div>
             ) : confirmingAction === 'decline' ? (
-              <div style={{ padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+              <div style={{ padding: '1rem', background: 'var(--decline-prompt-bg)', border: '1px solid var(--decline-prompt-border)', borderRadius: 8 }}>
                 <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptDecline}</p>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleDecline}>{t.yesDecline}</button>
@@ -202,7 +237,7 @@ export default function InvitationPage() {
               </div>
             ) : (
               <div style={{ display: 'flex', gap: '1rem' }}>
-                <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setConfirmingAction('confirm')}>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setConfirmingAction('confirm')} disabled={disciplines.length > 1 && !selectedDiscipline}>
                   {t.confirmAttendance}
                 </button>
                 <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => setConfirmingAction('decline')}>
