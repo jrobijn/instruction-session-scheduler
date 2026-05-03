@@ -6,6 +6,7 @@ import {
   scheduleInvitationExpiry, cancelInvitationExpiry,
   getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
 } from '../expiryTimers.js';
+import { broadcastSession, broadcast } from '../sseClients.js';
 
 const router = Router();
 
@@ -124,6 +125,24 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
     // Email sending failed, but invitation is still created
   }
 
+  // Broadcast new invitation to session listeners
+  const fullInv = db.prepare(`
+    SELECT inv.*, inv.no_show, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.membership_id AS student_membership_id, s.attended_sessions,
+           d.name AS discipline_name, d.abbreviation AS discipline_abbreviation, ts.start_time AS timeslot_start_time,
+           i.first_name || ' ' || i.last_name AS instructor_name,
+           g.name AS group_name, g.color AS group_color
+    FROM invitations inv
+    JOIN students s ON s.id = inv.student_id
+    JOIN timeslots ts ON ts.id = inv.timeslot_id
+    JOIN instructors i ON i.id = inv.instructor_id
+    LEFT JOIN disciplines d ON d.id = inv.discipline_id
+    LEFT JOIN groups g ON g.id = inv.group_id
+    WHERE inv.token = ?
+  `).get(token) as any;
+  if (fullInv) {
+    broadcastSession(invitation.session_id, 'invitation_added', fullInv);
+  }
+
   return { name: replacementStudent.first_name + ' ' + replacementStudent.last_name, email: replacementStudent.email };
 }
 
@@ -142,6 +161,11 @@ export async function processExpiredInvitation(invitationId: number): Promise<vo
   db.prepare("UPDATE invitations SET status = 'expired', responded_at = datetime('now') WHERE id = ?").run(inv.id);
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
   normalizePriorities();
+
+  // Broadcast expiry to session and invitation listeners
+  broadcastSession(inv.session_id, 'invitation_updated', { id: inv.id, status: 'expired' });
+  broadcast(`invitation:${inv.token}`, 'invitation_updated', { status: 'expired' });
+
   await findAndInviteReplacement(inv);
 }
 
@@ -231,6 +255,20 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
   // Cancel the expiry timer — invitation is resolved
   cancelInvitationExpiry(invitation.id);
 
+  // Broadcast confirmation to session and invitation listeners
+  const updatedInv = db.prepare('SELECT discipline_id FROM invitations WHERE id = ?').get(invitation.id) as any;
+  let confirmedDisciplineName: string | null = null;
+  let confirmedDisciplineAbbr: string | null = null;
+  if (updatedInv?.discipline_id) {
+    const d = db.prepare('SELECT name, abbreviation FROM disciplines WHERE id = ?').get(updatedInv.discipline_id) as any;
+    if (d) { confirmedDisciplineName = d.name; confirmedDisciplineAbbr = d.abbreviation; }
+  }
+  broadcastSession(invitation.session_id, 'invitation_updated', {
+    id: invitation.id, status: 'confirmed',
+    discipline_name: confirmedDisciplineName, discipline_abbreviation: confirmedDisciplineAbbr,
+  });
+  broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'confirmed' });
+
   // Send confirmation email with cancellation link
   try {
     const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
@@ -278,6 +316,10 @@ router.post('/:token/cancel', async (req: Request, res: Response) => {
   db.prepare(`
     UPDATE invitations SET status = 'cancelled', responded_at = datetime('now') WHERE id = ?
   `).run(invitation.id);
+
+  // Broadcast cancellation to session and invitation listeners
+  broadcastSession(invitation.session_id, 'invitation_updated', { id: invitation.id, status: 'cancelled' });
+  broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'cancelled' });
 
   // Reverse the priority increase that was applied when this student was invited
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
@@ -341,6 +383,10 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
 
   // Cancel the expiry timer — invitation is resolved
   cancelInvitationExpiry(invitation.id);
+
+  // Broadcast decline to session and invitation listeners
+  broadcastSession(invitation.session_id, 'invitation_updated', { id: invitation.id, status: 'declined' });
+  broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'declined' });
 
   // Reverse the priority increase that was applied when this student was invited
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);

@@ -59,6 +59,24 @@ export default function InvitationPage() {
     load();
   }, [token]);
 
+  // SSE: real-time updates for this invitation
+  useEffect(() => {
+    if (!token) return;
+    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
+    const es = new EventSource(`${API_BASE}/invitations/${token}/events`);
+
+    es.addEventListener('invitation_updated', async () => {
+      try {
+        const inv = await api.getInvitation(token);
+        setInvitation(inv);
+        setConfirmingAction(null);
+        if (inv.locale) setLocale(inv.locale);
+      } catch { /* ignore */ }
+    });
+
+    return () => es.close();
+  }, [token]);
+
   const handleConfirm = async () => {
     try {
       await api.confirmInvitation(token!, selectedDiscipline ? Number(selectedDiscipline) : undefined);

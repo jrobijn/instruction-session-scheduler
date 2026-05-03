@@ -117,6 +117,44 @@ export default function SessionDetailPage() {
 
   useEffect(() => { load(); }, [id]);
 
+  // SSE: real-time updates
+  useEffect(() => {
+    const token = localStorage.getItem('admin_token');
+    if (!token || !id) return;
+    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
+    const es = new EventSource(`${API_BASE}/sessions/${id}/events?token=${encodeURIComponent(token)}`);
+
+    es.addEventListener('invitation_updated', (e) => {
+      const data = JSON.parse(e.data);
+      setSession(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          invitations: prev.invitations.map(inv =>
+            inv.id === data.id ? { ...inv, ...data } : inv
+          ),
+        };
+      });
+    });
+
+    es.addEventListener('invitation_added', (e) => {
+      const data = JSON.parse(e.data);
+      setSession(prev => {
+        if (!prev) return prev;
+        return { ...prev, invitations: [...prev.invitations, data] };
+      });
+    });
+
+    es.addEventListener('session_updated', (e) => {
+      const data = JSON.parse(e.data);
+      setSession(prev => prev ? { ...prev, ...data } : prev);
+    });
+
+    es.addEventListener('reload', () => { load(); });
+
+    return () => es.close();
+  }, [id]);
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {

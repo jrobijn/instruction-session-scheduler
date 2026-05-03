@@ -6,6 +6,7 @@ import {
   scheduleInvitationExpiry, cancelInvitationExpiry, cancelAllSessionTimers,
   getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
 } from '../expiryTimers.js';
+import { broadcastSession, broadcast } from '../sseClients.js';
 
 const router = Router();
 
@@ -211,6 +212,7 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
       // Admin-cancel active invitations and notify
       db.prepare("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?").run(inv.id);
       cancelInvitationExpiry(inv.id);
+      broadcast(`invitation:${inv.token}`, 'invitation_updated', { status: 'admin_cancelled' });
       db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
       if (inv.email_sent) {
         try {
@@ -241,6 +243,9 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
     .run(req.params.id, req.params.instructorId);
 
   res.json({ success: true, cancelled: affectedInvitations.filter(i => i.status === 'invited' || i.status === 'confirmed').length });
+
+  // Broadcast structural change
+  broadcastSession(Number(req.params.id), 'reload', {});
 });
 
 // Replace instructor: reassign all active invitations to a new instructor
@@ -282,6 +287,9 @@ router.post('/:id/instructors/:instructorId/replace', (req: Request, res: Respon
     .run(req.params.id, newInstructorId);
 
   res.json({ success: true, reassigned: reassigned.changes });
+
+  // Broadcast structural change
+  broadcastSession(Number(req.params.id), 'reload', {});
 });
 
 // ===== Schedule Generation =====
@@ -659,6 +667,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   // Update session status to scheduled
   db.prepare("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?").run(req.params.id);
 
+  broadcastSession(Number(req.params.id), 'reload', {});
+
   res.json({
     session_id: req.params.id,
     total_slots: totalSlots,
@@ -722,6 +732,8 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
     db.prepare("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?").run(req.params.id);
   }
 
+  broadcastSession(Number(req.params.id), 'reload', {});
+
   res.json({ sent, errors });
 });
 
@@ -738,6 +750,9 @@ router.post('/:id/invitations/:invitationId/toggle-no-show', (req: Request, res:
 
   const newValue = invitation.no_show ? 0 : 1;
   db.prepare('UPDATE invitations SET no_show = ? WHERE id = ?').run(newValue, invitation.id);
+
+  broadcastSession(Number(req.params.id), 'invitation_updated', { id: invitation.id, no_show: newValue });
+
   res.json({ success: true, no_show: newValue });
 });
 
@@ -770,6 +785,9 @@ router.post('/:id/complete', (req: Request, res: Response) => {
   });
 
   completeTransaction();
+
+  broadcastSession(Number(req.params.id), 'session_updated', { status: 'completed' });
+
   res.json({ success: true, students_credited: confirmedStudents.length });
 });
 
@@ -873,6 +891,9 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
   }
 
   res.status(201).json({ success: true });
+
+  // Broadcast after response — new invitation added
+  broadcastSession(Number(req.params.id), 'reload', {});
 });
 
 // Remove an invitation from a session
@@ -934,6 +955,10 @@ router.post('/:id/invitations/:invitationId/admin-cancel', async (req: Request, 
 
   // Cancel expiry timer if pending
   cancelInvitationExpiry(invitation.id);
+
+  // Broadcast admin cancellation
+  broadcastSession(Number(req.params.id), 'invitation_updated', { id: invitation.id, status: 'admin_cancelled' });
+  broadcast(`invitation:${invitation.token}`, 'invitation_updated', { status: 'admin_cancelled' });
 
   // Reverse the priority increase that was applied when this student was invited
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
@@ -1027,6 +1052,12 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, cancelled_invitations: activeInvitations.length });
+
+  // Broadcast session cancellation
+  broadcastSession(Number(req.params.id), 'reload', {});
+  for (const inv of activeInvitations) {
+    broadcast(`invitation:${inv.token}`, 'invitation_updated', { status: 'admin_cancelled' });
+  }
 });
 
 // ===== Reactivate cancelled session =====
@@ -1045,6 +1076,9 @@ router.post('/:id/reactivate', (req: Request, res: Response) => {
   db.prepare("UPDATE training_sessions SET status = 'draft' WHERE id = ?").run(req.params.id);
 
   res.json({ success: true, new_status: 'draft' });
+
+  // Broadcast structural change
+  broadcastSession(Number(req.params.id), 'reload', {});
 });
 
 export default router;

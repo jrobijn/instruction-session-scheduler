@@ -14,6 +14,7 @@ import invitationsRouter, { processExpiredInvitation } from './routes/invitation
 import settingsRouter from './routes/settings.js';
 import { setExpirySettingsChangedCallback } from './routes/settings.js';
 import { initExpiryTimers, rehydrateTimers } from './expiryTimers.js';
+import { subscribe, broadcast } from './sseClients.js';
 import disciplinesRouter from './routes/disciplines.js';
 import groupsRouter from './routes/groups.js';
 import buddyGroupsRouter from './routes/buddyGroups.js';
@@ -48,6 +49,22 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
   } else {
     res.status(401).json({ error: 'Invalid password' });
   }
+});
+
+// SSE: real-time session updates (admin, must be before requireAdmin middleware)
+app.get('/api/sessions/:id/events', (req: Request, res: Response) => {
+  const token = req.query.token as string;
+  if (token !== process.env.ADMIN_PASSWORD) {
+    res.status(403).json({ error: 'Invalid credentials' });
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('\n');
+  subscribe(`session:${req.params.id}`, res);
 });
 
 // Protected admin routes
@@ -99,6 +116,22 @@ app.get('/api/public/disciplines/:token', (req: Request, res: Response) => {
     `).all(invitation.student_id);
     res.json(disciplines);
   }
+});
+
+// SSE: real-time invitation updates (public, keyed by token)
+app.get('/api/invitations/:token/events', (req: Request, res: Response) => {
+  const invitation = db.prepare(
+    'SELECT session_id FROM invitations WHERE token = ?'
+  ).get(req.params.token) as { session_id: number } | undefined;
+  if (!invitation) { res.status(404).json({ error: 'Not found' }); return; }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('\n');
+  subscribe(`invitation:${req.params.token}`, res);
 });
 
 // Health check
