@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api';
-import { useT, getLocale, setLocale, getAvailableLocales } from '../i18n';
+import { useT, getAvailableLocales } from '../i18n';
 
 interface Settings {
   [key: string]: string;
@@ -46,19 +46,6 @@ export default function SettingsPage() {
     <div className="page">
       <h1>{t.settingsTitle}</h1>
       <div className="card">
-        <div className="form-group">
-          <label>{t.settingLanguage}</label>
-          <select
-            value={getLocale()}
-            onChange={e => setLocale(e.target.value)}
-          >
-            {getAvailableLocales().map(code => (
-              <option key={code} value={code}>{t.languageNames[code] || code}</option>
-            ))}
-          </select>
-          <small style={{ color: '#6b7280' }}>{t.settingLanguageDesc}</small>
-        </div>
-
         <div className="form-group">
           <label>{t.settingEmailLocale}</label>
           <select

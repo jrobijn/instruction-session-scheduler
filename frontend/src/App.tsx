@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
-import { useT } from './i18n';
+import { useT, getLocale, setLocale, getAvailableLocales } from './i18n';
 import LoginPage from './pages/LoginPage';
 import StudentsPage from './pages/StudentsPage';
 import InstructorsPage from './pages/InstructorsPage';
@@ -48,6 +48,20 @@ function AdminLayout() {
         <NavLink to="/buddy-groups">{t.navBuddyGroups}</NavLink>
         <NavLink to="/settings">{t.navSettings}</NavLink>
         <div className="spacer" />
+        <div className="locale-wrapper">
+          <svg className="locale-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          <select
+            className="locale-select"
+            value={getLocale()}
+            onChange={e => setLocale(e.target.value)}
+          >
+            {getAvailableLocales().map(code => (
+              <option key={code} value={code}>{t.languageNames[code] || code}</option>
+            ))}
+          </select>
+        </div>
         <button className="logout-btn" onClick={handleLogout}>{t.logout}</button>
       </nav>
       <Routes>
