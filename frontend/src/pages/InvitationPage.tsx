@@ -116,7 +116,7 @@ export default function InvitationPage() {
   return (
     <div className="invitation-page">
       <div className="card" style={{ width: '100%', maxWidth: 560, margin: '2rem auto', padding: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-start', justifyContent: 'center' }}>
-        <img src="/logo.png" alt="Logo" style={{ width: 128, height: 128, objectFit: 'contain', flexShrink: 0 }} />
+        <img src={document.documentElement.getAttribute('data-theme') === 'dark' ? '/logo-white.png' : '/logo.png'} alt="Logo" style={{ width: 128, height: 128, objectFit: 'contain', flexShrink: 0 }} />
         <div style={{ flex: '1 1 280px' }}>
         <h1 style={{ margin: '0 0 1.5rem 0' }}>{t.trainingInvitation}</h1>
 

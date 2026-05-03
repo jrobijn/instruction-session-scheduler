@@ -1,4 +1,4 @@
-:root {
+:root, [data-theme="light"] {
   --bg: #f8fafc;
   --surface: #ffffff;
   --border: #e2e8f0;
@@ -11,6 +11,29 @@
   --success: #16a34a;
   --warning: #d97706;
   --radius: 8px;
+  --hover-row: #f1f5f9;
+  --shadow: rgba(0,0,0,0.1);
+  --neutral-badge-bg: #475569;
+  --neutral-badge-text: #ffffff;
+}
+
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --border: #334155;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --radius: 8px;
+  --hover-row: #334155;
+  --shadow: rgba(0,0,0,0.4);
+  --neutral-badge-bg: #64748b;
+  --neutral-badge-text: #f1f5f9;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -66,7 +89,7 @@ th { background: var(--bg); font-weight: 600; font-size: 13px; color: var(--text
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--text); }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: #f1f5f9; }
+tr:hover td { background: var(--hover-row); }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 16px;
@@ -87,12 +110,23 @@ tr:hover td { background: #f1f5f9; }
 .btn-sm { padding: 4px 10px; font-size: 13px; }
 .btn-group { display: flex; gap: 8px; }
 
+[data-theme="dark"] .btn-primary { background: #2563eb; color: #fff; }
+[data-theme="dark"] .btn-primary:hover:not(:disabled) { background: #3b82f6; }
+[data-theme="dark"] .btn-danger { background: #dc2626; color: #fff; }
+[data-theme="dark"] .btn-danger:hover:not(:disabled) { background: #ef4444; }
+[data-theme="dark"] .btn-success { background: #16a34a; color: #fff; }
+[data-theme="dark"] .btn-success:hover:not(:disabled) { background: #22c55e; }
+[data-theme="dark"] .btn-warning { background: #d97706; color: #fff; }
+[data-theme="dark"] .btn-warning:hover:not(:disabled) { background: #f59e0b; }
+[data-theme="dark"] .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+[data-theme="dark"] .btn-outline:hover:not(:disabled) { background: #334155; }
+
 .action-dropdown { position: relative; display: inline-block; }
 .action-dropdown-toggle { min-width: 36px; text-align: center; font-size: 18px; line-height: 1; letter-spacing: 1px; }
 .action-dropdown-menu {
   position: fixed; z-index: 9999;
-  background: white; border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1); min-width: 140px; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 4px 12px var(--shadow); min-width: 140px; overflow: hidden;
 }
 .action-dropdown-item {
   display: block; width: 100%; padding: 7px 14px; border: none; background: none;
@@ -101,7 +135,8 @@ tr:hover td { background: #f1f5f9; }
 }
 .action-dropdown-item:hover { background: var(--bg); }
 .action-dropdown-item-danger { color: var(--danger); }
-.action-dropdown-item-danger:hover { background: #fee2e2; }
+[data-theme="light"] .action-dropdown-item-danger:hover { background: #fee2e2; }
+[data-theme="dark"] .action-dropdown-item-danger:hover { background: #451a1a; }
 
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--text-muted); }
@@ -121,12 +156,24 @@ tr:hover td { background: #f1f5f9; }
 .badge-show { background: #ffffff; color: #000000; border: 1px solid #000000; }
 .badge-no-show { background: #000000; color: #ffffff; }
 
+[data-theme="dark"] .badge-draft { background: #334155; color: var(--text-muted); }
+[data-theme="dark"] .badge-published { background: #1e3a5f; color: #60a5fa; }
+[data-theme="dark"] .badge-pending { background: #422006; color: #fbbf24; }
+[data-theme="dark"] .badge-confirmed { background: #052e16; color: #4ade80; }
+[data-theme="dark"] .badge-declined { background: #450a0a; color: #f87171; }
+[data-theme="dark"] .badge-show { background: var(--surface); color: var(--text); border: 1px solid var(--text); }
+[data-theme="dark"] .badge-no-show { background: #e2e8f0; color: #0f172a; }
+
 .alert { padding: 12px 16px; border-radius: var(--radius); margin-bottom: 16px; font-size: 14px; }
 .alert-error { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
 .alert-success { background: #dcfce7; color: #16a34a; border: 1px solid #bbf7d0; }
 .alert-info { background: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; }
 
-.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+[data-theme="dark"] .alert-error { background: #450a0a; color: #f87171; border-color: #7f1d1d; }
+[data-theme="dark"] .alert-success { background: #052e16; color: #4ade80; border-color: #14532d; }
+[data-theme="dark"] .alert-info { background: #1e3a5f; color: #60a5fa; border-color: #1e40af; }
+
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { background: var(--surface); border-radius: var(--radius); padding: 24px; width: 460px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
 .modal h2 { margin-bottom: 16px; font-size: 18px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
@@ -167,4 +214,62 @@ tr:hover td { background: #f1f5f9; }
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* DatePicker calendar dark mode */
+[data-theme="dark"] .react-datepicker {
+  background-color: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+[data-theme="dark"] .react-datepicker__header {
+  background-color: var(--bg);
+  border-bottom-color: var(--border);
+}
+[data-theme="dark"] .react-datepicker__current-month,
+[data-theme="dark"] .react-datepicker__day-name {
+  color: var(--text);
+}
+[data-theme="dark"] .react-datepicker__day {
+  color: var(--text);
+}
+[data-theme="dark"] .react-datepicker__day:hover {
+  background-color: var(--hover-row);
+}
+[data-theme="dark"] .react-datepicker__day--selected,
+[data-theme="dark"] .react-datepicker__day--keyboard-selected {
+  background-color: var(--primary);
+  color: #fff;
+}
+[data-theme="dark"] .react-datepicker__day--disabled {
+  color: #475569;
+}
+[data-theme="dark"] .react-datepicker__day--outside-month {
+  color: var(--text-muted);
+}
+[data-theme="dark"] .react-datepicker__navigation-icon::before {
+  border-color: var(--text-muted);
+}
+[data-theme="dark"] .react-datepicker__triangle::before,
+[data-theme="dark"] .react-datepicker__triangle::after {
+  border-bottom-color: var(--bg) !important;
+}
+
+/* Theme toggle */
+nav .theme-wrapper {
+  position: relative; display: inline-flex; align-items: center;
+}
+nav .theme-icon {
+  position: absolute; left: 8px; width: 14px; height: 14px; color: var(--text-muted);
+  pointer-events: none; opacity: 0.7;
+}
+nav .theme-select {
+  background: none; border: 1px solid var(--border); padding: 6px 10px 6px 28px;
+  border-radius: var(--radius); font-size: 13px; color: var(--text-muted); cursor: pointer;
+  appearance: auto;
+}
+
+/* Dark mode color scheme for form elements */
+[data-theme="dark"] input, [data-theme="dark"] select, [data-theme="dark"] textarea {
+  color-scheme: dark;
 }

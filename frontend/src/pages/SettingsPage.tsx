@@ -59,8 +59,8 @@ export default function SettingsPage() {
               <option key={code} value={code}>{t.languageNames[code] || code}</option>
             ))}
           </select>
-          <small style={{ color: '#6b7280' }}>{t.settingEmailLocaleDesc}</small>
-          {saved === 'email_locale' && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>{t.saved}</small>}
+          <small style={{ color: 'var(--text-muted)' }}>{t.settingEmailLocaleDesc}</small>
+          {saved === 'email_locale' && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
         </div>
 
         {settingsConfig.map(({ key, label, type, description }) => (
@@ -72,8 +72,8 @@ export default function SettingsPage() {
               onChange={e => setSettings({ ...settings, [key]: e.target.value })}
               onBlur={e => saveSetting(key, e.target.value)}
             />
-            <small style={{ color: '#6b7280' }}>{description}</small>
-            {saved === key && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>{t.saved}</small>}
+            <small style={{ color: 'var(--text-muted)' }}>{description}</small>
+            {saved === key && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
           </div>
         ))}
 
@@ -104,8 +104,8 @@ export default function SettingsPage() {
               );
             })}
           </div>
-            <small style={{ color: '#6b7280' }}>{t.settingClubDaysDesc}</small>
-            {saved === 'club_days' && <small style={{ color: '#10b981', marginLeft: '0.5rem' }}>{t.saved}</small>}
+            <small style={{ color: 'var(--text-muted)' }}>{t.settingClubDaysDesc}</small>
+            {saved === 'club_days' && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
         </div>
       </div>
     </div>

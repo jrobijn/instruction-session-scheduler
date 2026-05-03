@@ -522,14 +522,14 @@ export default function SessionDetailPage() {
             {session.instructors.map(i => (
               <span key={i.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                 {replacingInstructorId === i.id ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: '#475569', color: '#ffffff', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600 }}>
                     <span>{i.first_name} {i.last_name}</span>
-                    <span style={{ color: '#cbd5e1' }}>→</span>
+                    <span style={{ color: 'var(--text-muted)' }}>→</span>
                     <select
                       autoFocus
                       value={replacementTargetId ?? ''}
                       onChange={e => setReplacementTargetId(e.target.value ? Number(e.target.value) : null)}
-                      style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid #94a3b8', background: '#334155', color: '#ffffff' }}
+                      style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                     >
                       <option value="">{t.replaceWith}</option>
                       {allInstructors.filter(inst => !assignedIds.has(inst.id)).map(inst => (
@@ -549,7 +549,7 @@ export default function SessionDetailPage() {
                     >✗</button>
                   </span>
                 ) : (
-                  <span className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: '#475569', color: '#ffffff' }}>
+                  <span className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)' }}>
                     {i.first_name} {i.last_name}
                     {session.status !== 'completed' && session.status !== 'cancelled' && (
                       <>
@@ -579,7 +579,7 @@ export default function SessionDetailPage() {
                       }
                     }}
                     onBlur={() => setShowAddInstructor(false)}
-                    style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                    style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                   >
                     <option value="">{t.selectInstructor}</option>
                     {availableInstructors.map(inst => (
@@ -631,11 +631,11 @@ export default function SessionDetailPage() {
           </p>
         )}
         {session.timeslots.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</p>
+          <p style={{ color: 'var(--text-muted)' }}>{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</p>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {session.timeslots.map(ts => (
-              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: '#475569', color: '#ffffff' }}>
+              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)' }}>
                 {ts.start_time}
               </span>
             ))}
@@ -648,7 +648,7 @@ export default function SessionDetailPage() {
           <div style={{ marginTop: '1rem' }}>
             <div style={{
               display: 'flex', height: '32px', borderRadius: '6px', overflow: 'hidden',
-              border: '1px solid #e5e7eb', background: '#f3f4f6',
+              border: '1px solid var(--border)', background: 'var(--bg)',
             }}>
               {session.timetableGroups.map((seg, i) => (
                 seg.percentage > 0 ? (
@@ -658,7 +658,7 @@ export default function SessionDetailPage() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: 'white', fontSize: '0.8rem', fontWeight: 600,
                     minWidth: '24px',
-                    borderRight: i < session.timetableGroups.length - 1 ? '2px solid white' : 'none',
+                    borderRight: i < session.timetableGroups.length - 1 ? '2px solid var(--surface)' : 'none',
                   }}>
                     {seg.percentage}%
                   </div>
@@ -932,18 +932,18 @@ export default function SessionDetailPage() {
                           {showStudentDropdown && (
                             <div style={{
                               position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                              background: 'white', border: '1px solid #d1d5db', borderRadius: '0.375rem',
-                              maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.375rem',
+                              maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px var(--shadow)',
                             }}>
                               {studentResults.map(s => (
                                 <div
                                   key={s.id}
                                   onClick={() => addStudentToSlot(s.id)}
-                                  style={{ padding: '0.5rem', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
-                                  onMouseOver={e => (e.currentTarget.style.background = '#f3f4f6')}
-                                  onMouseOut={e => (e.currentTarget.style.background = 'white')}
+                                  style={{ padding: '0.5rem', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                                  onMouseOver={e => (e.currentTarget.style.background = 'var(--bg)')}
+                                  onMouseOut={e => (e.currentTarget.style.background = 'var(--surface)')}
                                 >
-                                  {s.first_name} {s.last_name} <span style={{ color: '#6b7280', fontSize: '0.8rem' }}>({s.email})</span>
+                                  {s.first_name} {s.last_name} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>({s.email})</span>
                                 </div>
                               ))}
                             </div>

@@ -396,7 +396,7 @@ export default function StudentsPage() {
               </tr>
               {isExpanded && (
                 <tr key={`${s.id}-details`}>
-                  <td colSpan={8} style={{ background: '#f9fafb', padding: '1rem 1.5rem' }}>
+                  <td colSpan={8} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem 2rem' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
                         <strong>{t.firstName}:</strong> <span>{s.first_name}</span>
@@ -445,7 +445,7 @@ export default function StudentsPage() {
                       </div>
                       <div>
                         {cooldownInfo && (
-                          <div style={{ color: '#991b1b' }}>
+                          <div style={{ color: 'var(--danger)' }}>
                             <strong>{t.cooldown}:</strong>
                             <div style={{ marginTop: '0.25rem' }}>{t.cooldownDetail(cooldownInfo.days, cooldownInfo.date)}</div>
                           </div>
@@ -594,7 +594,7 @@ export default function StudentsPage() {
               <label>{t.cooldownDays}</label>
               <input type="number" min={1} value={cooldownDays} onChange={e => setCooldownDays(Number(e.target.value))} />
               {cooldownDays > 0 && (
-                <small style={{ color: '#666', marginTop: '0.25rem', display: 'block' }}>
+                <small style={{ color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
                   {t.cooldownUntil(new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB'))}
                 </small>
               )}

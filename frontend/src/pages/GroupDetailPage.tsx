@@ -138,9 +138,9 @@ export default function GroupDetailPage() {
           {showDropdown && searchResults.length > 0 && (
             <div style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 10,
-              background: 'white', border: '1px solid #ddd', borderRadius: '4px',
+              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px',
               maxWidth: '400px', width: '100%', maxHeight: '250px', overflowY: 'auto',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              boxShadow: '0 4px 12px var(--shadow)'
             }}>
               {searchResults.map(s => (
                 <div
@@ -148,14 +148,14 @@ export default function GroupDetailPage() {
                   onClick={() => handleAddMember(s)}
                   style={{
                     padding: '0.5rem 0.75rem', cursor: 'pointer',
-                    borderBottom: '1px solid #eee',
+                    borderBottom: '1px solid var(--border)',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#f5f5f5')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'white')}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'var(--surface)')}
                 >
                   <span>{s.first_name} {s.last_name}</span>
-                  <span style={{ color: '#888', fontSize: '0.85rem' }}>{s.email}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{s.email}</span>
                 </div>
               ))}
             </div>
@@ -163,9 +163,9 @@ export default function GroupDetailPage() {
           {showDropdown && searchQuery.trim() && searchResults.length === 0 && (
             <div style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 10,
-              background: 'white', border: '1px solid #ddd', borderRadius: '4px',
-              maxWidth: '400px', width: '100%', padding: '0.5rem 0.75rem', color: '#888',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px',
+              maxWidth: '400px', width: '100%', padding: '0.5rem 0.75rem', color: 'var(--text-muted)',
+              boxShadow: '0 4px 12px var(--shadow)'
             }}>
               {t.noStudentsFound}
             </div>
