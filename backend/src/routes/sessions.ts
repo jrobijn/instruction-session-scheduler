@@ -2,6 +2,10 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import db from '../database.js';
 import { sendInvitationEmail, sendAdminCancellationEmail, getEmailStrings } from '../email.js';
+import {
+  scheduleInvitationExpiry, cancelInvitationExpiry, cancelAllSessionTimers,
+  getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
+} from '../expiryTimers.js';
 
 const router = Router();
 
@@ -72,11 +76,19 @@ router.get('/:id', (req: Request, res: Response) => {
     ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
   `).all(req.params.id);
 
-  const expiryMinutes = Number(
-    (db.prepare("SELECT value FROM settings WHERE key = 'invitation_expiry_minutes'").get() as any)?.value || '120'
-  );
+  const expiryMinutes = getExpiryMinutes();
 
-  res.json({ ...session, instructors, timeslots, invitations, timetable, timetableGroups, invitation_expiry_minutes: expiryMinutes });
+  // Compute effective status for invitations (lazy expiry check)
+  const effectiveInvitations = (invitations as any[]).map(inv => {
+    if (inv.status === 'invited' && expiryMinutes > 0 && inv.invited_at) {
+      if (isInvitationLogicallyExpired(inv.invited_at, expiryMinutes)) {
+        return { ...inv, status: 'expired' };
+      }
+    }
+    return inv;
+  });
+
+  res.json({ ...session, instructors, timeslots, invitations: effectiveInvitations, timetable, timetableGroups, invitation_expiry_minutes: expiryMinutes });
 });
 
 // Create training session
@@ -198,6 +210,7 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
     if (inv.status === 'invited' || inv.status === 'confirmed') {
       // Admin-cancel active invitations and notify
       db.prepare("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?").run(inv.id);
+      cancelInvitationExpiry(inv.id);
       db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
       if (inv.email_sent) {
         try {
@@ -688,7 +701,16 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
         clubName,
         locale: emailLocale,
       });
-      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE id = ?").run(inv.id);
+      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE id = ?").run(inv.id);
+      // Schedule expiry timer
+      const expiryMinutes = getExpiryMinutes();
+      if (expiryMinutes > 0) {
+        const updated = db.prepare("SELECT invited_at FROM invitations WHERE id = ?").get(inv.id) as any;
+        if (updated) {
+          const expiresAt = computeExpiresAt(updated.invited_at, expiryMinutes);
+          scheduleInvitationExpiry(inv.id, expiresAt.getTime());
+        }
+      }
       sent++;
     } catch (err: any) {
       errors.push({ student: inv.student_name, error: err.message });
@@ -835,7 +857,16 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
         clubName,
         locale: emailLocale,
       });
-      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE token = ?").run(token);
+      db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE token = ?").run(token);
+      // Schedule expiry timer
+      const expiryMinutes = getExpiryMinutes();
+      if (expiryMinutes > 0) {
+        const newInv = db.prepare("SELECT id, invited_at FROM invitations WHERE token = ?").get(token) as any;
+        if (newInv) {
+          const expiresAt = computeExpiresAt(newInv.invited_at, expiryMinutes);
+          scheduleInvitationExpiry(newInv.id, expiresAt.getTime());
+        }
+      }
     } catch (err) {
       console.error('Failed to send invitation email for manually added student:', err);
     }
@@ -901,6 +932,9 @@ router.post('/:id/invitations/:invitationId/admin-cancel', async (req: Request, 
     UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?
   `).run(invitation.id);
 
+  // Cancel expiry timer if pending
+  cancelInvitationExpiry(invitation.id);
+
   // Reverse the priority increase that was applied when this student was invited
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
   normalizePriorities();
@@ -933,6 +967,9 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
   if (session.status === 'completed') { res.status(400).json({ error: 'Cannot cancel a completed session' }); return; }
   if (session.status === 'cancelled') { res.status(400).json({ error: 'Session is already cancelled' }); return; }
+
+  // Cancel all expiry timers for this session
+  cancelAllSessionTimers(Number(req.params.id));
 
   // Find all active invitations (for emails)
   const activeInvitations = db.prepare(`
@@ -997,6 +1034,9 @@ router.post('/:id/reactivate', (req: Request, res: Response) => {
   const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
   if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
   if (session.status !== 'cancelled') { res.status(400).json({ error: 'Only cancelled sessions can be reactivated' }); return; }
+
+  // Cancel all expiry timers for this session
+  cancelAllSessionTimers(Number(req.params.id));
 
   // Delete all invitations belonging to this session
   db.prepare('DELETE FROM invitations WHERE session_id = ?').run(req.params.id);

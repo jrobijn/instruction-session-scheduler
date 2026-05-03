@@ -2,6 +2,10 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import db from '../database.js';
 import { sendInvitationEmail, sendConfirmationEmail, sendCancellationEmail, getEmailStrings } from '../email.js';
+import {
+  scheduleInvitationExpiry, cancelInvitationExpiry,
+  getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
+} from '../expiryTimers.js';
 
 const router = Router();
 
@@ -105,12 +109,40 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
       clubName,
       locale: emailLocale,
     });
-    db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited' WHERE token = ?").run(token);
+    db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE token = ?").run(token);
+
+    // Schedule expiry timer for the replacement invitation
+    const expiryMinutes = getExpiryMinutes();
+    if (expiryMinutes > 0) {
+      const newInv = db.prepare("SELECT id, invited_at FROM invitations WHERE token = ?").get(token) as any;
+      if (newInv) {
+        const expiresAt = computeExpiresAt(newInv.invited_at, expiryMinutes);
+        scheduleInvitationExpiry(newInv.id, expiresAt.getTime());
+      }
+    }
   } catch {
     // Email sending failed, but invitation is still created
   }
 
   return { name: replacementStudent.first_name + ' ' + replacementStudent.last_name, email: replacementStudent.email };
+}
+
+// Process a single expired invitation (called by expiry timer)
+export async function processExpiredInvitation(invitationId: number): Promise<void> {
+  const inv = db.prepare(`
+    SELECT inv.*, ts.date AS session_date, ts.id AS session_id, ts.status AS session_status
+    FROM invitations inv
+    JOIN training_sessions ts ON ts.id = inv.session_id
+    WHERE inv.id = ? AND inv.status = 'invited'
+  `).get(invitationId) as any;
+
+  if (!inv) return; // Already handled (confirmed, declined, etc.)
+  if (inv.session_status === 'completed' || inv.session_status === 'cancelled') return;
+
+  db.prepare("UPDATE invitations SET status = 'expired', responded_at = datetime('now') WHERE id = ?").run(inv.id);
+  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
+  normalizePriorities();
+  await findAndInviteReplacement(inv);
 }
 
 // Get invitation details by token (public)
@@ -132,15 +164,17 @@ router.get('/:token', (req: Request, res: Response) => {
 
   const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
   const locale = (db.prepare("SELECT value FROM settings WHERE key = 'email_locale'").get() as any)?.value || 'en';
-  const expiryMinutes = Number(
-    (db.prepare("SELECT value FROM settings WHERE key = 'invitation_expiry_minutes'").get() as any)?.value || '120'
-  );
+  const expiryMinutes = getExpiryMinutes();
 
+  // Compute effective status: treat as expired if logically past expiry time
+  let effectiveStatus = invitation.status;
   let expires_at: string | null = null;
   if (invitation.status === 'invited' && expiryMinutes > 0 && invitation.invited_at) {
-    const expiresDate = new Date(invitation.invited_at + 'Z');
-    expiresDate.setMinutes(expiresDate.getMinutes() + expiryMinutes);
-    expires_at = expiresDate.toISOString();
+    if (isInvitationLogicallyExpired(invitation.invited_at, expiryMinutes)) {
+      effectiveStatus = 'expired';
+    } else {
+      expires_at = computeExpiresAt(invitation.invited_at, expiryMinutes).toISOString();
+    }
   }
 
   res.json({
@@ -148,7 +182,7 @@ router.get('/:token', (req: Request, res: Response) => {
     date: invitation.session_date,
     start_time: invitation.timeslot_start_time,
     notes: invitation.session_notes,
-    status: invitation.status,
+    status: effectiveStatus,
     session_status: invitation.session_status,
     discipline_name: invitation.discipline_name || null,
     club_name: clubName,
@@ -175,6 +209,13 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
   if (invitation.session_status === 'completed') { res.status(400).json({ error: 'This session has already passed' }); return; }
   if (invitation.status !== 'invited') { res.status(400).json({ error: `Invitation already ${invitation.status}` }); return; }
 
+  // Check if logically expired (timer may not have fired yet)
+  const expiryMinutes = getExpiryMinutes();
+  if (expiryMinutes > 0 && invitation.invited_at && isInvitationLogicallyExpired(invitation.invited_at, expiryMinutes)) {
+    res.status(400).json({ error: 'This invitation has expired' });
+    return;
+  }
+
   // Validate discipline belongs to the invitation's group
   if (discipline_id && invitation.group_id) {
     const allowed = db.prepare(
@@ -186,6 +227,9 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
   db.prepare(`
     UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?
   `).run(discipline_id || null, invitation.id);
+
+  // Cancel the expiry timer — invitation is resolved
+  cancelInvitationExpiry(invitation.id);
 
   // Send confirmation email with cancellation link
   try {
@@ -284,9 +328,19 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
   if (invitation.session_status === 'completed') { res.status(400).json({ error: 'This session has already passed' }); return; }
   if (invitation.status !== 'invited') { res.status(400).json({ error: `Invitation already ${invitation.status}` }); return; }
 
+  // Check if logically expired (timer may not have fired yet)
+  const expiryMinutesDecline = getExpiryMinutes();
+  if (expiryMinutesDecline > 0 && invitation.invited_at && isInvitationLogicallyExpired(invitation.invited_at, expiryMinutesDecline)) {
+    res.status(400).json({ error: 'This invitation has expired' });
+    return;
+  }
+
   db.prepare(`
     UPDATE invitations SET status = 'declined', responded_at = datetime('now') WHERE id = ?
   `).run(invitation.id);
+
+  // Cancel the expiry timer — invitation is resolved
+  cancelInvitationExpiry(invitation.id);
 
   // Reverse the priority increase that was applied when this student was invited
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
@@ -300,34 +354,5 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
     replacement,
   });
 });
-
-// Process expired invitations: mark as expired and invite replacements
-export async function processExpiredInvitations(): Promise<number> {
-  const expiryMinutes = Number(
-    (db.prepare("SELECT value FROM settings WHERE key = 'invitation_expiry_minutes'").get() as any)?.value || '120'
-  );
-  if (expiryMinutes <= 0) return 0; // 0 means no expiration
-
-  // Find invited (not yet responded) invitations older than the expiry window
-  // for sessions that haven't been completed yet
-  const expired = db.prepare(`
-    SELECT inv.*, ts.date AS session_date, ts.id AS session_id
-    FROM invitations inv
-    JOIN training_sessions ts ON ts.id = inv.session_id
-    WHERE inv.status = 'invited'
-      AND ts.status != 'completed'
-      AND datetime(inv.invited_at, '+' || ? || ' minutes') < datetime('now')
-  `).all(expiryMinutes) as any[];
-
-  for (const inv of expired) {
-    db.prepare("UPDATE invitations SET status = 'expired', responded_at = datetime('now') WHERE id = ?").run(inv.id);
-    // Reverse the priority increase that was applied when this student was invited
-    db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
-    normalizePriorities();
-    await findAndInviteReplacement(inv);
-  }
-
-  return expired.length;
-}
 
 export default router;
