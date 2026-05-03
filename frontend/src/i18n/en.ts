@@ -293,8 +293,6 @@ const en = {
   settingClubNameDesc: 'Name of the sports club, used in emails.',
   settingExpiryMinutes: 'Invitation Expiry (minutes)',
   settingExpiryMinutesDesc: 'Minutes before an unanswered invitation expires and a replacement is invited. Set to 0 to disable.',
-  settingCheckInterval: 'Expiry Check Interval (minutes)',
-  settingCheckIntervalDesc: 'How often the server checks for expired invitations. Changes take effect after the current interval completes.',
   settingClubDays: 'Club Days',
   settingClubDaysDesc: 'Days of the week the club operates. At least one must be selected.',
 

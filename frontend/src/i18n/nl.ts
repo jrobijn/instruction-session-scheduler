@@ -295,8 +295,6 @@ const nl: Translations = {
   settingClubNameDesc: 'Naam van de sportclub, gebruikt in e-mails.',
   settingExpiryMinutes: 'Verloopduur uitnodiging (minuten)',
   settingExpiryMinutesDesc: 'Minuten voordat een onbeantwoorde uitnodiging verloopt en een vervanger wordt uitgenodigd. Stel in op 0 om uit te schakelen.',
-  settingCheckInterval: 'Controle-interval verlopen (minuten)',
-  settingCheckIntervalDesc: 'Hoe vaak de server controleert op verlopen uitnodigingen. Wijzigingen worden van kracht na het huidige interval.',
   settingClubDays: 'Clubdagen',
   settingClubDaysDesc: 'Dagen van de week waarop de club actief is. Er moet minimaal één dag geselecteerd zijn.',
 

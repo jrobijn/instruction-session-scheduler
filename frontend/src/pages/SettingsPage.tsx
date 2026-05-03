@@ -40,7 +40,6 @@ export default function SettingsPage() {
   const settingsConfig = [
     { key: 'club_name', label: t.settingClubName, type: 'text', description: t.settingClubNameDesc },
     { key: 'invitation_expiry_minutes', label: t.settingExpiryMinutes, type: 'number', description: t.settingExpiryMinutesDesc },
-    { key: 'invitation_check_interval_minutes', label: t.settingCheckInterval, type: 'number', description: t.settingCheckIntervalDesc },
   ];
 
   return (

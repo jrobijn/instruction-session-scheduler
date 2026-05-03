@@ -25,7 +25,7 @@ router.put('/:key', (req: Request, res: Response) => {
 
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(req.params.key, String(value));
 
-  if ((req.params.key === 'invitation_expiry_minutes' || req.params.key === 'invitation_check_interval_minutes') && onExpirySettingsChanged) {
+  if (req.params.key === 'invitation_expiry_minutes' && onExpirySettingsChanged) {
     onExpirySettingsChanged();
   }
 
