@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useT, setLocale } from '../i18n';
+import Countdown from '../components/Countdown';
 
 interface Invitation {
   id: number;
@@ -107,6 +108,7 @@ export default function InvitationPage() {
           <p><strong>{t.dateLabel}</strong> {dateStr}</p>
           <p><strong>{t.timeLabel}</strong> {invitation.start_time}</p>
           <p><strong>{t.statusLabel}</strong>{' '}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
             <span className={`badge ${
               invitation.status === 'confirmed' ? 'badge-confirmed' :
               invitation.status === 'declined' ? 'badge-declined' :
@@ -117,15 +119,17 @@ export default function InvitationPage() {
             }`}>
               {t.statusMap(invitation.status)}
             </span>
+            {invitation.status === 'invited' && invitation.expires_at && (() => {
+              const expiresAt = new Date(invitation.expires_at);
+              return (
+                <span className="badge badge-draft" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontVariantNumeric: 'tabular-nums', minWidth: '5.5em', justifyContent: 'center' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3l2 2"/><path d="M19 3l-2 2"/><line x1="12" y1="1" x2="12" y2="3"/></svg>
+                  <Countdown expiresAt={expiresAt} />
+                </span>
+              );
+            })()}
+            </span>
           </p>
-          {invitation.status === 'invited' && invitation.expires_at && (
-            <div className="alert" style={{ marginTop: '1rem', background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a' }}>
-              {t.expiresAt(
-                new Date(invitation.expires_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
-                new Date(invitation.expires_at).toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-              )}
-            </div>
-          )}
         </div>
 
         {actionDone === 'confirmed' && (
