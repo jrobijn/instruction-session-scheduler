@@ -307,6 +307,8 @@ const en = {
   confirmAttendance: 'Confirm Attendance',
   decline: 'Decline',
   preferredDiscipline: 'Preferred Discipline',
+  chooseDiscipline: 'Choose Discipline',
+  selectDiscipline: 'Select a discipline…',
   noPreference: 'No preference',
   invitationConfirmedMsg: 'Your attendance has been confirmed. See you at the training!',
   invitationDeclinedMsg: 'You have declined this invitation. Another student will be invited in your place.',

@@ -46,6 +46,8 @@ export default function InvitationPage() {
         }
         if (inv.discipline_id) {
           setSelectedDiscipline(String(inv.discipline_id));
+        } else if (discs.length === 1) {
+          setSelectedDiscipline(String(discs[0].id));
         }
       } catch (err: any) {
         setError(err.message);
@@ -182,11 +184,14 @@ export default function InvitationPage() {
 
         {invitation.status === 'invited' && !actionDone && (
           <>
-            {disciplines.length > 0 && !confirmingAction && (
+            {disciplines.length === 1 && !confirmingAction && (
+              <p style={{ marginBottom: '1.5rem' }}><strong>{t.discipline}:</strong> {disciplines[0].name}</p>
+            )}
+            {disciplines.length > 1 && !confirmingAction && (
               <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>{t.preferredDiscipline}</label>
+                <label>{t.chooseDiscipline}</label>
                 <select value={selectedDiscipline} onChange={e => setSelectedDiscipline(e.target.value)}>
-                  <option value="">{t.noPreference}</option>
+                  <option value="" disabled>{t.selectDiscipline}</option>
                   {disciplines.map(d => (
                     <option key={d.id} value={d.id}>{d.name}</option>
                   ))}
@@ -197,7 +202,7 @@ export default function InvitationPage() {
               <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8 }}>
                 <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptConfirm}</p>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm}>{t.yesConfirm}</button>
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm} disabled={disciplines.length > 1 && !selectedDiscipline}>{t.yesConfirm}</button>
                   <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmingAction(null)}>{t.goBack}</button>
                 </div>
               </div>
@@ -211,7 +216,7 @@ export default function InvitationPage() {
               </div>
             ) : (
               <div style={{ display: 'flex', gap: '1rem' }}>
-                <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setConfirmingAction('confirm')}>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setConfirmingAction('confirm')} disabled={disciplines.length > 1 && !selectedDiscipline}>
                   {t.confirmAttendance}
                 </button>
                 <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => setConfirmingAction('decline')}>

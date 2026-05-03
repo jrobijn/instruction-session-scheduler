@@ -309,6 +309,8 @@ const nl: Translations = {
   confirmAttendance: 'Aanwezigheid bevestigen',
   decline: 'Afwijzen',
   preferredDiscipline: 'Voorkeursdiscipline',
+  chooseDiscipline: 'Kies discipline',
+  selectDiscipline: 'Selecteer een discipline…',
   noPreference: 'Geen voorkeur',
   invitationConfirmedMsg: 'Je aanwezigheid is bevestigd. Tot bij de training!',
   invitationDeclinedMsg: 'Je hebt deze uitnodiging afgewezen. Een andere leerling wordt in jouw plaats uitgenodigd.',
