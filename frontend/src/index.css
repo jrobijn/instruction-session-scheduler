@@ -15,6 +15,10 @@
   --shadow: rgba(0,0,0,0.1);
   --neutral-badge-bg: #475569;
   --neutral-badge-text: #ffffff;
+  --confirm-prompt-bg: #f0fdf4;
+  --confirm-prompt-border: #bbf7d0;
+  --decline-prompt-bg: #fef2f2;
+  --decline-prompt-border: #fecaca;
 }
 
 [data-theme="dark"] {
@@ -34,6 +38,10 @@
   --shadow: rgba(0,0,0,0.4);
   --neutral-badge-bg: #64748b;
   --neutral-badge-text: #f1f5f9;
+  --confirm-prompt-bg: #052e16;
+  --confirm-prompt-border: #14532d;
+  --decline-prompt-bg: #450a0a;
+  --decline-prompt-border: #7f1d1d;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

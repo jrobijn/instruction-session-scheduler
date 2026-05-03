@@ -188,7 +188,7 @@ export default function InvitationPage() {
               <p style={{ marginBottom: '1rem' }}><strong>{t.discipline}:</strong> {invitation.discipline_name}</p>
             )}
             {confirmingAction === 'cancel' ? (
-              <div style={{ padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+              <div style={{ padding: '1rem', background: 'var(--decline-prompt-bg)', border: '1px solid var(--decline-prompt-border)', borderRadius: 8 }}>
                 <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptCancel}</p>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleCancel}>{t.yesCancel}</button>
@@ -220,7 +220,7 @@ export default function InvitationPage() {
               </div>
             )}
             {confirmingAction === 'confirm' ? (
-              <div style={{ padding: '1rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8 }}>
+              <div style={{ padding: '1rem', background: 'var(--confirm-prompt-bg)', border: '1px solid var(--confirm-prompt-border)', borderRadius: 8 }}>
                 <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptConfirm}</p>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm} disabled={disciplines.length > 1 && !selectedDiscipline}>{t.yesConfirm}</button>
@@ -228,7 +228,7 @@ export default function InvitationPage() {
                 </div>
               </div>
             ) : confirmingAction === 'decline' ? (
-              <div style={{ padding: '1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+              <div style={{ padding: '1rem', background: 'var(--decline-prompt-bg)', border: '1px solid var(--decline-prompt-border)', borderRadius: 8 }}>
                 <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptDecline}</p>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleDecline}>{t.yesDecline}</button>
