@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, API_BASE } from '../api';
 import { useT, setLocale } from '../i18n';
 import Countdown from '../components/Countdown';
 
@@ -62,7 +62,6 @@ export default function InvitationPage() {
   // SSE: real-time updates for this invitation
   useEffect(() => {
     if (!token) return;
-    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
     const es = new EventSource(`${API_BASE}/invitations/${token}/events`);
 
     es.addEventListener('invitation_updated', async () => {

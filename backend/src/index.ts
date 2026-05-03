@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import jwt from 'jsonwebtoken';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeDatabase } from './database.js';
@@ -21,42 +23,74 @@ import buddyGroupsRouter from './routes/buddyGroups.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_PASSWORD || 'change-me';
 
 // Middleware
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true,
+}));
 app.use(express.json());
+app.use(cookieParser());
 
-// Simple admin auth middleware
+// Admin auth middleware (reads JWT from cookie)
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = req.cookies?.auth_token;
+  if (!token) {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
-  const token = authHeader.slice(7);
-  if (token !== process.env.ADMIN_PASSWORD) {
-    res.status(403).json({ error: 'Invalid credentials' });
-    return;
+  try {
+    jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token' });
   }
-  next();
 }
 
 // Auth endpoint
 app.post('/api/auth/login', (req: Request, res: Response) => {
   const { password } = req.body;
   if (password === process.env.ADMIN_PASSWORD) {
-    res.json({ success: true, token: process.env.ADMIN_PASSWORD });
+    const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    });
+    res.json({ success: true });
   } else {
     res.status(401).json({ error: 'Invalid password' });
   }
 });
 
-// SSE: real-time session updates (admin, must be before requireAdmin middleware)
+// Logout endpoint
+app.post('/api/auth/logout', (_req: Request, res: Response) => {
+  res.clearCookie('auth_token');
+  res.json({ success: true });
+});
+
+// Check auth status
+app.get('/api/auth/me', (req: Request, res: Response) => {
+  const token = req.cookies?.auth_token;
+  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
+  try {
+    jwt.verify(token, JWT_SECRET);
+    res.json({ authenticated: true });
+  } catch {
+    res.status(401).json({ error: 'Not authenticated' });
+  }
+});
+
+// SSE: real-time session updates (admin, authenticated via cookie)
 app.get('/api/sessions/:id/events', (req: Request, res: Response) => {
-  const token = req.query.token as string;
-  if (token !== process.env.ADMIN_PASSWORD) {
-    res.status(403).json({ error: 'Invalid credentials' });
-    return;
+  const token = req.cookies?.auth_token;
+  if (!token) { res.status(401).json({ error: 'Authentication required' }); return; }
+  try {
+    jwt.verify(token, JWT_SECRET);
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token' }); return;
   }
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',

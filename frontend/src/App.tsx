@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
-import { isAuthenticated, clearToken } from './api';
+import { useAuth } from './AuthContext';
 import { useT } from './i18n';
 import LoginPage from './pages/LoginPage';
 import StudentsPage from './pages/StudentsPage';
@@ -20,18 +20,17 @@ import InvitationPage from './pages/InvitationPage';
 
 function AdminLayout() {
   const navigate = useNavigate();
-  const [, forceUpdate] = useState(0);
+  const { authenticated, logout } = useAuth();
   const t = useT();
 
   useEffect(() => { document.title = t.appTitle; }, [t.appTitle]);
 
   const handleLogout = () => {
-    clearToken();
-    forceUpdate(n => n + 1);
+    logout();
     navigate('/login');
   };
 
-  if (!isAuthenticated()) return <Navigate to="/login" />;
+  if (!authenticated) return <Navigate to="/login" />;
 
   return (
     <div className="app">

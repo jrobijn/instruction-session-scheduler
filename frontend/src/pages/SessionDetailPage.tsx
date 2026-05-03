@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api } from '../api';
+import { api, API_BASE } from '../api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useT } from '../i18n';
@@ -119,10 +119,8 @@ export default function SessionDetailPage() {
 
   // SSE: real-time updates
   useEffect(() => {
-    const token = localStorage.getItem('admin_token');
-    if (!token || !id) return;
-    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
-    const es = new EventSource(`${API_BASE}/sessions/${id}/events?token=${encodeURIComponent(token)}`);
+    if (!id) return;
+    const es = new EventSource(`${API_BASE}/sessions/${id}/events`, { withCredentials: true });
 
     es.addEventListener('invitation_updated', (e) => {
       const data = JSON.parse(e.data);
