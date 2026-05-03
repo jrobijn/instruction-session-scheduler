@@ -27,6 +27,7 @@ interface TimetableInfo {
 
 interface Invitation {
   id: number;
+  student_id: number;
   student_name: string;
   student_email: string;
   student_membership_id: string;
@@ -42,6 +43,8 @@ interface Invitation {
   group_name: string | null;
   group_color: string | null;
   invited_at: string | null;
+  buddy_group_id: number | null;
+  buddy_group_name: string | null;
 }
 
 interface TimetableGroup {
@@ -404,6 +407,18 @@ export default function SessionDetailPage() {
       slotGroups.push({ timeslotId: first.timeslotId, instructorId: first.instructorId, startTime: first.startTime, instructorName: first.instructorName, entries });
     }
   }
+
+  // Buddy group indicators: assign colors to buddy groups with 2+ members in this session
+  const BUDDY_COLORS = ['#e11d48', '#7c3aed', '#0891b2', '#c026d3', '#ea580c', '#4f46e5', '#059669'];
+  const buddyGroupCounts = new Map<number, number>();
+  for (const inv of session.invitations) {
+    if (inv.buddy_group_id && inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled') {
+      buddyGroupCounts.set(inv.buddy_group_id, (buddyGroupCounts.get(inv.buddy_group_id) || 0) + 1);
+    }
+  }
+  const activeBuddyGroups = [...buddyGroupCounts.entries()].filter(([, c]) => c >= 2).map(([id]) => id);
+  const buddyColorMap = new Map<number, string>();
+  activeBuddyGroups.forEach((bgId, i) => buddyColorMap.set(bgId, BUDDY_COLORS[i % BUDDY_COLORS.length]));
 
   const exportPdf = () => {
     const doc = new jsPDF({ orientation: 'landscape' });
@@ -772,6 +787,12 @@ export default function SessionDetailPage() {
                                 background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
                               }} />
                               <span>{inv.student_name}</span>
+                              {inv.buddy_group_id && buddyColorMap.has(inv.buddy_group_id) && (
+                                <svg style={{ width: '14px', height: '14px', flexShrink: 0 }} viewBox="0 0 24 24" fill={buddyColorMap.get(inv.buddy_group_id)} xmlns="http://www.w3.org/2000/svg">
+                                  <title>{inv.buddy_group_name}</title>
+                                  <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                                </svg>
+                              )}
                               <span className={`badge ${
                                 inv.status === 'confirmed' ? 'badge-confirmed' :
                                 inv.status === 'declined' ? 'badge-declined' :
@@ -838,6 +859,12 @@ export default function SessionDetailPage() {
                           background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
                         }} />
                         {inv.student_name}
+                        {inv.buddy_group_id && buddyColorMap.has(inv.buddy_group_id) && (
+                          <svg style={{ width: '14px', height: '14px', flexShrink: 0 }} viewBox="0 0 24 24" fill={buddyColorMap.get(inv.buddy_group_id)} xmlns="http://www.w3.org/2000/svg">
+                            <title>{inv.buddy_group_name}</title>
+                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                          </svg>
+                        )}
                       </span>
                     </td>
                     <td>{inv.discipline_name || t.noData}</td>
