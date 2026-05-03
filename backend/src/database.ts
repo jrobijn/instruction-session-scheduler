@@ -55,10 +55,11 @@ export function initializeDatabase(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS session_instructors (
+    CREATE TABLE IF NOT EXISTS session_slots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
       instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
+      removed INTEGER NOT NULL DEFAULT 0,
       UNIQUE(session_id, instructor_id)
     );
 
@@ -82,7 +83,7 @@ export function initializeDatabase(): void {
       session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
-      instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
+      slot_id INTEGER NOT NULL REFERENCES session_slots(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
       status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled','admin_cancelled')),
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
@@ -166,12 +167,12 @@ export function initializeDatabase(): void {
     db.exec('ALTER TABLE training_evenings RENAME TO training_sessions');
   }
   if (tables.some(t => t.name === 'evening_instructors')) {
-    db.exec('ALTER TABLE evening_instructors RENAME TO session_instructors');
+    db.exec('ALTER TABLE evening_instructors RENAME TO session_slots');
   }
   // Rename evening_id columns
-  const sessionInstrCols = db.prepare("PRAGMA table_info(session_instructors)").all() as Array<{ name: string }>;
+  const sessionInstrCols = db.prepare("PRAGMA table_info(session_slots)").all() as Array<{ name: string }>;
   if (sessionInstrCols.some(c => c.name === 'evening_id')) {
-    db.exec('ALTER TABLE session_instructors RENAME COLUMN evening_id TO session_id');
+    db.exec('ALTER TABLE session_slots RENAME COLUMN evening_id TO session_id');
   }
   const timeslotCols = db.prepare("PRAGMA table_info(timeslots)").all() as Array<{ name: string }>;
   if (timeslotCols.some(c => c.name === 'evening_id')) {
@@ -314,6 +315,69 @@ export function initializeDatabase(): void {
     `);
   }
 
+  // Migrate session_instructors -> session_slots and invitations.instructor_id -> invitations.slot_id
+  const tablesNow = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+  if (tablesNow.some(t => t.name === 'session_instructors')) {
+    if (tablesNow.some(t => t.name === 'session_slots')) {
+      // Both tables exist (e.g. schema created session_slots while old session_instructors still around)
+      // Merge any data from session_instructors into session_slots, then drop the old table
+      db.exec(`INSERT OR IGNORE INTO session_slots (session_id, instructor_id) SELECT session_id, instructor_id FROM session_instructors`);
+      db.exec('DROP TABLE session_instructors');
+    } else {
+      db.exec('ALTER TABLE session_instructors RENAME TO session_slots');
+    }
+  }
+  const invColsSlot = db.prepare("PRAGMA table_info(invitations)").all() as Array<{ name: string }>;
+  if (invColsSlot.some(c => c.name === 'instructor_id') && !invColsSlot.some(c => c.name === 'slot_id')) {
+    db.pragma('foreign_keys = OFF');
+    // Add slot_id, populate from session_slots, then rebuild without instructor_id
+    db.exec(`ALTER TABLE invitations ADD COLUMN slot_id INTEGER REFERENCES session_slots(id) ON DELETE CASCADE`);
+    db.exec(`
+      UPDATE invitations SET slot_id = (
+        SELECT ss.id FROM session_slots ss
+        WHERE ss.session_id = invitations.session_id AND ss.instructor_id = invitations.instructor_id
+      )
+    `);
+    // For any orphaned invitations (instructor removed), create session_slots entries
+    const orphans = db.prepare(`
+      SELECT DISTINCT session_id, instructor_id FROM invitations WHERE slot_id IS NULL
+    `).all() as Array<{ session_id: number; instructor_id: number }>;
+    for (const orphan of orphans) {
+      db.prepare('INSERT OR IGNORE INTO session_slots (session_id, instructor_id) VALUES (?, ?)').run(orphan.session_id, orphan.instructor_id);
+    }
+    if (orphans.length > 0) {
+      db.exec(`
+        UPDATE invitations SET slot_id = (
+          SELECT ss.id FROM session_slots ss
+          WHERE ss.session_id = invitations.session_id AND ss.instructor_id = invitations.instructor_id
+        ) WHERE slot_id IS NULL
+      `);
+    }
+    // Rebuild invitations table without instructor_id
+    db.exec(`
+      CREATE TABLE invitations_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
+        slot_id INTEGER NOT NULL REFERENCES session_slots(id) ON DELETE CASCADE,
+        token TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled','admin_cancelled')),
+        discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
+        group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+        email_sent INTEGER NOT NULL DEFAULT 0,
+        no_show INTEGER NOT NULL DEFAULT 0,
+        invited_at TEXT NOT NULL DEFAULT (datetime('now')),
+        responded_at TEXT
+      );
+      INSERT INTO invitations_new (id, session_id, student_id, timeslot_id, slot_id, token, status, discipline_id, group_id, email_sent, no_show, invited_at, responded_at)
+        SELECT id, session_id, student_id, timeslot_id, slot_id, token, status, discipline_id, group_id, email_sent, no_show, invited_at, responded_at FROM invitations;
+      DROP TABLE invitations;
+      ALTER TABLE invitations_new RENAME TO invitations;
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+
   // Add cooldown_until column to students if missing
   const studentCols3 = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
   if (!studentCols3.some(c => c.name === 'cooldown_until')) {
@@ -331,6 +395,12 @@ export function initializeDatabase(): void {
       db.exec(`UPDATE students SET priority = priority - ${minP - 1}`);
     }
   }
+  // Add removed column to session_slots if missing
+  const slotCols = db.prepare("PRAGMA table_info(session_slots)").all() as Array<{ name: string }>;
+  if (!slotCols.some(c => c.name === 'removed')) {
+    db.exec('ALTER TABLE session_slots ADD COLUMN removed INTEGER NOT NULL DEFAULT 0');
+  }
+
   // Migrate training_sessions CHECK constraint to include 'cancelled' status
   const sessCheckInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='training_sessions'").get() as { sql: string } | undefined;
   if (sessCheckInfo && !sessCheckInfo.sql.includes("'cancelled'")) {

@@ -91,8 +91,8 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
   if (!replacementStudent) return null;
 
   const token = crypto.randomUUID();
-  db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, instructor_id, group_id, token) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.instructor_id, replacementGroupId, token);
+  db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.slot_id, replacementGroupId, token);
 
   // Increment priority for the replacement student
   db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?').run(replacementStudent.id);
@@ -129,12 +129,13 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
   const fullInv = db.prepare(`
     SELECT inv.*, inv.no_show, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.membership_id AS student_membership_id, s.attended_sessions,
            d.name AS discipline_name, d.abbreviation AS discipline_abbreviation, ts.start_time AS timeslot_start_time,
-           i.first_name || ' ' || i.last_name AS instructor_name,
+           ss.instructor_id AS instructor_id, i.first_name || ' ' || i.last_name AS instructor_name,
            g.name AS group_name, g.color AS group_color
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     JOIN timeslots ts ON ts.id = inv.timeslot_id
-    JOIN instructors i ON i.id = inv.instructor_id
+    JOIN session_slots ss ON ss.id = inv.slot_id
+    JOIN instructors i ON i.id = ss.instructor_id
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
     LEFT JOIN groups g ON g.id = inv.group_id
     WHERE inv.token = ?
