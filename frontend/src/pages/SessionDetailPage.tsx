@@ -364,31 +364,45 @@ export default function SessionDetailPage() {
 
   // Build unified slot list for invitations table: every timeslot×instructor gets rows for
   // existing invitations (including declined) plus an empty add-row if the slot is unoccupied
-  type SlotEntry = { timeslotId: number; instructorId: number; startTime: string; invitation: Invitation | null; empty: boolean };
-  const allSlots: SlotEntry[] = [];
+  type SlotEntry = { timeslotId: number; instructorId: number; startTime: string; instructorName: string; invitation: Invitation | null; empty: boolean };
+  type SlotGroup = { timeslotId: number; instructorId: number; startTime: string; instructorName: string; entries: SlotEntry[] };
+  const slotGroups: SlotGroup[] = [];
   const assignedInstructorIds = new Set(session.instructors.map(i => i.id));
   for (const ts of session.timeslots) {
     for (const instr of session.instructors) {
+      const instrName = `${instr.first_name} ${instr.last_name}`;
       const slotInvitations = session.invitations.filter(
         inv => inv.timeslot_id === ts.id && inv.instructor_id === instr.id
       );
+      const entries: SlotEntry[] = [];
       // Add all invitations for this slot (active + declined)
       for (const inv of slotInvitations) {
-        allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: inv, empty: false });
+        entries.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, instructorName: instrName, invitation: inv, empty: false });
       }
       // If no active (non-declined/expired) invitation occupies this slot, add an empty row
       const hasActive = slotInvitations.some(inv => inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled');
       if (!hasActive) {
-        allSlots.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, invitation: null, empty: true });
+        entries.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, instructorName: instrName, invitation: null, empty: true });
       }
+      slotGroups.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, instructorName: instrName, entries });
     }
   }
   // Add orphaned invitations (instructor was removed from session)
   const orphanedInvitations = session.invitations.filter(
     inv => !assignedInstructorIds.has(inv.instructor_id)
   );
-  for (const inv of orphanedInvitations) {
-    allSlots.push({ timeslotId: inv.timeslot_id, instructorId: inv.instructor_id, startTime: inv.timeslot_start_time, invitation: inv, empty: false });
+  if (orphanedInvitations.length > 0) {
+    // Group orphans by timeslot+instructor
+    const orphanMap = new Map<string, SlotEntry[]>();
+    for (const inv of orphanedInvitations) {
+      const key = `${inv.timeslot_id}-${inv.instructor_id}`;
+      if (!orphanMap.has(key)) orphanMap.set(key, []);
+      orphanMap.get(key)!.push({ timeslotId: inv.timeslot_id, instructorId: inv.instructor_id, startTime: inv.timeslot_start_time, instructorName: inv.instructor_name, invitation: inv, empty: false });
+    }
+    for (const [, entries] of orphanMap) {
+      const first = entries[0];
+      slotGroups.push({ timeslotId: first.timeslotId, instructorId: first.instructorId, startTime: first.startTime, instructorName: first.instructorName, entries });
+    }
   }
 
   const exportPdf = () => {
@@ -807,11 +821,16 @@ export default function SessionDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {allSlots.map((slot, idx) => {
+              {slotGroups.map((group, groupIdx) => (
+                group.entries.map((slot, idx) => {
+                const isFirstInGroup = idx === 0;
+                const groupBorderStyle = isFirstInGroup && groupIdx > 0 ? '2px solid var(--border)' : undefined;
                 const inv = slot.invitation;
                 if (inv) return (
-                  <tr key={inv.id}>
-                    <td>{inv.timeslot_start_time}</td>
+                  <tr key={inv.id} style={groupBorderStyle ? { borderTop: groupBorderStyle } : undefined}>
+                    <td style={isFirstInGroup ? { fontWeight: 500 } : { color: 'transparent', userSelect: 'none' }}>
+                      {inv.timeslot_start_time}
+                    </td>
                     <td>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
                         <span title={inv.group_name || ''} style={{
@@ -895,8 +914,10 @@ export default function SessionDetailPage() {
                 );
                 if (!slot.empty || !(canEdit || session.status === 'invitations_sent')) return null;
                 return (
-                  <tr key={`empty-${slot.timeslotId}-${slot.instructorId}`}>
-                    <td>{slot.startTime}</td>
+                  <tr key={`empty-${slot.timeslotId}-${slot.instructorId}-${idx}`} style={groupBorderStyle ? { borderTop: groupBorderStyle } : undefined}>
+                    <td style={isFirstInGroup ? { fontWeight: 500 } : { color: 'transparent', userSelect: 'none' }}>
+                      {slot.startTime}
+                    </td>
                     <td colSpan={2}>
                       {addSlot?.timeslotId === slot.timeslotId && addSlot?.instructorId === slot.instructorId ? (
                         <div ref={dropdownRef} style={{ position: 'relative' }}>
@@ -940,7 +961,8 @@ export default function SessionDetailPage() {
                     {(canEdit || session.status === 'invitations_sent') && <td></td>}
                   </tr>
                 );
-              })}
+                })
+              ))}
             </tbody>
           </table>
         </div>

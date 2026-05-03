@@ -74,7 +74,7 @@ router.get('/:id', (req: Request, res: Response) => {
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
     LEFT JOIN groups g ON g.id = inv.group_id
     WHERE inv.session_id = ?
-    ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC
+    ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC, inv.id ASC
   `).all(req.params.id);
 
   const expiryMinutes = getExpiryMinutes();
