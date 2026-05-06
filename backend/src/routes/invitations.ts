@@ -54,17 +54,43 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
     ORDER BY priority ASC, last_name ASC, first_name ASC
   `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), ...alreadyInvited, invitation.session_date) as any[];
 
+  // Load timetable group priorities for proper assignment
+  const timetableGroupPriorities = new Map<number, number>();
+  if (sessionInfo?.timetable_id) {
+    const tgRows = db.prepare(
+      'SELECT tg.group_id, g.priority FROM timetable_groups tg JOIN groups g ON g.id = tg.group_id WHERE tg.timetable_id = ?'
+    ).all(sessionInfo.timetable_id) as Array<{ group_id: number; priority: number }>;
+    for (const row of tgRows) {
+      timetableGroupPriorities.set(row.group_id, row.priority);
+    }
+  }
+
+  // Helper: find a student's best (highest-priority = lowest number) timetable group
+  function getBestTimetableGroup(studentGroupIds: number[]): number | null {
+    let bestGroupId: number | null = null;
+    let bestPriority = Infinity;
+    for (const gid of studentGroupIds) {
+      const p = timetableGroupPriorities.get(gid);
+      if (p !== undefined && p < bestPriority) {
+        bestPriority = p;
+        bestGroupId = gid;
+      }
+    }
+    return bestGroupId;
+  }
+
   const originalGroupId = invitation.group_id as number | null;
   let replacementStudent = null;
   let replacementGroupId = originalGroupId;
 
-  // First pass: find a replacement in the same group
+  // First pass: find a replacement whose best timetable group matches the original group
   for (const student of nextStudent) {
     const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
       .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
+    const bestGroup = getBestTimetableGroup(studentGroupIds);
     const inSameGroup = originalGroupId
-      ? studentGroupIds.includes(originalGroupId)
-      : (timetableGroupIds.length === 0 || studentGroupIds.some(gid => timetableGroupIds.includes(gid)));
+      ? bestGroup === originalGroupId
+      : (timetableGroupIds.length === 0 || bestGroup !== null);
     const hasDisciplines = studentGroupIds.some(gid => discGroupIds.has(gid));
     if (inSameGroup && hasDisciplines) {
       replacementStudent = student;
@@ -77,12 +103,11 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
     for (const student of nextStudent) {
       const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
         .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
-      const inAnyTimetableGroup = studentGroupIds.some(gid => timetableGroupIds.includes(gid));
+      const bestGroup = getBestTimetableGroup(studentGroupIds);
       const hasDisciplines = studentGroupIds.some(gid => discGroupIds.has(gid));
-      if (inAnyTimetableGroup && hasDisciplines) {
+      if (bestGroup !== null && hasDisciplines) {
         replacementStudent = student;
-        // Use the student's timetable group as the invitation group
-        replacementGroupId = studentGroupIds.find(gid => timetableGroupIds.includes(gid)) ?? originalGroupId;
+        replacementGroupId = bestGroup;
         break;
       }
     }
