@@ -76,6 +76,7 @@ export const api = {
   addSessionInvitation: (sessionId: number, data: { student_id: number; timeslot_id: number; instructor_id: number }) => request(`/sessions/${sessionId}/invitations`, { method: 'POST', body: JSON.stringify(data) }),
   removeSessionInvitation: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}`, { method: 'DELETE' }),
   adminCancelInvitation: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}/admin-cancel`, { method: 'POST' }),
+  autoScheduleSlot: (sessionId: number, timeslotId: number, instructorId: number) => request(`/sessions/${sessionId}/auto-schedule-slot`, { method: 'POST', body: JSON.stringify({ timeslot_id: timeslotId, instructor_id: instructorId }) }),
   cancelSession: (sessionId: number) => request(`/sessions/${sessionId}/cancel`, { method: 'POST' }),
   reactivateSession: (sessionId: number) => request(`/sessions/${sessionId}/reactivate`, { method: 'POST' }),
 

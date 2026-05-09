@@ -297,6 +297,19 @@ export default function SessionDetailPage() {
     }
   };
 
+  const autoScheduleSlot = async (timeslotId: number, instructorId: number) => {
+    if (!confirm(t.confirmAutoInvite)) return;
+    try {
+      const result = await api.autoScheduleSlot(Number(id), timeslotId, instructorId);
+      if (!result.replacement) {
+        alert(t.noReplacementFound);
+      }
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const completeSession = async () => {
     if (!confirm(t.confirmComplete)) return;
     setActionLoading('completing');
@@ -977,11 +990,21 @@ export default function SessionDetailPage() {
                           )}
                         </div>
                       ) : (
-                        <button
-                          className="btn btn-outline"
-                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
-                          onClick={() => { setAddSlot({ timeslotId: slot.timeslotId, instructorId: slot.instructorId }); setStudentSearch(''); setStudentResults([]); }}
-                        >{t.addStudentToSlot}</button>
+                        <div style={{ display: 'flex', gap: '0.3rem' }}>
+                          <button
+                            className="btn btn-outline"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
+                            onClick={() => { setAddSlot({ timeslotId: slot.timeslotId, instructorId: slot.instructorId }); setStudentSearch(''); setStudentResults([]); }}
+                          >{t.addStudentToSlot}</button>
+                          {session.status === 'invitations_sent' && (
+                            <button
+                              className="btn btn-outline"
+                              style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem', borderStyle: 'dashed' }}
+                              onClick={() => autoScheduleSlot(slot.timeslotId, slot.instructorId)}
+                              title={t.autoScheduleStudent}
+                            >{t.autoScheduleLabel}</button>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td></td>
@@ -994,6 +1017,7 @@ export default function SessionDetailPage() {
           </table>
         </div>
       )}
+
     </div>
   );
 }
