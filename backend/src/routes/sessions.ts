@@ -7,6 +7,7 @@ import {
   getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
 } from '../expiryTimers.js';
 import { broadcastSession, broadcast } from '../sseClients.js';
+import { findAndInviteReplacement } from './invitations.js';
 
 const router = Router();
 
@@ -1002,6 +1003,46 @@ router.post('/:id/invitations/:invitationId/admin-cancel', async (req: Request, 
   }
 
   res.json({ success: true });
+});
+
+// ===== Auto-schedule a student into an empty slot =====
+router.post('/:id/auto-schedule-slot', async (req: Request, res: Response) => {
+  const session = db.prepare('SELECT * FROM training_sessions WHERE id = ?').get(req.params.id) as any;
+  if (!session) { res.status(404).json({ error: 'Training session not found' }); return; }
+  if (session.status !== 'invitations_sent') {
+    res.status(400).json({ error: 'Auto-scheduling is only available after invitations are sent' }); return;
+  }
+
+  const { timeslot_id, instructor_id } = req.body;
+  if (!timeslot_id || !instructor_id) {
+    res.status(400).json({ error: 'timeslot_id and instructor_id are required' }); return;
+  }
+
+  // Look up the session slot for this instructor
+  const slot = db.prepare('SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0')
+    .get(req.params.id, instructor_id) as { id: number } | undefined;
+  if (!slot) { res.status(400).json({ error: 'Instructor is not assigned to this session' }); return; }
+
+  // Check slot is not already occupied
+  const slotTaken = db.prepare(
+    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')"
+  ).get(req.params.id, timeslot_id, slot.id);
+  if (slotTaken) { res.status(409).json({ error: 'This slot is already occupied' }); return; }
+
+  // Look up the most recent vacated invitation for this slot to preserve group consistency
+  const lastVacated = db.prepare(
+    "SELECT group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN ('declined', 'expired', 'cancelled', 'admin_cancelled') ORDER BY responded_at DESC LIMIT 1"
+  ).get(req.params.id, timeslot_id, slot.id) as { group_id: number | null } | undefined;
+
+  const replacement = await findAndInviteReplacement({
+    session_id: Number(req.params.id),
+    session_date: session.date,
+    timeslot_id,
+    slot_id: slot.id,
+    group_id: lastVacated?.group_id ?? null,
+  });
+
+  res.json({ success: true, replacement });
 });
 
 // ===== Cancel entire session =====

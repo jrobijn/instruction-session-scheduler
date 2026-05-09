@@ -21,7 +21,7 @@ function normalizePriorities() {
 }
 
 // Shared helper: find and invite a replacement student for a vacated slot
-async function findAndInviteReplacement(invitation: any): Promise<{ name: string; email: string } | null> {
+export async function findAndInviteReplacement(invitation: any): Promise<{ name: string; email: string } | null> {
   const alreadyInvited = (db.prepare(`
     SELECT student_id FROM invitations WHERE session_id = ?
   `).all(invitation.session_id) as Array<{ student_id: number }>).map(r => r.student_id);
@@ -94,6 +94,9 @@ async function findAndInviteReplacement(invitation: any): Promise<{ name: string
     const hasDisciplines = studentGroupIds.some(gid => discGroupIds.has(gid));
     if (inSameGroup && hasDisciplines) {
       replacementStudent = student;
+      if (!originalGroupId && bestGroup !== null) {
+        replacementGroupId = bestGroup;
+      }
       break;
     }
   }
