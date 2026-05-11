@@ -44,7 +44,7 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     SELECT * FROM students
     WHERE active = 1
       AND ('|' || preferred_days || '|') LIKE '%|' || ? || '|%'
-      AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))
+      AND (cooldown_until IS NULL OR cooldown_until <= ?)
       AND id NOT IN (${alreadyInvited.map(() => '?').join(',')})
       AND id NOT IN (
         SELECT inv.student_id FROM invitations inv
@@ -52,7 +52,7 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
         WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')
       )
     ORDER BY priority ASC, last_name ASC, first_name ASC
-  `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), ...alreadyInvited, invitation.session_date) as any[];
+  `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), invitation.session_date, ...alreadyInvited, invitation.session_date) as any[];
 
   // Load timetable group priorities for proper assignment
   const timetableGroupPriorities = new Map<number, number>();
