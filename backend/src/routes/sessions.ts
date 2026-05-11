@@ -781,12 +781,13 @@ router.get('/:id/available-students', (req: Request, res: Response) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 2) { res.json([]); return; }
 
-  const alreadyInvited = (db.prepare(
-    `SELECT student_id FROM invitations WHERE session_id = ?`
+  // Exclude students who have an active (non-terminal) invitation for this session
+  const activelyInvited = (db.prepare(
+    `SELECT student_id FROM invitations WHERE session_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')`
   ).all(req.params.id) as Array<{ student_id: number }>).map(r => r.student_id);
 
-  const placeholders = alreadyInvited.length > 0
-    ? `AND s.id NOT IN (${alreadyInvited.map(() => '?').join(',')})`
+  const placeholders = activelyInvited.length > 0
+    ? `AND s.id NOT IN (${activelyInvited.map(() => '?').join(',')})`
     : '';
 
   const students = db.prepare(`
@@ -797,7 +798,7 @@ router.get('/:id/available-students', (req: Request, res: Response) => {
       ${placeholders}
     ORDER BY s.last_name ASC, s.first_name ASC
     LIMIT 15
-  `).all(`%${q}%`, `%${q}%`, ...alreadyInvited);
+  `).all(`%${q}%`, `%${q}%`, ...activelyInvited);
 
   res.json(students);
 });
@@ -820,11 +821,11 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
     .get(req.params.id, instructor_id) as { id: number } | undefined;
   if (!slot) { res.status(400).json({ error: 'Instructor is not assigned to this session' }); return; }
 
-  // Check student is not already in this session
+  // Check student does not already have an active (non-terminal) invitation for this session
   const existing = db.prepare(
-    'SELECT id FROM invitations WHERE session_id = ? AND student_id = ?'
+    "SELECT id FROM invitations WHERE session_id = ? AND student_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')"
   ).get(req.params.id, student_id);
-  if (existing) { res.status(409).json({ error: 'Student is already in this session' }); return; }
+  if (existing) { res.status(409).json({ error: 'Student already has an active invitation for this session' }); return; }
 
   // Check slot is not occupied
   const slotTaken = db.prepare(
