@@ -537,62 +537,28 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
       if (preferredIds.has(timeslots[i].id)) preferredIndices.add(i);
     }
 
-    const adjacentIndices = new Set<number>();
-    for (const idx of preferredIndices) {
-      if (idx > 0 && !preferredIndices.has(idx - 1)) adjacentIndices.add(idx - 1);
-      if (idx < timeslots.length - 1 && !preferredIndices.has(idx + 1)) adjacentIndices.add(idx + 1);
-    }
-
     let assignedIdx = -1;
 
-    // If nearTimeslotIdx is set (buddy scheduling), prefer slots at same or adjacent timeslot
-    // but only among the student's own preferred timeslots
+    // If nearTimeslotIdx is set (buddy scheduling), prefer slots near buddy's timeslot
+    // but only among the student's preferred timeslots
     if (nearTimeslotIdx !== undefined) {
       const nearIndices = new Set<number>();
       nearIndices.add(nearTimeslotIdx);
       if (nearTimeslotIdx > 0) nearIndices.add(nearTimeslotIdx - 1);
       if (nearTimeslotIdx < timeslots.length - 1) nearIndices.add(nearTimeslotIdx + 1);
 
-      // Try: near AND preferred
       for (let i = 0; i < slotGrid.length; i++) {
         if (slotAvailable[i] && nearIndices.has(slotGrid[i].timeslotIdx) && preferredIndices.has(slotGrid[i].timeslotIdx)) {
           assignedIdx = i;
           break;
         }
       }
-      // Try: near (even if not in student's preferred, buddy proximity is soft)
-      if (assignedIdx === -1) {
-        for (let i = 0; i < slotGrid.length; i++) {
-          if (slotAvailable[i] && nearIndices.has(slotGrid[i].timeslotIdx)) {
-            assignedIdx = i;
-            break;
-          }
-        }
-      }
     }
 
-    // Standard 3-pass fallback: preferred → adjacent → any
+    // Fallback: any preferred timeslot
     if (assignedIdx === -1) {
       for (let i = 0; i < slotGrid.length; i++) {
         if (slotAvailable[i] && preferredIndices.has(slotGrid[i].timeslotIdx)) {
-          assignedIdx = i;
-          break;
-        }
-      }
-    }
-
-    if (assignedIdx === -1) {
-      for (let i = 0; i < slotGrid.length; i++) {
-        if (slotAvailable[i] && adjacentIndices.has(slotGrid[i].timeslotIdx)) {
-          assignedIdx = i;
-          break;
-        }
-      }
-    }
-
-    if (assignedIdx === -1) {
-      for (let i = 0; i < slotGrid.length; i++) {
-        if (slotAvailable[i]) {
           assignedIdx = i;
           break;
         }
