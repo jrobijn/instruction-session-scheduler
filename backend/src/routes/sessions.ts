@@ -381,14 +381,14 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     SELECT s.* FROM students s
     WHERE s.active = 1
       AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
-      AND (s.cooldown_until IS NULL OR s.cooldown_until <= datetime('now'))
+      AND (s.cooldown_until IS NULL OR s.cooldown_until <= ?)
       AND s.id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
         WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')
       )
     ORDER BY s.priority ASC, s.last_name ASC, s.first_name ASC
-  `).all(sessionDow, session.date) as any[];
+  `).all(sessionDow, session.date, session.date) as any[];
 
   // Load group memberships for all students
   const allMemberships = db.prepare(
