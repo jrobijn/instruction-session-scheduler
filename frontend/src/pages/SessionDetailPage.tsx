@@ -591,7 +591,7 @@ export default function SessionDetailPage() {
             ))}
             {(session.status === 'draft' || session.status === 'scheduled' || session.status === 'invitations_sent') && availableInstructors.length > 0 && (
               showAddInstructor ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: '#f1f5f9', color: '#1e293b', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600, border: '1px solid #cbd5e1' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--hover-row)', color: 'var(--text)', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600, border: '1px solid var(--border)' }}>
                   <select
                     autoFocus
                     value=""
@@ -616,12 +616,12 @@ export default function SessionDetailPage() {
                   </select>
                   <button
                     onClick={() => setShowAddInstructor(false)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem', color: '#64748b', padding: '0 0.2rem' }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem', color: 'var(--text-muted)', padding: '0 0.2rem' }}
                   >✗</button>
                 </span>
               ) : (
                 <span
-                  style={{ fontSize: '0.95rem', padding: '0.4rem 0.9rem', background: '#f1f5f9', color: '#1e293b', border: '1px solid #cbd5e1', cursor: 'pointer', borderRadius: '12px', display: 'inline-flex', alignItems: 'center', fontWeight: 600 }}
+                  style={{ fontSize: '0.95rem', padding: '0.4rem 0.9rem', background: 'var(--hover-row)', color: 'var(--text)', border: '1px solid var(--border)', cursor: 'pointer', borderRadius: '12px', display: 'inline-flex', alignItems: 'center', fontWeight: 600 }}
                   onClick={() => setShowAddInstructor(true)}
                 >
                   +
