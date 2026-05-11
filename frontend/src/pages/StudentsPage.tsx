@@ -129,12 +129,10 @@ export default function StudentsPage() {
         const created = await api.createStudent(form);
         studentId = created.id;
       }
-      // Save timeslot preferences for each timetable that has custom prefs
+      // Save timeslot preferences for each timetable
       for (const tt of timetables) {
-        const tsIds = timeslotPrefs[tt.id];
-        if (tsIds !== undefined) {
-          await api.setStudentPreferredTimeslots(studentId, tt.id, tsIds);
-        }
+        const tsIds = timeslotPrefs[tt.id] ?? (tt.timeslots || []).map((s: any) => s.id);
+        await api.setStudentPreferredTimeslots(studentId, tt.id, tsIds);
       }
       setShowModal(false);
       load();

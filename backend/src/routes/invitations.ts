@@ -79,12 +79,28 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     return bestGroupId;
   }
 
+  // Load preferred timeslots to only invite students who prefer this timeslot
+  const prefsByStudent = new Map<number, Set<number>>();
+  if (sessionInfo?.timetable_id) {
+    const allPrefs = db.prepare(
+      'SELECT student_id, timeslot_id FROM student_preferred_timeslots WHERE timetable_id = ?'
+    ).all(sessionInfo.timetable_id) as Array<{ student_id: number; timeslot_id: number }>;
+    for (const p of allPrefs) {
+      if (!prefsByStudent.has(p.student_id)) prefsByStudent.set(p.student_id, new Set());
+      prefsByStudent.get(p.student_id)!.add(p.timeslot_id);
+    }
+  }
+
   const originalGroupId = invitation.group_id as number | null;
   let replacementStudent = null;
   let replacementGroupId = originalGroupId;
 
   // First pass: find a replacement whose best timetable group matches the original group
   for (const student of nextStudent) {
+    // Skip students who don't prefer this timeslot
+    const studentPrefs = prefsByStudent.get(student.id);
+    if (studentPrefs && studentPrefs.size > 0 && !studentPrefs.has(invitation.timeslot_id)) continue;
+
     const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
       .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
     const bestGroup = getBestTimetableGroup(studentGroupIds);
@@ -104,6 +120,10 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
   // Second pass: if no same-group replacement found, try any timetable group
   if (!replacementStudent && originalGroupId && timetableGroupIds.length > 0) {
     for (const student of nextStudent) {
+      // Skip students who don't prefer this timeslot
+      const studentPrefs = prefsByStudent.get(student.id);
+      if (studentPrefs && studentPrefs.size > 0 && !studentPrefs.has(invitation.timeslot_id)) continue;
+
       const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
         .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
       const bestGroup = getBestTimetableGroup(studentGroupIds);
