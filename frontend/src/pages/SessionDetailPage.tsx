@@ -87,6 +87,7 @@ export default function SessionDetailPage() {
   const [studentSearch, setStudentSearch] = useState('');
   const [studentResults, setStudentResults] = useState<Array<{ id: number; first_name: string; last_name: string; email: string }>>([]);
   const [showStudentDropdown, setShowStudentDropdown] = useState(false);
+  const [dropdownUp, setDropdownUp] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLImageElement | null>(null);
@@ -176,6 +177,10 @@ export default function SessionDetailPage() {
         const results = await api.searchAvailableStudents(Number(id), query.trim());
         setStudentResults(results);
         setShowStudentDropdown(results.length > 0);
+        if (results.length > 0 && dropdownRef.current) {
+          const rect = dropdownRef.current.getBoundingClientRect();
+          setDropdownUp(window.innerHeight - rect.bottom < 220);
+        }
       } catch { setStudentResults([]); }
     }, 300);
   };
@@ -844,7 +849,7 @@ export default function SessionDetailPage() {
             {adminCancelled > 0 && <span className="badge badge-declined">{t.summaryWithdrawn(adminCancelled)}</span>}
             {expired > 0 && <span className="badge badge-declined">{t.summaryExpired(expired)}</span>}
           </div>
-          <table>
+          <table style={{ overflow: 'visible' }}>
             <thead>
               <tr>
                 <th>{t.timeslot}</th>
@@ -971,7 +976,8 @@ export default function SessionDetailPage() {
                           />
                           {showStudentDropdown && (
                             <div style={{
-                              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                              position: 'absolute', left: 0, right: 0, zIndex: 10,
+                              ...(dropdownUp ? { bottom: '100%' } : { top: '100%' }),
                               background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.375rem',
                               maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px var(--shadow)',
                             }}>
