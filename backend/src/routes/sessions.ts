@@ -593,7 +593,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
         if (processedInGroup.has(student.id)) continue;
         if (groupSlotsUsed >= gsc.slots) break;
         const result = assignStudent(student, req.params.id as string, gsc.group_id);
-        if (!result) break; // No more slots globally
+        if (!result) continue; // This student's preferred slots are full, try next student
         invited.push(result);
         invitedStudentIds.add(student.id);
         processedInGroup.add(student.id);
@@ -628,7 +628,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
         if (studs.some((s: any) => s.id === student.id)) { studentGroupId = group.group_id; break; }
       }
       const result = assignStudent(student, req.params.id as string, studentGroupId);
-      if (!result) break; // No more slots globally
+      if (!result) continue; // This student's preferred slots are full, try next student
       invited.push(result);
     }
 
