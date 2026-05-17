@@ -141,6 +141,7 @@ export const api = {
 
   // Timetable groups
   setTimetableGroups: (id: number, groups: Array<{ group_id: number; percentage: number }>) => request(`/timetables/${id}/groups`, { method: 'PUT', body: JSON.stringify({ groups }) }),
+  reorderTimetableGroups: (id: number, groupIds: number[]) => request(`/timetables/${id}/groups/reorder`, { method: 'PUT', body: JSON.stringify({ group_ids: groupIds }) }),
 
   // Public invitation
   getInvitation: (token: string) => request(`/invitations/${token}`),

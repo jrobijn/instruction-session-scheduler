@@ -121,6 +121,7 @@ export function initializeDatabase(): void {
       timetable_id INTEGER NOT NULL REFERENCES timetables(id) ON DELETE CASCADE,
       group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
       percentage INTEGER NOT NULL DEFAULT 100,
+      position INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY(timetable_id, group_id)
     );
 
@@ -464,6 +465,20 @@ export function initializeDatabase(): void {
       ALTER TABLE groups_new RENAME TO groups;
     `);
     db.pragma('foreign_keys = ON');
+  }
+
+  // Add position column to timetable_groups if missing
+  const tgSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='timetable_groups'").get() as { sql: string } | undefined;
+  if (tgSchema && !tgSchema.sql.includes('position')) {
+    db.exec(`ALTER TABLE timetable_groups ADD COLUMN position INTEGER NOT NULL DEFAULT 0`);
+    // Set positions based on existing rowid order per timetable
+    const timetables = db.prepare('SELECT DISTINCT timetable_id FROM timetable_groups').all() as Array<{ timetable_id: number }>;
+    for (const tt of timetables) {
+      const rows = db.prepare('SELECT rowid, group_id FROM timetable_groups WHERE timetable_id = ? ORDER BY rowid ASC').all(tt.timetable_id) as Array<{ rowid: number; group_id: number }>;
+      rows.forEach((row, idx) => {
+        db.prepare('UPDATE timetable_groups SET position = ? WHERE timetable_id = ? AND group_id = ?').run(idx, tt.timetable_id, row.group_id);
+      });
+    }
   }
 }
 

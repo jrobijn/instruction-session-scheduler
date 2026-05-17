@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useT } from '../i18n';
@@ -47,6 +47,9 @@ export default function TimetableDetailPage() {
   const [allGroups, setAllGroups] = useState<AvailableGroup[]>([]);
   const [groupAssignments, setGroupAssignments] = useState<Array<{ group_id: number; percentage: number }>>([]);
   const [groupError, setGroupError] = useState('');
+  const dragIdx = useRef<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [reorderMode, setReorderMode] = useState(false);
 
   const load = async () => {
     try {
@@ -154,9 +157,16 @@ export default function TimetableDetailPage() {
         color: g.group_color || GROUP_COLORS_FALLBACK[idx % GROUP_COLORS_FALLBACK.length],
       }));
 
-  const AllocationBar = () => {
+  const AllocationBar = ({ onReorder, alwaysDraggable, onToggleDone }: {
+    onReorder?: (fromIdx: number, toIdx: number) => void;
+    alwaysDraggable?: boolean;
+    onToggleDone?: () => void;
+  }) => {
     const total = barSegments.reduce((s, seg) => s + seg.percentage, 0);
     if (barSegments.length === 0) return null;
+    const canReorder = !!onReorder && barSegments.length > 1;
+    const dragging = canReorder && (alwaysDraggable || reorderMode);
+    const showToggle = canReorder && !alwaysDraggable;
     return (
       <div style={{ marginBottom: '1rem' }}>
         <div style={{
@@ -179,9 +189,32 @@ export default function TimetableDetailPage() {
             ) : null
           ))}
         </div>
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
           {barSegments.map((seg, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem' }}>
+            <div
+              key={i}
+              draggable={dragging}
+              title={dragging ? t.dragToReorderTooltip : undefined}
+              onDragStart={e => { if (!dragging) return; dragIdx.current = i; e.dataTransfer.effectAllowed = 'move'; }}
+              onDragOver={e => { if (!dragging) return; e.preventDefault(); setDragOverIdx(i); }}
+              onDragEnd={() => { dragIdx.current = null; setDragOverIdx(null); }}
+              onDrop={() => {
+                if (!dragging || !onReorder || dragIdx.current === null || dragIdx.current === i) return;
+                onReorder(dragIdx.current, i);
+                dragIdx.current = null;
+                setDragOverIdx(null);
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem',
+                cursor: dragging ? 'grab' : 'default',
+                padding: '0.25rem 0.5rem', borderRadius: '4px',
+                background: dragging && dragOverIdx === i ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
+                border: dragging && dragOverIdx === i ? '1px dashed var(--primary, #3b82f6)' : '1px solid transparent',
+                transition: 'background 0.15s, border 0.15s',
+                userSelect: dragging ? 'none' : 'auto',
+              }}
+            >
+              {dragging && <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1 }}>⠿</span>}
               <span style={{
                 width: '12px', height: '12px', borderRadius: '3px',
                 background: seg.color, display: 'inline-block', flexShrink: 0,
@@ -189,6 +222,19 @@ export default function TimetableDetailPage() {
               {seg.name} ({seg.percentage}%)
             </div>
           ))}
+          {showToggle && (
+            <button
+              className={`btn btn-sm ${reorderMode ? 'btn-primary' : 'btn-outline'}`}
+              onClick={() => {
+                if (reorderMode && onToggleDone) onToggleDone();
+                setReorderMode(!reorderMode);
+              }}
+              title={t.reorderGroups}
+              style={{ marginLeft: 'auto', fontSize: '0.78rem', padding: '0.2rem 0.5rem' }}
+            >
+              {reorderMode ? t.doneReordering : t.reorderGroups}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -260,7 +306,13 @@ export default function TimetableDetailPage() {
               {groupAssignments.map((ga, idx) => {
                 const group = allGroups.find(g => g.id === ga.group_id);
                 return (
-                  <div key={ga.group_id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <div
+                    key={ga.group_id}
+                    style={{
+                      display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem',
+                      padding: '0.4rem 0.5rem', borderRadius: '6px',
+                    }}
+                  >
                     <span style={{ minWidth: '120px' }}>{group?.name || `Group ${ga.group_id}`}</span>
                     <input
                       type="range"
@@ -353,7 +405,12 @@ export default function TimetableDetailPage() {
               );
             })()}
             {groupError && <div className="alert alert-error" style={{ marginBottom: '0.5rem' }}>{groupError}</div>}
-            <AllocationBar />
+            <AllocationBar alwaysDraggable onReorder={(from, to) => {
+              const next = [...groupAssignments];
+              const [moved] = next.splice(from, 1);
+              next.splice(to, 0, moved);
+              setGroupAssignments(next);
+            }} />
             <button className="btn btn-outline" onClick={async () => {
               setGroupError('');
               if (groupAssignments.length === 0) { setGroupError(t.atLeastOneGroup); return; }
@@ -370,7 +427,17 @@ export default function TimetableDetailPage() {
             {timetable.groups.length === 0 ? (
               <p style={{ color: '#6b7280' }}>{t.noGroupsAssignedTimetable}</p>
             ) : (
-              <AllocationBar />
+              <AllocationBar onReorder={(from, to) => {
+                const next = [...timetable.groups];
+                const [moved] = next.splice(from, 1);
+                next.splice(to, 0, moved);
+                setTimetable({ ...timetable, groups: next });
+              }} onToggleDone={async () => {
+                try {
+                  await api.reorderTimetableGroups(Number(id), timetable.groups.map(g => g.group_id));
+                  load();
+                } catch (err: any) { alert(err.message); }
+              }} />
             )}
           </>
         )}

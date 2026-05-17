@@ -59,7 +59,7 @@ router.get('/:id', (req: Request, res: Response) => {
       FROM timetable_groups tg
       JOIN groups g ON g.id = tg.group_id
       WHERE tg.timetable_id = ?
-      ORDER BY tg.rowid ASC
+      ORDER BY tg.position ASC
     `).all(session.timetable_id);
   }
 
@@ -351,7 +351,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     FROM timetable_groups tg
     JOIN groups g ON g.id = tg.group_id
     WHERE tg.timetable_id = ?
-    ORDER BY tg.rowid ASC
+    ORDER BY tg.position ASC
   `).all(session.timetable_id) as Array<{ group_id: number; percentage: number; group_name: string }>;
 
   if (timetableGroups.length === 0) {
