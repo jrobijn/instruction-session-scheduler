@@ -59,6 +59,8 @@ const nl: Translations = {
   noStudentsHint: 'Voeg je eerste leerling toe om te beginnen.',
   buddyGroupLabel: (name: string) => `Buddygroep: ${name}`,
   manageBuddies: 'Buddies beheren',
+  groupBuddiesOn: "Buddies worden gegroepeerd — klik om normaal te sorteren",
+  groupBuddiesOff: "Buddies worden normaal gesorteerd — klik om te groeperen",
   finishBuddyMode: 'Klaar',
   buddyModeHint: 'Selecteer 2+ ongegroepeerde leerlingen om een buddygroep te maken, of gebruik × om te verwijderen / "Ontgroeperen" om op te heffen.',
   groupSelected: (n: number) => `${n} Leerlingen groeperen`,

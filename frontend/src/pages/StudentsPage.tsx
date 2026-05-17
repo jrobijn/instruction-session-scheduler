@@ -52,7 +52,16 @@ export default function StudentsPage() {
   const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
   const [buddyMode, setBuddyMode] = useState(false);
   const [buddySelection, setBuddySelection] = useState<Set<number>>(new Set());
+  const [groupBuddies, setGroupBuddies] = useState(() => localStorage.getItem('groupBuddies') !== 'false');
   const t = useT();
+
+  const toggleGroupBuddies = () => {
+    setGroupBuddies(prev => {
+      const next = !prev;
+      localStorage.setItem('groupBuddies', String(next));
+      return next;
+    });
+  };
 
   const toggleSort = (col: keyof Student) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -68,6 +77,7 @@ export default function StudentsPage() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     // Group buddy members together: place them after the first buddy in sort order
+    if (!groupBuddies) return base;
     const placed = new Set<number>();
     const result: Student[] = [];
     for (const s of base) {
@@ -347,13 +357,27 @@ export default function StudentsPage() {
       <div className="page-header">
         <h1>{t.studentsTitle(students.length)}</h1>
         <div className="btn-group">
-          <button
-            className={`btn ${buddyMode ? 'btn-primary' : 'btn-outline'}`}
-            onClick={toggleBuddyMode}
-            disabled={priorityMode}
-          >
-            {buddyMode ? t.finishBuddyMode : t.manageBuddies}
-          </button>
+          <div style={{ display: 'flex' }}>
+            <button
+              className={`btn ${buddyMode ? 'btn-primary' : 'btn-outline'}`}
+              onClick={toggleBuddyMode}
+              disabled={priorityMode}
+              style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+            >
+              {buddyMode ? t.finishBuddyMode : t.manageBuddies}
+            </button>
+            <button
+              className={`btn ${groupBuddies ? 'btn-primary' : 'btn-outline'}`}
+              onClick={toggleGroupBuddies}
+              title={groupBuddies ? t.groupBuddiesOn : t.groupBuddiesOff}
+              disabled={priorityMode}
+              style={{ padding: '0.4rem 0.5rem', lineHeight: 1, marginLeft: '-1px', borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+            >
+              <svg style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+              </svg>
+            </button>
+          </div>
           <button
             className={`btn ${priorityMode ? 'btn-primary' : 'btn-outline'}`}
             onClick={togglePriorityMode}

@@ -57,6 +57,8 @@ const en = {
   noStudentsHint: 'Add your first student to get started.',
   buddyGroupLabel: (name: string) => `Buddy group: ${name}`,
   manageBuddies: 'Manage Buddies',
+  groupBuddiesOn: 'Buddies are grouped together — click to sort normally',
+  groupBuddiesOff: 'Buddies are sorted normally — click to group together',
   finishBuddyMode: 'Done',
   buddyModeHint: 'Select 2+ ungrouped students to create a buddy group, or use × to remove / "Ungroup" to dissolve.',
   groupSelected: (n: number) => `Group ${n} Students`,
