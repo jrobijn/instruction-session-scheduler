@@ -133,7 +133,7 @@ const nl: Translations = {
 
   // Group detail
   backToGroups: '← Terug naar Groepen',
-  groupInfo: (memberCount: number) => `${memberCount} lid/leden`,
+  groupInfo: (memberCount: number) => `${memberCount} ${memberCount === 1 ? 'lid' : 'leden'}`,
   addMember: 'Lid toevoegen',
   searchStudents: 'Zoek leerlingen op naam of e-mail...',
   noStudentsFound: 'Geen leerlingen gevonden',

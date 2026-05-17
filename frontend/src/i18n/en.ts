@@ -131,7 +131,7 @@ const en = {
 
   // Group detail
   backToGroups: '← Back to Groups',
-  groupInfo: (memberCount: number) => `${memberCount} member(s)`,
+  groupInfo: (memberCount: number) => `${memberCount} ${memberCount === 1 ? 'member' : 'members'}`,
   addMember: 'Add Member',
   searchStudents: 'Search students by name or email...',
   noStudentsFound: 'No students found',
