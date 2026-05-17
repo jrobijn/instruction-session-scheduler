@@ -16,6 +16,7 @@ interface Student {
   active: number;
   cooldown_until: string | null;
   group?: { id: number; name: string; color: string | null } | null;
+  buddy_group?: { id: number; name: string } | null;
 }
 
 interface Timetable {
@@ -49,6 +50,8 @@ export default function StudentsPage() {
   const [expandedStudent, setExpandedStudent] = useState<number | null>(null);
   const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
   const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
+  const [buddyMode, setBuddyMode] = useState(false);
+  const [buddySelection, setBuddySelection] = useState<Set<number>>(new Set());
   const t = useT();
 
   const toggleSort = (col: keyof Student) => {
@@ -56,13 +59,37 @@ export default function StudentsPage() {
     else { setSortCol(col); setSortDir('asc'); }
   };
 
-  const sortedStudents = [...students].sort((a, b) => {
-    const av = a[sortCol], bv = b[sortCol];
-    let cmp: number;
-    if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
-    else cmp = String(av).localeCompare(String(bv));
-    return sortDir === 'asc' ? cmp : -cmp;
-  });
+  const sortedStudents = (() => {
+    const base = [...students].sort((a, b) => {
+      const av = a[sortCol], bv = b[sortCol];
+      let cmp: number;
+      if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+      else cmp = String(av).localeCompare(String(bv));
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    // Group buddy members together: place them after the first buddy in sort order
+    const placed = new Set<number>();
+    const result: Student[] = [];
+    for (const s of base) {
+      if (placed.has(s.id)) continue;
+      result.push(s);
+      placed.add(s.id);
+      if (s.buddy_group) {
+        const buddies = base.filter(b => b.id !== s.id && !placed.has(b.id) && b.buddy_group?.id === s.buddy_group!.id);
+        for (const b of buddies) {
+          result.push(b);
+          placed.add(b.id);
+        }
+      }
+    }
+    return result;
+  })();
+
+  // Assign distinct colors to buddy groups
+  const BUDDY_COLORS = ['#e11d48', '#7c3aed', '#0891b2', '#c026d3', '#ea580c', '#4f46e5', '#059669'];
+  const buddyColorMap = new Map<number, string>();
+  const seenBuddyIds = [...new Set(sortedStudents.map(s => s.buddy_group?.id).filter(Boolean))] as number[];
+  seenBuddyIds.forEach((bgId, i) => buddyColorMap.set(bgId, BUDDY_COLORS[i % BUDDY_COLORS.length]));
 
   const sortIcon = (col: keyof Student) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
@@ -267,6 +294,52 @@ export default function StudentsPage() {
     setShowPrioritySavePrompt(false);
   };
 
+  const toggleBuddyMode = () => {
+    setBuddyMode(!buddyMode);
+    setBuddySelection(new Set());
+  };
+
+  const toggleBuddySelect = (id: number) => {
+    setBuddySelection(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleGroupSelected = async () => {
+    const ids = Array.from(buddySelection);
+    if (ids.length < 2) return;
+    try {
+      await api.quickCreateBuddyGroup(ids);
+      setBuddySelection(new Set());
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleUngroupBuddy = async (groupId: number) => {
+    if (!confirm(t.confirmDissolveBuddyGroup)) return;
+    try {
+      await api.deleteBuddyGroup(groupId);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleRemoveFromBuddy = async (student: Student) => {
+    if (!student.buddy_group) return;
+    try {
+      await api.removeBuddyGroupMember(student.buddy_group.id, student.id);
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   if (loading) return <div className="page"><p>{t.loading}</p></div>;
 
   return (
@@ -275,21 +348,40 @@ export default function StudentsPage() {
         <h1>{t.studentsTitle(students.length)}</h1>
         <div className="btn-group">
           <button
+            className={`btn ${buddyMode ? 'btn-primary' : 'btn-outline'}`}
+            onClick={toggleBuddyMode}
+            disabled={priorityMode}
+          >
+            {buddyMode ? t.finishBuddyMode : t.manageBuddies}
+          </button>
+          <button
             className={`btn ${priorityMode ? 'btn-primary' : 'btn-outline'}`}
             onClick={togglePriorityMode}
+            disabled={buddyMode}
           >
             {priorityMode ? t.finishAdjusting : t.adjustPriorities}
           </button>
-          <button className="btn btn-outline" onClick={handleExport} disabled={priorityMode}>{t.exportCsv}</button>
-          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} disabled={priorityMode}>{t.importCsv}</button>
+          <button className="btn btn-outline" onClick={handleExport} disabled={priorityMode || buddyMode}>{t.exportCsv}</button>
+          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} disabled={priorityMode || buddyMode}>{t.importCsv}</button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-          <button className="btn btn-primary" onClick={openCreate} disabled={priorityMode}>{t.addStudent}</button>
+          <button className="btn btn-primary" onClick={openCreate} disabled={priorityMode || buddyMode}>{t.addStudent}</button>
         </div>
       </div>
 
       {priorityMode && (
         <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
           {t.priorityModeHint}
+        </div>
+      )}
+
+      {buddyMode && (
+        <div className="alert alert-info" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <span>{t.buddyModeHint}</span>
+          {buddySelection.size >= 2 && (
+            <button className="btn btn-primary btn-sm" onClick={handleGroupSelected}>
+              {t.groupSelected(buddySelection.size)}
+            </button>
+          )}
         </div>
       )}
 
@@ -314,6 +406,7 @@ export default function StudentsPage() {
         <table>
           <thead>
             <tr>
+              {buddyMode && <th style={{ width: '2rem' }}></th>}
               <th className="sortable" onClick={() => toggleSort('last_name')}>{t.name}{sortIcon('last_name')}</th>
               <th className="sortable" onClick={() => toggleSort('membership_id')}>{t.membershipId}{sortIcon('membership_id')}</th>
               <th className="sortable" onClick={() => toggleSort('attended_sessions')}>{t.sessionsAttended}{sortIcon('attended_sessions')}</th>
@@ -325,12 +418,27 @@ export default function StudentsPage() {
             </tr>
           </thead>
           <tbody>
-            {sortedStudents.map(s => {
+            {sortedStudents.map((s, idx) => {
               const cooldownInfo = getCooldownInfo(s);
               const isExpanded = expandedStudent === s.id;
+              // Buddy group visual grouping
+              const hasBuddy = !!s.buddy_group;
+              const buddyColor = hasBuddy ? buddyColorMap.get(s.buddy_group!.id) || '#3b82f6' : '';
+              const isFirstInBuddy = hasBuddy && (idx === 0 || sortedStudents[idx - 1].buddy_group?.id !== s.buddy_group!.id);
+              const isLastInBuddy = hasBuddy && (idx === sortedStudents.length - 1 || sortedStudents[idx + 1].buddy_group?.id !== s.buddy_group!.id);
+              const buddyRowStyle = hasBuddy ? {
+                borderLeft: `3px solid ${buddyColor}`,
+                background: `${buddyColor}08`,
+                ...(isFirstInBuddy ? { borderTop: `1px solid ${buddyColor}` } : {}),
+                ...(isLastInBuddy ? { borderBottom: `1px solid ${buddyColor}` } : {}),
+              } : {};
               return (
               <>
               <tr key={s.id} onClick={async () => {
+                if (buddyMode) {
+                  if (!s.buddy_group) toggleBuddySelect(s.id);
+                  return;
+                }
                 if (isExpanded) { setExpandedStudent(null); }
                 else {
                   setExpandedStudent(s.id);
@@ -346,8 +454,42 @@ export default function StudentsPage() {
                     setDetailTimeslotPrefs(prefs);
                   } catch { setDetailTimetables([]); setDetailTimeslotPrefs({}); }
                 }
-              }} style={{ cursor: 'pointer' }}>
-                <td>{s.first_name} {s.last_name}</td>
+              }} style={{ cursor: 'pointer', ...buddyRowStyle }}>
+                {buddyMode && (
+                  <td onClick={e => e.stopPropagation()}>
+                    {!s.buddy_group && (
+                      <input
+                        type="checkbox"
+                        checked={buddySelection.has(s.id)}
+                        onChange={() => toggleBuddySelect(s.id)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    )}
+                  </td>
+                )}
+                <td>
+                  {s.first_name} {s.last_name}
+                  {s.buddy_group && (
+                    <>
+                      <svg style={{ width: '14px', height: '14px', flexShrink: 0, marginLeft: '0.4rem', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill={buddyColor} xmlns="http://www.w3.org/2000/svg">
+                        <title>{s.buddy_group.name}</title>
+                        <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                      </svg>
+                      {buddyMode && (
+                        <button onClick={e => { e.stopPropagation(); handleRemoveFromBuddy(s); }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: buddyColor, marginLeft: '0.25rem', fontSize: '0.85rem', lineHeight: 1, padding: 0 }}
+                          title={t.removeFromBuddyGroup}>×</button>
+                      )}
+                    </>
+                  )}
+                  {buddyMode && isFirstInBuddy && s.buddy_group && (
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={e => { e.stopPropagation(); handleUngroupBuddy(s.buddy_group!.id); }}
+                      style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.1rem 0.35rem' }}
+                    >{t.ungroup}</button>
+                  )}
+                </td>
                 <td>{s.membership_id}</td>
                 <td>{s.attended_sessions}</td>
                 <td>{s.no_show_count}</td>
@@ -394,7 +536,7 @@ export default function StudentsPage() {
               </tr>
               {isExpanded && (
                 <tr key={`${s.id}-details`}>
-                  <td colSpan={8} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
+                  <td colSpan={buddyMode ? 9 : 8} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem 2rem' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
                         <strong>{t.firstName}:</strong> <span>{s.first_name}</span>
