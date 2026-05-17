@@ -147,4 +147,10 @@ export const api = {
   // Public disciplines (no auth)
   getPublicDisciplines: () => request('/public/disciplines'),
   getPublicDisciplinesForToken: (token: string) => request(`/public/disciplines/${token}`),
+
+  // Notifications
+  getNotifications: (page = 1, limit = 20) => request(`/notifications?page=${page}&limit=${limit}`),
+  getUnreadNotificationCount: () => request('/notifications/unread-count'),
+  markNotificationRead: (id: number) => request(`/notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
 };

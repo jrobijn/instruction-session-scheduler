@@ -189,6 +189,7 @@ const en = {
   timetable: 'Timetable',
   instructors: 'Instructors',
   invitations: 'Invitations',
+  attendance: 'Attendance',
   confirmDeleteSession: 'Are you sure you want to delete this session?',
   newSessionTitle: 'New Training Session',
   selectDate: 'Select a date...',
@@ -366,6 +367,28 @@ const en = {
   invitationNotFound: 'Invitation not found.',
   expiresAt: (time: string, date: string) => `This invitation expires at ${time} on ${date}.`,
   expiresIn: (minutes: number) => minutes <= 0 ? 'Expiring soon' : minutes < 60 ? `Expires in ${minutes}m` : `Expires in ${Math.floor(minutes / 60)}h ${minutes % 60}m`,
+
+  // Notifications
+  notifications: 'Notifications',
+  notificationsTitle: (count: number) => `Notifications (${count})`,
+  noNotifications: 'No notifications',
+  noNotificationsHint: 'Notifications will appear here when students respond to invitations.',
+  markAllRead: 'Mark all as read',
+  viewAllNotifications: 'View all notifications',
+  notificationConfirmed: (name: string, date: string) => `${name} confirmed attendance for ${date}`,
+  notificationDeclined: (name: string, date: string) => `${name} declined invitation for ${date}`,
+  notificationExpired: (name: string, date: string) => `${name}'s invitation expired for ${date}`,
+  notificationCancelled: (name: string, date: string) => `${name} cancelled their attendance for ${date}`,
+  notificationSessionFull: (date: string) => `All slots confirmed for session on ${date}`,
+  notificationSessionNoLongerFull: (date: string) => `Session on ${date} is no longer fully confirmed`,
+  notificationTimeAgo: (minutes: number) => {
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  },
 };
 
 export default en;
