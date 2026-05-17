@@ -24,11 +24,11 @@ router.get('/:id', (req: Request, res: Response) => {
   ).all(req.params.id);
 
   const groups = db.prepare(`
-    SELECT tg.group_id, tg.percentage, g.name AS group_name, g.priority, g.is_default, g.color AS group_color
+    SELECT tg.group_id, tg.percentage, g.name AS group_name, g.is_default, g.color AS group_color
     FROM timetable_groups tg
     JOIN groups g ON g.id = tg.group_id
     WHERE tg.timetable_id = ?
-    ORDER BY g.priority ASC
+    ORDER BY tg.position ASC
   `).all(req.params.id);
 
   res.json({ ...timetable, timeslots, groups });
@@ -44,7 +44,7 @@ router.post('/', (req: Request, res: Response) => {
   // Auto-assign default group at 100%
   const defaultGroup = db.prepare("SELECT id FROM groups WHERE is_default = 1").get() as { id: number } | undefined;
   if (defaultGroup) {
-    db.prepare('INSERT INTO timetable_groups (timetable_id, group_id, percentage) VALUES (?, ?, 100)').run(timetableId, defaultGroup.id);
+    db.prepare('INSERT INTO timetable_groups (timetable_id, group_id, percentage, position) VALUES (?, ?, 100, 0)').run(timetableId, defaultGroup.id);
   }
   const timetable = db.prepare('SELECT * FROM timetables WHERE id = ?').get(timetableId);
   res.status(201).json(timetable);
@@ -167,13 +167,31 @@ router.put('/:id/groups', (req: Request, res: Response) => {
 
   const setGroups = db.transaction(() => {
     db.prepare('DELETE FROM timetable_groups WHERE timetable_id = ?').run(req.params.id);
-    const insert = db.prepare('INSERT INTO timetable_groups (timetable_id, group_id, percentage) VALUES (?, ?, ?)');
-    for (const g of groups) {
-      insert.run(req.params.id, g.group_id, g.percentage);
+    const insert = db.prepare('INSERT INTO timetable_groups (timetable_id, group_id, percentage, position) VALUES (?, ?, ?, ?)');
+    for (let i = 0; i < groups.length; i++) {
+      insert.run(req.params.id, groups[i].group_id, groups[i].percentage, i);
     }
   });
 
   setGroups();
+  res.json({ success: true });
+});
+
+// Reorder groups within a timetable
+router.put('/:id/groups/reorder', (req: Request, res: Response) => {
+  const { group_ids } = req.body;
+  if (!Array.isArray(group_ids)) { res.status(400).json({ error: 'group_ids array is required' }); return; }
+
+  const timetable = db.prepare('SELECT * FROM timetables WHERE id = ?').get(req.params.id) as any;
+  if (!timetable) { res.status(404).json({ error: 'Timetable not found' }); return; }
+
+  const update = db.prepare('UPDATE timetable_groups SET position = ? WHERE timetable_id = ? AND group_id = ?');
+  const reorder = db.transaction(() => {
+    for (let i = 0; i < group_ids.length; i++) {
+      update.run(i, req.params.id, group_ids[i]);
+    }
+  });
+  reorder();
   res.json({ success: true });
 });
 

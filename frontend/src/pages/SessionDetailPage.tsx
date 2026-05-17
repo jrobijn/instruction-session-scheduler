@@ -705,7 +705,7 @@ export default function SessionDetailPage() {
                     width: '12px', height: '12px', borderRadius: '3px',
                     background: seg.group_color || '#3b82f6', display: 'inline-block', flexShrink: 0,
                   }} />
-                  {seg.is_default ? t.default : seg.group_name} ({seg.percentage}%)
+                  {seg.group_name} ({seg.percentage}%)
                 </div>
               ))}
             </div>

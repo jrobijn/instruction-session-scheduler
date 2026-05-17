@@ -19,7 +19,7 @@ router.get('/', (_req: Request, res: Response) => {
     SELECT dg.discipline_id, dg.group_id, g.name AS group_name
     FROM discipline_groups dg
     JOIN groups g ON g.id = dg.group_id
-    ORDER BY g.priority ASC
+    ORDER BY g.name ASC
   `).all() as Array<{ discipline_id: number; group_id: number; group_name: string }>;
   const groupsByDisc = new Map<number, Array<{ id: number; name: string }>>();
   for (const dg of allDg) {
@@ -190,11 +190,11 @@ router.get('/:id/groups', (req: Request, res: Response) => {
   if (!discipline) { res.status(404).json({ error: 'Discipline not found' }); return; }
 
   const groups = db.prepare(`
-    SELECT g.id, g.name, g.priority, g.is_default, g.active
+    SELECT g.id, g.name, g.is_default, g.active
     FROM groups g
     JOIN discipline_groups dg ON dg.group_id = g.id
     WHERE dg.discipline_id = ?
-    ORDER BY g.priority ASC
+    ORDER BY g.name ASC
   `).all(req.params.id);
   res.json(groups);
 });

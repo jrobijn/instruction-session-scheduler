@@ -14,19 +14,17 @@ function escapeCsvField(value: string | number | null | undefined): string {
 // List all students
 router.get('/', (_req: Request, res: Response) => {
   const students = db.prepare('SELECT * FROM students ORDER BY last_name ASC, first_name ASC').all() as any[];
-  // Attach group names for each student
+  // Attach group for each student (single group per student)
   const groupMemberships = db.prepare(`
     SELECT sg.student_id, g.id AS group_id, g.name AS group_name, g.color AS group_color
     FROM student_groups sg
     JOIN groups g ON g.id = sg.group_id
-    ORDER BY g.priority ASC
   `).all() as Array<{ student_id: number; group_id: number; group_name: string; group_color: string | null }>;
-  const groupsByStudent = new Map<number, Array<{ id: number; name: string; color: string | null }>>();
+  const groupByStudent = new Map<number, { id: number; name: string; color: string | null }>();
   for (const m of groupMemberships) {
-    if (!groupsByStudent.has(m.student_id)) groupsByStudent.set(m.student_id, []);
-    groupsByStudent.get(m.student_id)!.push({ id: m.group_id, name: m.group_name, color: m.group_color });
+    groupByStudent.set(m.student_id, { id: m.group_id, name: m.group_name, color: m.group_color });
   }
-  const result = students.map(s => ({ ...s, groups: groupsByStudent.get(s.id) || [] }));
+  const result = students.map(s => ({ ...s, group: groupByStudent.get(s.id) || null }));
   res.json(result);
 });
 
@@ -152,7 +150,10 @@ router.post('/import', (req: Request, res: Response) => {
             existing.id
           );
           if (defaultGroup) {
-            db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(existing.id, defaultGroup.id);
+            const hasGroup = db.prepare('SELECT 1 FROM student_groups WHERE student_id = ?').get(existing.id);
+            if (!hasGroup) {
+              db.prepare('INSERT INTO student_groups (student_id, group_id) VALUES (?, ?)').run(existing.id, defaultGroup.id);
+            }
           }
         } else {
           const result = db.prepare(`INSERT INTO students (first_name, last_name, email, membership_id${
@@ -176,7 +177,7 @@ router.post('/import', (req: Request, res: Response) => {
             ...(active != null && !isNaN(active) ? [active] : []),
           );
           if (defaultGroup) {
-            db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(result.lastInsertRowid, defaultGroup.id);
+            db.prepare('INSERT INTO student_groups (student_id, group_id) VALUES (?, ?)').run(result.lastInsertRowid, defaultGroup.id);
           }
         }
         imported++;
@@ -319,47 +320,33 @@ router.put('/:id/preferred-timeslots/:timetableId', (req: Request, res: Response
 
 // ===== Group Membership =====
 
-// Get groups for a student
+// Get group for a student
 router.get('/:id/groups', (req: Request, res: Response) => {
   const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
-  const groups = db.prepare(`
+  const group = db.prepare(`
     SELECT g.id, g.name, g.priority, g.is_default FROM groups g
     JOIN student_groups sg ON sg.group_id = g.id
     WHERE sg.student_id = ?
-    ORDER BY g.priority ASC
-  `).all(req.params.id);
-  res.json(groups);
+  `).get(req.params.id);
+  res.json(group || null);
 });
 
-// Set groups for a student (replaces all non-default memberships + always keeps default)
+// Set group for a student (replaces existing group)
 router.put('/:id/groups', (req: Request, res: Response) => {
-  const { group_ids } = req.body;
-  if (!Array.isArray(group_ids)) { res.status(400).json({ error: 'group_ids array is required' }); return; }
+  const { group_id } = req.body;
 
   const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
-  const defaultGroup = db.prepare("SELECT id FROM groups WHERE is_default = 1").get() as { id: number };
-
-  const setGroups = db.transaction(() => {
-    // Remove all non-default memberships
-    db.prepare('DELETE FROM student_groups WHERE student_id = ? AND group_id != ?')
-      .run(req.params.id, defaultGroup.id);
-    // Ensure default group membership
-    db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)')
-      .run(req.params.id, defaultGroup.id);
-    // Add requested groups
-    const insert = db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)');
-    for (const gid of group_ids) {
-      if (gid !== defaultGroup.id) {
-        insert.run(req.params.id, gid);
-      }
+  const setGroup = db.transaction(() => {
+    db.prepare('DELETE FROM student_groups WHERE student_id = ?').run(req.params.id);
+    if (group_id) {
+      db.prepare('INSERT INTO student_groups (student_id, group_id) VALUES (?, ?)').run(req.params.id, group_id);
     }
   });
-
-  setGroups();
+  setGroup();
   res.json({ success: true });
 });
 

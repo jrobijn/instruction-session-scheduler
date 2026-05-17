@@ -12,7 +12,6 @@ import TimetablesPage from './pages/TimetablesPage';
 import TimetableDetailPage from './pages/TimetableDetailPage';
 import SettingsPage from './pages/SettingsPage';
 import DisciplinesPage from './pages/DisciplinesPage';
-import DisciplineDetailPage from './pages/DisciplineDetailPage';
 import GroupsPage from './pages/GroupsPage';
 import GroupDetailPage from './pages/GroupDetailPage';
 import BuddyGroupsPage from './pages/BuddyGroupsPage';
@@ -84,7 +83,6 @@ function AdminLayout() {
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/instructors" element={<InstructorsPage />} />
         <Route path="/disciplines" element={<DisciplinesPage />} />
-        <Route path="/disciplines/:id" element={<DisciplineDetailPage />} />
         <Route path="/groups" element={<GroupsPage />} />
         <Route path="/groups/:id" element={<GroupDetailPage />} />
         <Route path="/buddy-groups" element={<BuddyGroupsPage />} />
