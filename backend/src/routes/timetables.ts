@@ -24,11 +24,11 @@ router.get('/:id', (req: Request, res: Response) => {
   ).all(req.params.id);
 
   const groups = db.prepare(`
-    SELECT tg.group_id, tg.percentage, g.name AS group_name, g.priority, g.is_default, g.color AS group_color
+    SELECT tg.group_id, tg.percentage, g.name AS group_name, g.is_default, g.color AS group_color
     FROM timetable_groups tg
     JOIN groups g ON g.id = tg.group_id
     WHERE tg.timetable_id = ?
-    ORDER BY g.priority ASC
+    ORDER BY tg.rowid ASC
   `).all(req.params.id);
 
   res.json({ ...timetable, timeslots, groups });

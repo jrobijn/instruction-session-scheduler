@@ -15,7 +15,7 @@ interface Student {
   preferred_days: string;
   active: number;
   cooldown_until: string | null;
-  groups?: Array<{ id: number; name: string; color: string | null }>;
+  group?: { id: number; name: string; color: string | null } | null;
 }
 
 interface Timetable {
@@ -434,12 +434,12 @@ export default function StudentsPage() {
                         )}
                       </div>
                       <div>
-                        <strong>{t.groups}:</strong>
-                        {s.groups && s.groups.length > 0 ? s.groups.map(g => (
-                          <div key={g.id} style={{ marginLeft: '0.25rem', marginTop: '0.25rem', display: 'flex', alignItems: 'center' }}>
-                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: g.color || '#999', marginRight: 8, flexShrink: 0 }} />{g.name}
+                        <strong>{t.group}:</strong>
+                        {s.group ? (
+                          <div style={{ marginLeft: '0.25rem', marginTop: '0.25rem', display: 'flex', alignItems: 'center' }}>
+                            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: s.group.color || '#999', marginRight: 8, flexShrink: 0 }} />{s.group.name}
                           </div>
-                        )) : <span> {t.noData}</span>}
+                        ) : <span> {t.noData}</span>}
                       </div>
                       <div>
                         {cooldownInfo && (

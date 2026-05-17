@@ -59,7 +59,7 @@ router.get('/:id', (req: Request, res: Response) => {
       FROM timetable_groups tg
       JOIN groups g ON g.id = tg.group_id
       WHERE tg.timetable_id = ?
-      ORDER BY g.priority ASC
+      ORDER BY tg.rowid ASC
     `).all(session.timetable_id);
   }
 
@@ -345,28 +345,28 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   const availableSlots = totalSlots - manualInvitations.length;
 
-  // Get groups assigned to this timetable with percentages
+  // Get groups assigned to this timetable with percentages (in timetable definition order)
   const timetableGroups = db.prepare(`
-    SELECT tg.group_id, tg.percentage, g.name AS group_name, g.priority
+    SELECT tg.group_id, tg.percentage, g.name AS group_name
     FROM timetable_groups tg
     JOIN groups g ON g.id = tg.group_id
     WHERE tg.timetable_id = ?
-    ORDER BY g.priority ASC
-  `).all(session.timetable_id) as Array<{ group_id: number; percentage: number; group_name: string; priority: number }>;
+    ORDER BY tg.rowid ASC
+  `).all(session.timetable_id) as Array<{ group_id: number; percentage: number; group_name: string }>;
 
   if (timetableGroups.length === 0) {
     res.status(400).json({ error: 'No groups assigned to this timetable' }); return;
   }
 
   // Compute slots per group from percentages based on remaining available slots
-  const groupSlotCounts: Array<{ group_id: number; slots: number; priority: number }> = [];
+  const groupSlotCounts: Array<{ group_id: number; slots: number }> = [];
   let allocated = 0;
   for (const tg of timetableGroups) {
     const slots = Math.floor(availableSlots * tg.percentage / 100);
-    groupSlotCounts.push({ group_id: tg.group_id, slots, priority: tg.priority });
+    groupSlotCounts.push({ group_id: tg.group_id, slots });
     allocated += slots;
   }
-  // Distribute remainder to highest-priority group (lowest priority number)
+  // Distribute remainder round-robin across groups
   let remainder = availableSlots - allocated;
   for (const gsc of groupSlotCounts) {
     if (remainder <= 0) break;
@@ -394,10 +394,9 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   const allMemberships = db.prepare(
     'SELECT sg.student_id, sg.group_id FROM student_groups sg'
   ).all() as Array<{ student_id: number; group_id: number }>;
-  const membershipsByStudent = new Map<number, Set<number>>();
+  const groupByStudent = new Map<number, number>();
   for (const m of allMemberships) {
-    if (!membershipsByStudent.has(m.student_id)) membershipsByStudent.set(m.student_id, new Set());
-    membershipsByStudent.get(m.student_id)!.add(m.group_id);
+    groupByStudent.set(m.student_id, m.group_id);
   }
 
   // Load discipline-group associations to check which students have available disciplines
@@ -412,24 +411,14 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   // Determine the timetable group IDs (the groups assigned to this timetable)
   const timetableGroupIds = new Set(timetableGroups.map(tg => tg.group_id));
 
-  // Build a priority lookup for timetable groups (lower number = higher priority)
-  const timetableGroupPriority = new Map<number, number>();
-  for (const tg of timetableGroups) {
-    timetableGroupPriority.set(tg.group_id, tg.priority);
-  }
-
-  // For each student, check if they have at least one available discipline through their timetable groups
+  // For each student, check if they have a discipline available through their group
   const studentHasDisciplines = (studentId: number): boolean => {
-    const groups = membershipsByStudent.get(studentId);
-    if (!groups) return false;
-    for (const gid of groups) {
-      if (timetableGroupIds.has(gid) && disciplineGroupIds.has(gid)) return true;
-    }
-    return false;
+    const gid = groupByStudent.get(studentId);
+    if (gid === undefined) return false;
+    return timetableGroupIds.has(gid) && disciplineGroupIds.has(gid);
   };
 
-  // For each student, find their best (highest priority = lowest number) timetable group
-  // Only considers groups that are both: (1) assigned to this timetable and (2) the student is a member of
+  // Assign each student to their group (students are in exactly one group)
   const studentsByGroup = new Map<number, any[]>();
   for (const gsc of groupSlotCounts) {
     studentsByGroup.set(gsc.group_id, []);
@@ -440,31 +429,15 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   for (const student of allEligibleStudents) {
     if (manualStudentIds.has(student.id)) continue;
-    const groups = membershipsByStudent.get(student.id);
-    if (!groups) continue;
+    const gid = groupByStudent.get(student.id);
+    if (gid === undefined || !timetableGroupIds.has(gid)) continue;
 
-    // Find the highest-priority timetable group this student belongs to
-    let bestGroupId: number | null = null;
-    let bestPriority = Infinity;
-    for (const gid of groups) {
-      if (!timetableGroupIds.has(gid)) continue;
-      const p = timetableGroupPriority.get(gid)!;
-      if (p < bestPriority) {
-        bestPriority = p;
-        bestGroupId = gid;
-      }
-    }
-    if (bestGroupId === null) continue; // student isn't in any timetable group
-
-    // Skip students with no available disciplines through their timetable groups
+    // Skip students with no available disciplines through their group
     if (!studentHasDisciplines(student.id)) continue;
 
-    studentsByGroup.get(bestGroupId)!.push(student);
+    studentsByGroup.get(gid)!.push(student);
     assignedStudents.add(student.id);
   }
-
-  // Sort timetable groups by priority (lowest first = highest priority)
-  const sortedGroups = [...groupSlotCounts].sort((a, b) => a.priority - b.priority);
 
   // Check if there are any eligible students at all (manual students still count)
   if (assignedStudents.size === 0 && manualInvitations.length === 0) {
@@ -583,8 +556,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     const invited: any[] = [];
     const invitedStudentIds = new Set<number>();
 
-    // Process groups in priority order, allocating each group's share of slots
-    for (const gsc of sortedGroups) {
+    // Process each group, allocating its share of slots
+    for (const gsc of groupSlotCounts) {
       const groupStudents = studentsByGroup.get(gsc.group_id) || [];
       let groupSlotsUsed = 0;
       const processedInGroup = new Set<number>();
@@ -620,13 +593,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     // Second pass: fill any remaining slots with uninvited eligible students (regardless of group)
     for (const student of allEligibleStudents) {
       if (invitedStudentIds.has(student.id)) continue;
-      if (!assignedStudents.has(student.id)) continue; // must still pass group/discipline checks
-      // Find which group this student was assigned to
-      let studentGroupId: number | null = null;
-      for (const group of sortedGroups) {
-        const studs = studentsByGroup.get(group.group_id) || [];
-        if (studs.some((s: any) => s.id === student.id)) { studentGroupId = group.group_id; break; }
-      }
+      if (!assignedStudents.has(student.id)) continue;
+      const studentGroupId = groupByStudent.get(student.id) ?? null;
       const result = assignStudent(student, req.params.id as string, studentGroupId);
       if (!result) continue; // This student's preferred slots are full, try next student
       invited.push(result);

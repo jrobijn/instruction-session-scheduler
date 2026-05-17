@@ -98,6 +98,7 @@ const nl: Translations = {
   noDisciplinesYet: 'Nog geen disciplines',
   noDisciplinesHint: 'Voeg je eerste discipline toe om te beginnen.',
   groups: 'Groepen',
+  group: 'Groep',
   confirmDeleteDiscipline: 'Weet je zeker dat je deze discipline wilt verwijderen?',
   abbreviation: 'Afkorting',
   editDiscipline: 'Discipline bewerken',
@@ -109,7 +110,7 @@ const nl: Translations = {
   groupCount: (n: number) => `${n} groep(en)`,
   addGroup: 'Groep toevoegen',
   searchGroups: 'Zoek groepen op naam...',
-  priorityLabel: (n: number) => `Prioriteit: ${n}`,
+
   noGroupsFound: 'Geen groepen gevonden',
   noGroupsAssigned: 'Geen groepen toegewezen',
   noGroupsAssignedHint: 'Voeg groepen toe om te bepalen welke leerlingen deze discipline kunnen kiezen.',
@@ -127,11 +128,12 @@ const nl: Translations = {
   confirmDeleteGroup: (name: string) => `Weet je zeker dat je de groep "${name}" wilt verwijderen?`,
   editGroup: 'Groep bewerken',
   addGroupTitle: 'Groep toevoegen',
-  priorityFieldLabel: 'Prioriteit (lager = hogere prioriteit, max 9999)',
+  unsetDefault: 'Standaard opheffen',
+
 
   // Group detail
   backToGroups: '← Terug naar Groepen',
-  groupInfo: (priority: number, memberCount: number) => `Prioriteit: ${priority} · ${memberCount} lid/leden`,
+  groupInfo: (memberCount: number) => `${memberCount} lid/leden`,
   addMember: 'Lid toevoegen',
   searchStudents: 'Zoek leerlingen op naam of e-mail...',
   noStudentsFound: 'Geen leerlingen gevonden',
@@ -140,6 +142,13 @@ const nl: Translations = {
   confirmRemoveMember: 'Deze leerling uit de groep verwijderen?',
   groupNotFound: 'Groep niet gevonden',
   groupNotFoundText: 'Groep niet gevonden.',
+  disciplinesSection: 'Disciplines',
+  addDisciplineToGroup: 'Discipline toevoegen',
+  searchDisciplines: 'Zoek disciplines op naam...',
+  noDisciplinesFound: 'Geen disciplines gevonden',
+  noDisciplinesAssigned: 'Geen disciplines toegewezen',
+  noDisciplinesAssignedHint: 'Voeg disciplines toe aan deze groep om te bepalen welke disciplines deze leerlingen kunnen kiezen.',
+  confirmRemoveDiscipline: 'Deze discipline uit de groep verwijderen?',
 
   // Buddy groups
   buddyGroupsTitle: (count: number) => `Buddygroepen (${count})`,

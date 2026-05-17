@@ -110,19 +110,24 @@ export const api = {
 
   // Groups
   getGroups: () => request('/groups'),
-  createGroup: (data: { name: string; priority: number; color?: string }) => request('/groups', { method: 'POST', body: JSON.stringify(data) }),
+  createGroup: (data: { name: string; color?: string }) => request('/groups', { method: 'POST', body: JSON.stringify(data) }),
   updateGroup: (id: number, data: Record<string, unknown>) => request(`/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteGroup: (id: number) => request(`/groups/${id}`, { method: 'DELETE' }),
+  setDefaultGroup: (id: number) => request(`/groups/${id}/set-default`, { method: 'POST' }),
+  unsetDefaultGroup: (id: number) => request(`/groups/${id}/unset-default`, { method: 'POST' }),
   exportGroupsCsv: () => requestCsv('/groups/export'),
   importGroupsCsv: (csv: string) => request('/groups/import', { method: 'POST', body: JSON.stringify({ csv }) }),
   getGroupMembers: (id: number) => request(`/groups/${id}/members`),
   addGroupMember: (groupId: number, studentId: number) => request(`/groups/${groupId}/members`, { method: 'POST', body: JSON.stringify({ student_id: studentId }) }),
   removeGroupMember: (groupId: number, studentId: number) => request(`/groups/${groupId}/members/${studentId}`, { method: 'DELETE' }),
   searchGroupNonMembers: (groupId: number, query: string) => request(`/groups/${groupId}/non-members?q=${encodeURIComponent(query)}`),
+  getGroupDisciplines: (groupId: number) => request(`/groups/${groupId}/disciplines`),
+  addGroupDiscipline: (groupId: number, disciplineId: number) => request(`/groups/${groupId}/disciplines/${disciplineId}`, { method: 'POST' }),
+  removeGroupDiscipline: (groupId: number, disciplineId: number) => request(`/groups/${groupId}/disciplines/${disciplineId}`, { method: 'DELETE' }),
 
-  // Student groups
-  getStudentGroups: (id: number) => request(`/students/${id}/groups`),
-  setStudentGroups: (id: number, groupIds: number[]) => request(`/students/${id}/groups`, { method: 'PUT', body: JSON.stringify({ group_ids: groupIds }) }),
+  // Student group
+  getStudentGroup: (id: number) => request(`/students/${id}/groups`),
+  setStudentGroup: (id: number, groupId: number | null) => request(`/students/${id}/groups`, { method: 'PUT', body: JSON.stringify({ group_id: groupId }) }),
 
   // Buddy groups
   getBuddyGroups: () => request('/buddy-groups'),

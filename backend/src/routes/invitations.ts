@@ -30,10 +30,12 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     'SELECT timetable_id FROM training_sessions WHERE id = ?'
   ).get(invitation.session_id) as { timetable_id: number | null };
 
-  const timetableGroupIds = sessionInfo?.timetable_id
-    ? (db.prepare('SELECT group_id FROM timetable_groups WHERE timetable_id = ?')
-        .all(sessionInfo.timetable_id) as Array<{ group_id: number }>).map(r => r.group_id)
-    : [];
+  const timetableGroupIds = new Set(
+    sessionInfo?.timetable_id
+      ? (db.prepare('SELECT group_id FROM timetable_groups WHERE timetable_id = ?')
+          .all(sessionInfo.timetable_id) as Array<{ group_id: number }>).map(r => r.group_id)
+      : []
+  );
 
   const discGroupIds = new Set(
     (db.prepare('SELECT DISTINCT dg.group_id FROM discipline_groups dg JOIN disciplines d ON d.id = dg.discipline_id WHERE d.active = 1')
@@ -54,31 +56,6 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     ORDER BY priority ASC, last_name ASC, first_name ASC
   `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), invitation.session_date, ...alreadyInvited, invitation.session_date) as any[];
 
-  // Load timetable group priorities for proper assignment
-  const timetableGroupPriorities = new Map<number, number>();
-  if (sessionInfo?.timetable_id) {
-    const tgRows = db.prepare(
-      'SELECT tg.group_id, g.priority FROM timetable_groups tg JOIN groups g ON g.id = tg.group_id WHERE tg.timetable_id = ?'
-    ).all(sessionInfo.timetable_id) as Array<{ group_id: number; priority: number }>;
-    for (const row of tgRows) {
-      timetableGroupPriorities.set(row.group_id, row.priority);
-    }
-  }
-
-  // Helper: find a student's best (highest-priority = lowest number) timetable group
-  function getBestTimetableGroup(studentGroupIds: number[]): number | null {
-    let bestGroupId: number | null = null;
-    let bestPriority = Infinity;
-    for (const gid of studentGroupIds) {
-      const p = timetableGroupPriorities.get(gid);
-      if (p !== undefined && p < bestPriority) {
-        bestPriority = p;
-        bestGroupId = gid;
-      }
-    }
-    return bestGroupId;
-  }
-
   // Load preferred timeslots to only invite students who prefer this timeslot
   const prefsByStudent = new Map<number, Set<number>>();
   if (sessionInfo?.timetable_id) {
@@ -95,44 +72,40 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
   let replacementStudent = null;
   let replacementGroupId = originalGroupId;
 
-  // First pass: find a replacement whose best timetable group matches the original group
+  // First pass: find a replacement from the same group as the original invitation
   for (const student of nextStudent) {
-    // Skip students who don't prefer this timeslot
     const studentPrefs = prefsByStudent.get(student.id);
     if (studentPrefs && studentPrefs.size > 0 && !studentPrefs.has(invitation.timeslot_id)) continue;
 
-    const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
-      .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
-    const bestGroup = getBestTimetableGroup(studentGroupIds);
-    const inSameGroup = originalGroupId
-      ? bestGroup === originalGroupId
-      : (timetableGroupIds.length === 0 || bestGroup !== null);
-    const hasDisciplines = studentGroupIds.some(gid => discGroupIds.has(gid));
-    if (inSameGroup && hasDisciplines) {
+    const membership = db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
+      .get(student.id) as { group_id: number } | undefined;
+    const studentGroupId = membership?.group_id ?? null;
+    if (!studentGroupId || !timetableGroupIds.has(studentGroupId)) continue;
+    if (!discGroupIds.has(studentGroupId)) continue;
+
+    const inSameGroup = originalGroupId ? studentGroupId === originalGroupId : true;
+    if (inSameGroup) {
       replacementStudent = student;
-      if (!originalGroupId && bestGroup !== null) {
-        replacementGroupId = bestGroup;
-      }
+      replacementGroupId = studentGroupId;
       break;
     }
   }
 
   // Second pass: if no same-group replacement found, try any timetable group
-  if (!replacementStudent && originalGroupId && timetableGroupIds.length > 0) {
+  if (!replacementStudent && originalGroupId && timetableGroupIds.size > 0) {
     for (const student of nextStudent) {
-      // Skip students who don't prefer this timeslot
       const studentPrefs = prefsByStudent.get(student.id);
       if (studentPrefs && studentPrefs.size > 0 && !studentPrefs.has(invitation.timeslot_id)) continue;
 
-      const studentGroupIds = (db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
-        .all(student.id) as Array<{ group_id: number }>).map(r => r.group_id);
-      const bestGroup = getBestTimetableGroup(studentGroupIds);
-      const hasDisciplines = studentGroupIds.some(gid => discGroupIds.has(gid));
-      if (bestGroup !== null && hasDisciplines) {
-        replacementStudent = student;
-        replacementGroupId = bestGroup;
-        break;
-      }
+      const membership = db.prepare('SELECT group_id FROM student_groups WHERE student_id = ?')
+        .get(student.id) as { group_id: number } | undefined;
+      const studentGroupId = membership?.group_id ?? null;
+      if (!studentGroupId || !timetableGroupIds.has(studentGroupId)) continue;
+      if (!discGroupIds.has(studentGroupId)) continue;
+
+      replacementStudent = student;
+      replacementGroupId = studentGroupId;
+      break;
     }
   }
 

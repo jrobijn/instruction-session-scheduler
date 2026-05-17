@@ -104,7 +104,6 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS groups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
-      priority INTEGER NOT NULL DEFAULT 9999 UNIQUE,
       color TEXT NOT NULL DEFAULT '#3b82f6',
       is_default INTEGER NOT NULL DEFAULT 0,
       active INTEGER NOT NULL DEFAULT 1,
@@ -114,7 +113,8 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS student_groups (
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-      PRIMARY KEY(student_id, group_id)
+      PRIMARY KEY(student_id, group_id),
+      UNIQUE(student_id)
     );
 
     CREATE TABLE IF NOT EXISTS timetable_groups (
@@ -143,8 +143,7 @@ export function initializeDatabase(): void {
       UNIQUE(student_id)
     );
 
-    -- Default group (all students belong to this)
-    INSERT OR IGNORE INTO groups (name, priority, is_default, color) VALUES ('Default', 10000, 1, '#565656');
+
 
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -254,14 +253,7 @@ export function initializeDatabase(): void {
     }
   }
 
-  // Ensure all students are members of the default group
-  const defaultGroup = db.prepare("SELECT id FROM groups WHERE is_default = 1").get() as { id: number } | undefined;
-  if (defaultGroup) {
-    db.exec(`
-      INSERT OR IGNORE INTO student_groups (student_id, group_id)
-      SELECT id, ${defaultGroup.id} FROM students
-    `);
-  }
+
 
   // Add color column to groups if missing
   const groupCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
@@ -287,8 +279,7 @@ export function initializeDatabase(): void {
     db.exec("ALTER TABLE disciplines ADD COLUMN abbreviation TEXT NOT NULL DEFAULT ''");
   }
 
-  // Ensure default group has the correct color
-  db.exec("UPDATE groups SET color = '#565656' WHERE is_default = 1 AND color IN ('#3b82f6', '#232323')");
+
 
   // Migrate invitations CHECK constraint to include 'expired' and 'cancelled' statuses
   const checkInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invitations'").get() as { sql: string } | undefined;
@@ -418,6 +409,59 @@ export function initializeDatabase(): void {
       INSERT INTO training_sessions_new SELECT * FROM training_sessions;
       DROP TABLE training_sessions;
       ALTER TABLE training_sessions_new RENAME TO training_sessions;
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+
+  // Migrate to single group per student: keep only the highest-priority group membership
+  const sgSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='student_groups'").get() as { sql: string } | undefined;
+  if (sgSchema && !sgSchema.sql.includes('UNIQUE(student_id)')) {
+    db.pragma('foreign_keys = OFF');
+    // For each student with multiple groups, keep only the one with the lowest priority number
+    db.exec(`
+      DELETE FROM student_groups WHERE rowid NOT IN (
+        SELECT sg.rowid FROM student_groups sg
+        JOIN groups g ON g.id = sg.group_id
+        WHERE sg.student_id || '-' || g.priority = (
+          SELECT sg2.student_id || '-' || MIN(g2.priority)
+          FROM student_groups sg2
+          JOIN groups g2 ON g2.id = sg2.group_id
+          WHERE sg2.student_id = sg.student_id
+        )
+      )
+    `);
+    // Rebuild table with UNIQUE constraint on student_id
+    db.exec(`
+      CREATE TABLE student_groups_new (
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        PRIMARY KEY(student_id, group_id),
+        UNIQUE(student_id)
+      );
+      INSERT INTO student_groups_new SELECT * FROM student_groups;
+      DROP TABLE student_groups;
+      ALTER TABLE student_groups_new RENAME TO student_groups;
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+
+  // Remove priority column from groups if present
+  const groupsSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='groups'").get() as { sql: string } | undefined;
+  if (groupsSchema && groupsSchema.sql.includes('priority')) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE groups_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        color TEXT NOT NULL DEFAULT '#3b82f6',
+        is_default INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO groups_new (id, name, color, is_default, active, created_at)
+        SELECT id, name, color, is_default, active, created_at FROM groups;
+      DROP TABLE groups;
+      ALTER TABLE groups_new RENAME TO groups;
     `);
     db.pragma('foreign_keys = ON');
   }

@@ -7,11 +7,11 @@ import { useT } from '../i18n';
 interface Group {
   id: number;
   name: string;
-  priority: number;
   color: string;
   is_default: number;
   active: number;
   member_count: number;
+  discipline_count: number;
 }
 
 export default function GroupsPage() {
@@ -20,12 +20,12 @@ export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Group | null>(null);
-  const [form, setForm] = useState({ name: '', priority: '9999', color: '#3b82f6' });
+  const [form, setForm] = useState({ name: '', color: '#3b82f6' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [sortCol, setSortCol] = useState<keyof Group>('priority');
+  const [sortCol, setSortCol] = useState<keyof Group>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const toggleSort = (col: keyof Group) => {
@@ -57,14 +57,14 @@ export default function GroupsPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: '', priority: '9999', color: '#3b82f6' });
+    setForm({ name: '', color: '#3b82f6' });
     setError('');
     setShowModal(true);
   };
 
   const openEdit = (group: Group) => {
     setEditing(group);
-    setForm({ name: group.name, priority: String(group.priority), color: group.color || '#3b82f6' });
+    setForm({ name: group.name, color: group.color || '#3b82f6' });
     setError('');
     setShowModal(true);
   };
@@ -74,9 +74,9 @@ export default function GroupsPage() {
     setError('');
     try {
       if (editing) {
-        await api.updateGroup(editing.id, { name: form.name, priority: Number(form.priority), color: form.color });
+        await api.updateGroup(editing.id, { name: form.name, color: form.color });
       } else {
-        await api.createGroup({ name: form.name, priority: Number(form.priority), color: form.color });
+        await api.createGroup({ name: form.name, color: form.color });
       }
       setShowModal(false);
       load();
@@ -98,6 +98,19 @@ export default function GroupsPage() {
   const toggleActive = async (group: Group) => {
     try {
       await api.updateGroup(group.id, { active: group.active ? 0 : 1 });
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleToggleDefault = async (group: Group) => {
+    try {
+      if (group.is_default) {
+        await api.unsetDefaultGroup(group.id);
+      } else {
+        await api.setDefaultGroup(group.id);
+      }
       load();
     } catch (err: any) {
       alert(err.message);
@@ -170,8 +183,8 @@ export default function GroupsPage() {
             <tr>
               <th className="sortable" onClick={() => toggleSort('name')}>{t.name}{sortIcon('name')}</th>
               <th>{t.color}</th>
-              <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
               <th className="sortable" onClick={() => toggleSort('member_count')}>{t.members}{sortIcon('member_count')}</th>
+              <th className="sortable" onClick={() => toggleSort('discipline_count')}>{t.disciplinesSection}{sortIcon('discipline_count')}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
               <th>{t.actions}</th>
             </tr>
@@ -179,7 +192,7 @@ export default function GroupsPage() {
           <tbody>
             {sortedGroups.map(g => (
               <tr key={g.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/groups/${g.id}`)}>
-                <td>{g.is_default ? `${t.default} ${t.defaultSuffix}` : g.name}</td>
+                <td>{g.name}{g.is_default ? ` (${t.default})` : ''}</td>
                 <td>
                   <input
                     type="color"
@@ -195,21 +208,20 @@ export default function GroupsPage() {
                     style={{ width: '32px', height: '24px', padding: 0, border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}
                   />
                 </td>
-                <td>{g.priority}</td>
                 <td>{g.member_count}</td>
+                <td>{g.discipline_count}</td>
                 <td>
                   <span className={`badge ${g.active ? 'badge-confirmed' : 'badge-declined'}`}>
                     {g.active ? t.active : t.inactive}
                   </span>
                 </td>
                 <td>
-                  {!g.is_default && (
                     <ActionDropdown actions={[
                       { label: t.edit, onClick: () => openEdit(g) },
+                      { label: g.is_default ? t.unsetDefault : t.setDefault, onClick: () => handleToggleDefault(g) },
                       { label: g.active ? t.deactivate : t.activate, onClick: () => toggleActive(g) },
                       { label: t.delete, onClick: () => handleDelete(g), danger: true },
                     ]} />
-                  )}
                 </td>
               </tr>
             ))}
@@ -226,10 +238,6 @@ export default function GroupsPage() {
               <div className="form-group">
                 <label>{t.name}</label>
                 <input autoFocus={!editing} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
-              </div>
-              <div className="form-group">
-                <label>{t.priorityFieldLabel}</label>
-                <input type="number" min="1" max="9999" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })} required />
               </div>
               <div className="form-group">
                 <label>{t.color}</label>

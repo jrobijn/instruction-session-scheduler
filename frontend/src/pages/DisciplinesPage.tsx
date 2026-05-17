@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
 import { useT } from '../i18n';
@@ -9,25 +8,14 @@ interface Discipline {
   name: string;
   abbreviation: string;
   active: number;
-  groups: Array<{ id: number; name: string }>;
-}
-
-interface Group {
-  id: number;
-  name: string;
-  active: number;
-  is_default: number;
 }
 
 export default function DisciplinesPage() {
-  const navigate = useNavigate();
   const t = useT();
   const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Discipline | null>(null);
   const [form, setForm] = useState({ name: '', abbreviation: '' });
-  const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
-  const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
@@ -36,7 +24,6 @@ export default function DisciplinesPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const toggleSort = (col: keyof Discipline) => {
-    if (col === 'groups') return;
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
   };
@@ -53,9 +40,7 @@ export default function DisciplinesPage() {
 
   const load = async () => {
     try {
-      const [discs, groups] = await Promise.all([api.getDisciplines(), api.getGroups()]);
-      setDisciplines(discs);
-      setAllGroups(groups.filter((g: Group) => g.active));
+      setDisciplines(await api.getDisciplines());
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -68,7 +53,6 @@ export default function DisciplinesPage() {
   const openCreate = () => {
     setEditing(null);
     setForm({ name: '', abbreviation: '' });
-    setSelectedGroupIds([]);
     setError('');
     setShowModal(true);
   };
@@ -76,7 +60,6 @@ export default function DisciplinesPage() {
   const openEdit = (discipline: Discipline) => {
     setEditing(discipline);
     setForm({ name: discipline.name, abbreviation: discipline.abbreviation || '' });
-    setSelectedGroupIds(discipline.groups.map(g => g.id));
     setError('');
     setShowModal(true);
   };
@@ -85,15 +68,11 @@ export default function DisciplinesPage() {
     e.preventDefault();
     setError('');
     try {
-      let discId: number;
       if (editing) {
         await api.updateDiscipline(editing.id, form);
-        discId = editing.id;
       } else {
-        const created = await api.createDiscipline(form);
-        discId = created.id;
+        await api.createDiscipline(form);
       }
-      await api.setDisciplineGroups(discId, selectedGroupIds);
       setShowModal(false);
       load();
     } catch (err: any) {
@@ -186,17 +165,15 @@ export default function DisciplinesPage() {
             <tr>
               <th className="sortable" onClick={() => toggleSort('name')}>{t.name}{sortIcon('name')}</th>
               <th>{t.abbreviation}</th>
-              <th>{t.groups}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
               <th>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
             {sortedDisciplines.map(d => (
-              <tr key={d.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/disciplines/${d.id}`)}>
+              <tr key={d.id}>
                 <td>{d.name}</td>
                 <td>{d.abbreviation}</td>
-                <td>{d.groups.length}</td>
                 <td>
                   <span className={`badge ${d.active ? 'badge-confirmed' : 'badge-declined'}`}>
                     {d.active ? t.active : t.inactive}
@@ -228,29 +205,6 @@ export default function DisciplinesPage() {
               <div className="form-group">
                 <label>{t.abbreviation}</label>
                 <input value={form.abbreviation} onChange={e => setForm({ ...form, abbreviation: e.target.value })} />
-              </div>
-              <div className="form-group">
-                <label>{t.groupsWithAccess}</label>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {allGroups.map(g => {
-                    const checked = selectedGroupIds.includes(g.id);
-                    return (
-                      <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setSelectedGroupIds(checked
-                              ? selectedGroupIds.filter(id => id !== g.id)
-                              : [...selectedGroupIds, g.id]
-                            );
-                          }}
-                        />
-                        {g.name}
-                      </label>
-                    );
-                  })}
-                </div>
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>

@@ -7,7 +7,6 @@ import { useT } from '../i18n';
 interface GroupDetail {
   id: number;
   name: string;
-  priority: number;
   is_default: number;
   active: number;
 }
@@ -27,10 +26,18 @@ interface SearchResult {
   email: string;
 }
 
+interface DisciplineItem {
+  id: number;
+  name: string;
+  abbreviation: string;
+  active: number;
+}
+
 export default function GroupDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const t = useT();
+  const [tab, setTab] = useState<'members' | 'disciplines'>('members');
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,16 +48,24 @@ export default function GroupDetailPage() {
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Disciplines state
+  const [disciplines, setDisciplines] = useState<DisciplineItem[]>([]);
+  const [allDisciplines, setAllDisciplines] = useState<DisciplineItem[]>([]);
+
   const load = async () => {
     try {
-      const [groupsData, membersData] = await Promise.all([
+      const [groupsData, membersData, discData, allDiscData] = await Promise.all([
         api.getGroups(),
-        api.getGroupMembers(Number(id))
+        api.getGroupMembers(Number(id)),
+        api.getGroupDisciplines(Number(id)),
+        api.getDisciplines()
       ]);
       const g = groupsData.find((g: GroupDetail) => g.id === Number(id));
       if (!g) { setError(t.groupNotFound); return; }
       setGroup(g);
       setMembers(membersData);
+      setDisciplines(discData);
+      setAllDisciplines(allDiscData.filter((d: DisciplineItem) => d.active));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -110,9 +125,24 @@ export default function GroupDetailPage() {
     }
   };
 
+  const handleToggleDiscipline = async (disciplineId: number, assigned: boolean) => {
+    try {
+      if (assigned) {
+        await api.removeGroupDiscipline(Number(id), disciplineId);
+      } else {
+        await api.addGroupDiscipline(Number(id), disciplineId);
+      }
+      load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   if (loading) return <div className="page"><p>{t.loading}</p></div>;
   if (error) return <div className="page"><div className="alert alert-error">{error}</div></div>;
   if (!group) return <div className="page"><p>{t.groupNotFoundText}</p></div>;
+
+  const assignedIds = new Set(disciplines.map(d => d.id));
 
   return (
     <div className="page">
@@ -121,96 +151,161 @@ export default function GroupDetailPage() {
       </button>
 
       <div className="page-header">
-        <h1>{group.is_default ? `${t.default} ${t.defaultSuffix}` : group.name}</h1>
-        <span style={{ color: '#666', fontSize: '0.9rem' }}>{t.groupInfo(group.priority, members.length)}</span>
+        <h1>{group.name}{group.is_default ? ` (${t.default})` : ''}</h1>
+        <span style={{ color: '#666', fontSize: '0.9rem' }}>{t.groupInfo(members.length)}</span>
       </div>
 
-      {!group.is_default && (
-        <div style={{ marginBottom: '1.5rem', position: 'relative' }} ref={dropdownRef}>
-          <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>{t.addMember}</label>
-          <input
-            type="text"
-            placeholder={t.searchStudents}
-            value={searchQuery}
-            onChange={e => handleSearch(e.target.value)}
-            style={{ width: '100%', maxWidth: '400px' }}
-          />
-          {showDropdown && searchResults.length > 0 && (
-            <div style={{
-              position: 'absolute', top: '100%', left: 0, zIndex: 10,
-              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px',
-              maxWidth: '400px', width: '100%', maxHeight: '250px', overflowY: 'auto',
-              boxShadow: '0 4px 12px var(--shadow)'
-            }}>
-              {searchResults.map(s => (
-                <div
-                  key={s.id}
-                  onClick={() => handleAddMember(s)}
-                  style={{
-                    padding: '0.5rem 0.75rem', cursor: 'pointer',
-                    borderBottom: '1px solid var(--border)',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'var(--surface)')}
-                >
-                  <span>{s.first_name} {s.last_name}</span>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{s.email}</span>
-                </div>
-              ))}
+      <div className="tabs" style={{ display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: '1.5rem' }}>
+        <button
+          className={`tab-btn${tab === 'members' ? ' active' : ''}`}
+          onClick={() => setTab('members')}
+          style={{
+            padding: '0.5rem 1.25rem', border: 'none', background: 'none', cursor: 'pointer',
+            borderBottom: tab === 'members' ? '2px solid var(--primary)' : '2px solid transparent',
+            marginBottom: '-2px', fontWeight: tab === 'members' ? 600 : 400,
+            color: tab === 'members' ? 'var(--primary)' : 'var(--text-muted)'
+          }}
+        >
+          {t.members} ({members.length})
+        </button>
+        <button
+          className={`tab-btn${tab === 'disciplines' ? ' active' : ''}`}
+          onClick={() => setTab('disciplines')}
+          style={{
+            padding: '0.5rem 1.25rem', border: 'none', background: 'none', cursor: 'pointer',
+            borderBottom: tab === 'disciplines' ? '2px solid var(--primary)' : '2px solid transparent',
+            marginBottom: '-2px', fontWeight: tab === 'disciplines' ? 600 : 400,
+            color: tab === 'disciplines' ? 'var(--primary)' : 'var(--text-muted)'
+          }}
+        >
+          {t.disciplinesSection} ({disciplines.length})
+        </button>
+      </div>
+
+      {tab === 'members' && (
+        <>
+          <div style={{ marginBottom: '1.5rem', position: 'relative' }} ref={dropdownRef}>
+            <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>{t.addMember}</label>
+            <input
+              type="text"
+              placeholder={t.searchStudents}
+              value={searchQuery}
+              onChange={e => handleSearch(e.target.value)}
+              style={{ width: '100%', maxWidth: '400px' }}
+            />
+            {showDropdown && searchResults.length > 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, zIndex: 10,
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px',
+                maxWidth: '400px', width: '100%', maxHeight: '250px', overflowY: 'auto',
+                boxShadow: '0 4px 12px var(--shadow)'
+              }}>
+                {searchResults.map(s => (
+                  <div
+                    key={s.id}
+                    onClick={() => handleAddMember(s)}
+                    style={{
+                      padding: '0.5rem 0.75rem', cursor: 'pointer',
+                      borderBottom: '1px solid var(--border)',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'var(--surface)')}
+                  >
+                    <span>{s.first_name} {s.last_name}</span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{s.email}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {showDropdown && searchQuery.trim() && searchResults.length === 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, zIndex: 10,
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px',
+                maxWidth: '400px', width: '100%', padding: '0.5rem 0.75rem', color: 'var(--text-muted)',
+                boxShadow: '0 4px 12px var(--shadow)'
+              }}>
+                {t.noStudentsFound}
+              </div>
+            )}
+          </div>
+
+          {members.length === 0 ? (
+            <div className="empty-state">
+              <h3>{t.noMembers}</h3>
+              <p>{t.noMembersHint}</p>
             </div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>{t.firstName}</th>
+                  <th>{t.lastName}</th>
+                  <th>{t.email}</th>
+                  <th>{t.status}</th>
+                  <th>{t.actions}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map(m => (
+                  <tr key={m.id}>
+                    <td>{m.first_name}</td>
+                    <td>{m.last_name}</td>
+                    <td>{m.email}</td>
+                    <td>
+                      <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
+                        {m.active ? t.active : t.inactive}
+                      </span>
+                    </td>
+                    <td>
+                      <ActionDropdown actions={[
+                        { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
+                      ]} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
-          {showDropdown && searchQuery.trim() && searchResults.length === 0 && (
-            <div style={{
-              position: 'absolute', top: '100%', left: 0, zIndex: 10,
-              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px',
-              maxWidth: '400px', width: '100%', padding: '0.5rem 0.75rem', color: 'var(--text-muted)',
-              boxShadow: '0 4px 12px var(--shadow)'
-            }}>
-              {t.noStudentsFound}
-            </div>
-          )}
-        </div>
+        </>
       )}
 
-      {members.length === 0 ? (
-        <div className="empty-state">
-          <h3>{t.noMembers}</h3>
-          <p>{t.noMembersHint}</p>
-        </div>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>{t.firstName}</th>
-              <th>{t.lastName}</th>
-              <th>{t.email}</th>
-              <th>{t.status}</th>
-              {!group.is_default && <th>{t.actions}</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {members.map(m => (
-              <tr key={m.id}>
-                <td>{m.first_name}</td>
-                <td>{m.last_name}</td>
-                <td>{m.email}</td>
-                <td>
-                  <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {m.active ? t.active : t.inactive}
-                  </span>
-                </td>
-                {!group.is_default && (
-                  <td>
-                    <ActionDropdown actions={[
-                      { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
-                    ]} />
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {tab === 'disciplines' && (
+        <>
+          {allDisciplines.length === 0 ? (
+            <div className="empty-state">
+              <h3>{t.noDisciplinesAssigned}</h3>
+              <p>{t.noDisciplinesAssignedHint}</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.5rem' }}>
+              {allDisciplines.map(d => {
+                const checked = assignedIds.has(d.id);
+                return (
+                  <label key={d.id} style={{
+                    display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer',
+                    padding: '0.6rem 0.75rem', borderRadius: '6px',
+                    background: checked ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
+                    border: '1px solid',
+                    borderColor: checked ? 'var(--primary, #3b82f6)' : 'var(--border)',
+                    transition: 'all 0.15s ease'
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => handleToggleDiscipline(d.id, checked)}
+                      style={{ width: '16px', height: '16px' }}
+                    />
+                    <span style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontWeight: 500 }}>{d.name}</span>
+                      {d.abbreviation && <span style={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>{d.abbreviation}</span>}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -96,6 +96,7 @@ const en = {
   noDisciplinesYet: 'No disciplines yet',
   noDisciplinesHint: 'Add your first discipline to get started.',
   groups: 'Groups',
+  group: 'Group',
   confirmDeleteDiscipline: 'Are you sure you want to delete this discipline?',
   abbreviation: 'Abbreviation',
   editDiscipline: 'Edit Discipline',
@@ -107,7 +108,7 @@ const en = {
   groupCount: (n: number) => `${n} group(s)`,
   addGroup: 'Add Group',
   searchGroups: 'Search groups by name...',
-  priorityLabel: (n: number) => `Priority: ${n}`,
+
   noGroupsFound: 'No groups found',
   noGroupsAssigned: 'No groups assigned',
   noGroupsAssignedHint: 'Add groups to control which students can choose this discipline.',
@@ -125,11 +126,12 @@ const en = {
   confirmDeleteGroup: (name: string) => `Are you sure you want to delete the group "${name}"?`,
   editGroup: 'Edit Group',
   addGroupTitle: 'Add Group',
-  priorityFieldLabel: 'Priority (lower = higher priority, max 9999)',
+  unsetDefault: 'Unset Default',
+
 
   // Group detail
   backToGroups: '← Back to Groups',
-  groupInfo: (priority: number, memberCount: number) => `Priority: ${priority} · ${memberCount} member(s)`,
+  groupInfo: (memberCount: number) => `${memberCount} member(s)`,
   addMember: 'Add Member',
   searchStudents: 'Search students by name or email...',
   noStudentsFound: 'No students found',
@@ -138,17 +140,13 @@ const en = {
   confirmRemoveMember: 'Remove this student from the group?',
   groupNotFound: 'Group not found',
   groupNotFoundText: 'Group not found.',
-
-  // Buddy groups
-  buddyGroupsTitle: (count: number) => `Buddy Groups (${count})`,
-  addBuddyGroupButton: '+ Add Buddy Group',
-  noBuddyGroupsYet: 'No buddy groups yet',
-  noBuddyGroupsHint: 'Create buddy groups to schedule students together at nearby timeslots.',
-  confirmDeleteBuddyGroup: (name: string) => `Are you sure you want to delete the buddy group "${name}"?`,
-  editBuddyGroup: 'Edit Buddy Group',
-  addBuddyGroupTitle: 'Add Buddy Group',
-
-  // Buddy group detail
+  disciplinesSection: 'Disciplines',
+  addDisciplineToGroup: 'Add Discipline',
+  searchDisciplines: 'Search disciplines by name...',
+  noDisciplinesFound: 'No disciplines found',
+  noDisciplinesAssigned: 'No disciplines assigned',
+  noDisciplinesAssignedHint: 'Add disciplines to this group to control which disciplines these students can choose.',
+  confirmRemoveDiscipline: 'Remove this discipline from the group?',
   backToBuddyGroups: '← Back to Buddy Groups',
   buddyGroupMemberCount: (n: number) => `${n} member(s)`,
   noBuddyMembers: 'No members',
