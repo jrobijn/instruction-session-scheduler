@@ -338,17 +338,17 @@ nav .theme-select {
 .notification-type-declined { background: #fee2e2; color: #dc2626; }
 .notification-type-expired { background: #fef3c7; color: #d97706; }
 .notification-type-cancelled { background: #fee2e2; color: #dc2626; }
-.notification-type-session_full { background: #dbeafe; color: #2563eb; font-size: 14px; }
+.notification-type-session_full { background: #dcfce7; color: #16a34a; font-size: 14px; }
 .notification-type-session_no_longer_full { background: #fef3c7; color: #d97706; font-size: 14px; }
 [data-theme="dark"] .notification-type-confirmed { background: #052e16; color: #4ade80; }
 [data-theme="dark"] .notification-type-declined { background: #450a0a; color: #f87171; }
 [data-theme="dark"] .notification-type-expired { background: #422006; color: #fbbf24; }
 [data-theme="dark"] .notification-type-cancelled { background: #450a0a; color: #f87171; }
-[data-theme="dark"] .notification-type-session_full { background: #1e3a5f; color: #60a5fa; }
+[data-theme="dark"] .notification-type-session_full { background: #052e16; color: #4ade80; }
 [data-theme="dark"] .notification-type-session_no_longer_full { background: #422006; color: #fbbf24; }
 
 .notification-special {
-  box-shadow: inset 3px 0 0 var(--primary);
+  box-shadow: inset 3px 0 0 var(--success);
 }
 .notification-special.notification-type-item-session_no_longer_full {
   box-shadow: inset 3px 0 0 var(--warning);
