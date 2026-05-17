@@ -105,7 +105,7 @@ tr:hover td { background: var(--hover-row); }
   cursor: pointer; transition: background 0.15s, opacity 0.15s; text-decoration: none;
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary { background: var(--primary); color: white; }
+.btn-primary { background: var(--primary); color: white; border: 1px solid var(--primary); }
 .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
 .btn-danger { background: var(--danger); color: white; }
 .btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
@@ -118,7 +118,7 @@ tr:hover td { background: var(--hover-row); }
 .btn-sm { padding: 4px 10px; font-size: 13px; }
 .btn-group { display: flex; gap: 8px; }
 
-[data-theme="dark"] .btn-primary { background: #2563eb; color: #fff; }
+[data-theme="dark"] .btn-primary { background: #2563eb; color: #fff; border: 1px solid #2563eb; }
 [data-theme="dark"] .btn-primary:hover:not(:disabled) { background: #3b82f6; }
 [data-theme="dark"] .btn-danger { background: #dc2626; color: #fff; }
 [data-theme="dark"] .btn-danger:hover:not(:disabled) { background: #ef4444; }

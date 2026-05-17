@@ -133,7 +133,6 @@ export function initializeDatabase(): void {
 
     CREATE TABLE IF NOT EXISTS buddy_groups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -479,6 +478,22 @@ export function initializeDatabase(): void {
         db.prepare('UPDATE timetable_groups SET position = ? WHERE timetable_id = ? AND group_id = ?').run(idx, tt.timetable_id, row.group_id);
       });
     }
+  }
+
+  // Remove name column from buddy_groups if present
+  const bgSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='buddy_groups'").get() as { sql: string } | undefined;
+  if (bgSchema && bgSchema.sql.includes('name')) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE buddy_groups_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO buddy_groups_new (id, created_at) SELECT id, created_at FROM buddy_groups;
+      DROP TABLE buddy_groups;
+      ALTER TABLE buddy_groups_new RENAME TO buddy_groups;
+    `);
+    db.pragma('foreign_keys = ON');
   }
 }
 

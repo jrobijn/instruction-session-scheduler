@@ -24,7 +24,26 @@ router.get('/', (_req: Request, res: Response) => {
   for (const m of groupMemberships) {
     groupByStudent.set(m.student_id, { id: m.group_id, name: m.group_name, color: m.group_color });
   }
-  const result = students.map(s => ({ ...s, group: groupByStudent.get(s.id) || null }));
+  // Attach buddy group for each student (name computed from member first names)
+  const buddyMemberships = db.prepare(`
+    SELECT bgm.student_id, bgm.buddy_group_id
+    FROM buddy_group_members bgm
+  `).all() as Array<{ student_id: number; buddy_group_id: number }>;
+  // Build map of group_id -> member first names
+  const buddyGroupMembers = new Map<number, string[]>();
+  for (const m of buddyMemberships) {
+    const student = students.find(s => s.id === m.student_id) as any;
+    if (student) {
+      if (!buddyGroupMembers.has(m.buddy_group_id)) buddyGroupMembers.set(m.buddy_group_id, []);
+      buddyGroupMembers.get(m.buddy_group_id)!.push(student.first_name);
+    }
+  }
+  const buddyByStudent = new Map<number, { id: number; name: string }>();
+  for (const m of buddyMemberships) {
+    const names = buddyGroupMembers.get(m.buddy_group_id) || [];
+    buddyByStudent.set(m.student_id, { id: m.buddy_group_id, name: names.join(' & ') });
+  }
+  const result = students.map(s => ({ ...s, group: groupByStudent.get(s.id) || null, buddy_group: buddyByStudent.get(s.id) || null }));
   res.json(result);
 });
 

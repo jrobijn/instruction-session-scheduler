@@ -68,7 +68,7 @@ router.get('/:id', (req: Request, res: Response) => {
            d.name AS discipline_name, d.abbreviation AS discipline_abbreviation, ts.start_time AS timeslot_start_time,
            ss.instructor_id AS instructor_id, i.first_name || ' ' || i.last_name AS instructor_name,
            g.name AS group_name, g.color AS group_color,
-           bgm.buddy_group_id AS buddy_group_id, bg.name AS buddy_group_name
+           bgm.buddy_group_id AS buddy_group_id
     FROM invitations inv
     JOIN students s ON s.id = inv.student_id
     JOIN timeslots ts ON ts.id = inv.timeslot_id
@@ -77,15 +77,28 @@ router.get('/:id', (req: Request, res: Response) => {
     LEFT JOIN disciplines d ON d.id = inv.discipline_id
     LEFT JOIN groups g ON g.id = inv.group_id
     LEFT JOIN buddy_group_members bgm ON bgm.student_id = inv.student_id
-    LEFT JOIN buddy_groups bg ON bg.id = bgm.buddy_group_id
     WHERE inv.session_id = ?
     ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC, inv.id ASC
-  `).all(req.params.id);
+  `).all(req.params.id) as any[];
+
+  // Compute buddy group names from member first names
+  const buddyGroupIds = [...new Set(invitations.map(inv => inv.buddy_group_id).filter(Boolean))];
+  const buddyNameMap = new Map<number, string>();
+  for (const bgId of buddyGroupIds) {
+    const members = db.prepare(
+      `SELECT s.first_name FROM students s JOIN buddy_group_members bgm ON bgm.student_id = s.id WHERE bgm.buddy_group_id = ?`
+    ).all(bgId) as { first_name: string }[];
+    buddyNameMap.set(bgId, members.map(m => m.first_name).join(' & '));
+  }
+  const invitationsWithBuddyName = invitations.map(inv => ({
+    ...inv,
+    buddy_group_name: inv.buddy_group_id ? buddyNameMap.get(inv.buddy_group_id) || null : null,
+  }));
 
   const expiryMinutes = getExpiryMinutes();
 
   // Compute effective status for invitations (lazy expiry check)
-  const effectiveInvitations = (invitations as any[]).map(inv => {
+  const effectiveInvitations = invitationsWithBuddyName.map(inv => {
     if (inv.status === 'invited' && expiryMinutes > 0 && inv.invited_at) {
       if (isInvitationLogicallyExpired(inv.invited_at, expiryMinutes)) {
         return { ...inv, status: 'expired' };

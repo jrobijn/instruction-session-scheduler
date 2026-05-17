@@ -428,13 +428,14 @@ export default function SessionDetailPage() {
 
   // Buddy group indicators: assign colors to buddy groups with 2+ members in this session
   const BUDDY_COLORS = ['#e11d48', '#7c3aed', '#0891b2', '#c026d3', '#ea580c', '#4f46e5', '#059669'];
-  const buddyGroupCounts = new Map<number, number>();
+  const buddyGroupStudents = new Map<number, Set<number>>();
   for (const inv of session.invitations) {
     if (inv.buddy_group_id && inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled') {
-      buddyGroupCounts.set(inv.buddy_group_id, (buddyGroupCounts.get(inv.buddy_group_id) || 0) + 1);
+      if (!buddyGroupStudents.has(inv.buddy_group_id)) buddyGroupStudents.set(inv.buddy_group_id, new Set());
+      buddyGroupStudents.get(inv.buddy_group_id)!.add(inv.student_id);
     }
   }
-  const activeBuddyGroups = [...buddyGroupCounts.entries()].filter(([, c]) => c >= 2).map(([id]) => id);
+  const activeBuddyGroups = [...buddyGroupStudents.entries()].filter(([, s]) => s.size >= 2).map(([id]) => id);
   const buddyColorMap = new Map<number, string>();
   activeBuddyGroups.forEach((bgId, i) => buddyColorMap.set(bgId, BUDDY_COLORS[i % BUDDY_COLORS.length]));
 
