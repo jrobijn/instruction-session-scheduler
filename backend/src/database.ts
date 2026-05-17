@@ -145,6 +145,18 @@ export function initializeDatabase(): void {
 
 
 
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('invitation_confirmed','invitation_declined','invitation_expired','invitation_cancelled','session_full','session_no_longer_full')),
+      invitation_id INTEGER REFERENCES invitations(id) ON DELETE CASCADE,
+      session_id INTEGER REFERENCES training_sessions(id) ON DELETE CASCADE,
+      student_name TEXT NOT NULL DEFAULT '',
+      session_date TEXT NOT NULL,
+      timeslot_start_time TEXT,
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -492,6 +504,42 @@ export function initializeDatabase(): void {
       INSERT INTO buddy_groups_new (id, created_at) SELECT id, created_at FROM buddy_groups;
       DROP TABLE buddy_groups;
       ALTER TABLE buddy_groups_new RENAME TO buddy_groups;
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+
+  // Add session_id column to notifications if missing
+  const notifCols = db.prepare("PRAGMA table_info(notifications)").all() as Array<{ name: string }>;
+  if (notifCols.length > 0 && !notifCols.some(c => c.name === 'session_id')) {
+    db.exec('ALTER TABLE notifications ADD COLUMN session_id INTEGER REFERENCES training_sessions(id) ON DELETE CASCADE');
+    // Backfill session_id from invitations
+    db.exec(`
+      UPDATE notifications SET session_id = (
+        SELECT inv.session_id FROM invitations inv WHERE inv.id = notifications.invitation_id
+      ) WHERE session_id IS NULL AND invitation_id IS NOT NULL
+    `);
+  }
+
+  // Migrate notifications CHECK constraint to include new types
+  const notifSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='notifications'").get() as { sql: string } | undefined;
+  if (notifSchema && !notifSchema.sql.includes("'session_full'")) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE notifications_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK(type IN ('invitation_confirmed','invitation_declined','invitation_expired','invitation_cancelled','session_full','session_no_longer_full')),
+        invitation_id INTEGER REFERENCES invitations(id) ON DELETE CASCADE,
+        session_id INTEGER REFERENCES training_sessions(id) ON DELETE CASCADE,
+        student_name TEXT NOT NULL DEFAULT '',
+        session_date TEXT NOT NULL,
+        timeslot_start_time TEXT,
+        read INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO notifications_new (id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at)
+        SELECT id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at FROM notifications;
+      DROP TABLE notifications;
+      ALTER TABLE notifications_new RENAME TO notifications;
     `);
     db.pragma('foreign_keys = ON');
   }

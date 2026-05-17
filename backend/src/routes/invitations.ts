@@ -7,8 +7,23 @@ import {
   getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
 } from '../expiryTimers.js';
 import { broadcastSession, broadcast } from '../sseClients.js';
+import { createNotification } from './notifications.js';
 
 const router = Router();
+
+// Check if a session has full attendance (all slots × timeslots confirmed)
+function checkSessionFullAttendance(sessionId: number): { isFull: boolean; totalSlots: number; confirmedCount: number } {
+  const session = db.prepare('SELECT timetable_id FROM training_sessions WHERE id = ?').get(sessionId) as { timetable_id: number | null } | undefined;
+  if (!session?.timetable_id) return { isFull: false, totalSlots: 0, confirmedCount: 0 };
+
+  const instructorCount = (db.prepare('SELECT COUNT(*) AS cnt FROM session_slots WHERE session_id = ? AND removed = 0').get(sessionId) as any).cnt;
+  const timeslotCount = (db.prepare('SELECT COUNT(*) AS cnt FROM timeslots WHERE timetable_id = ?').get(session.timetable_id) as any).cnt;
+  const totalSlots = instructorCount * timeslotCount;
+  if (totalSlots === 0) return { isFull: false, totalSlots: 0, confirmedCount: 0 };
+
+  const confirmedCount = (db.prepare("SELECT COUNT(*) AS cnt FROM invitations WHERE session_id = ? AND status = 'confirmed'").get(sessionId) as any).cnt;
+  return { isFull: confirmedCount >= totalSlots, totalSlots, confirmedCount };
+}
 
 // Normalize priorities so the minimum active student has priority 1
 function normalizePriorities() {
@@ -171,9 +186,13 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
 // Process a single expired invitation (called by expiry timer)
 export async function processExpiredInvitation(invitationId: number): Promise<void> {
   const inv = db.prepare(`
-    SELECT inv.*, ts.date AS session_date, ts.id AS session_id, ts.status AS session_status
+    SELECT inv.*, ts.date AS session_date, ts.id AS session_id, ts.status AS session_status,
+           s.first_name || ' ' || s.last_name AS student_name,
+           tslot.start_time AS timeslot_start_time
     FROM invitations inv
     JOIN training_sessions ts ON ts.id = inv.session_id
+    JOIN students s ON s.id = inv.student_id
+    JOIN timeslots tslot ON tslot.id = inv.timeslot_id
     WHERE inv.id = ? AND inv.status = 'invited'
   `).get(invitationId) as any;
 
@@ -187,6 +206,15 @@ export async function processExpiredInvitation(invitationId: number): Promise<vo
   // Broadcast expiry to session and invitation listeners
   broadcastSession(inv.session_id, 'invitation_updated', { id: inv.id, status: 'expired' });
   broadcast(`invitation:${inv.token}`, 'invitation_updated', { status: 'expired' });
+
+  createNotification({
+    type: 'invitation_expired',
+    invitation_id: inv.id,
+    session_id: inv.session_id,
+    student_name: inv.student_name,
+    session_date: inv.session_date,
+    timeslot_start_time: inv.timeslot_start_time,
+  });
 
   await findAndInviteReplacement(inv);
 }
@@ -291,6 +319,25 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
   });
   broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'confirmed' });
 
+  createNotification({
+    type: 'invitation_confirmed',
+    invitation_id: invitation.id,
+    session_id: invitation.session_id,
+    student_name: invitation.student_name,
+    session_date: invitation.session_date,
+    timeslot_start_time: invitation.timeslot_start_time,
+  });
+
+  // Check if session now has full attendance
+  const { isFull } = checkSessionFullAttendance(invitation.session_id);
+  if (isFull) {
+    createNotification({
+      type: 'session_full',
+      session_id: invitation.session_id,
+      session_date: invitation.session_date,
+    });
+  }
+
   // Send confirmation email with cancellation link
   try {
     const clubName = (db.prepare("SELECT value FROM settings WHERE key = 'club_name'").get() as any)?.value || 'Sports Club';
@@ -335,6 +382,9 @@ router.post('/:token/cancel', async (req: Request, res: Response) => {
   if (invitation.session_status === 'completed') { res.status(400).json({ error: 'This session has already passed' }); return; }
   if (invitation.status !== 'confirmed') { res.status(400).json({ error: `Cannot cancel — invitation is ${invitation.status}` }); return; }
 
+  // Check if session was full before this cancellation
+  const wasFull = checkSessionFullAttendance(invitation.session_id).isFull;
+
   db.prepare(`
     UPDATE invitations SET status = 'cancelled', responded_at = datetime('now') WHERE id = ?
   `).run(invitation.id);
@@ -342,6 +392,24 @@ router.post('/:token/cancel', async (req: Request, res: Response) => {
   // Broadcast cancellation to session and invitation listeners
   broadcastSession(invitation.session_id, 'invitation_updated', { id: invitation.id, status: 'cancelled' });
   broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'cancelled' });
+
+  createNotification({
+    type: 'invitation_cancelled',
+    invitation_id: invitation.id,
+    session_id: invitation.session_id,
+    student_name: invitation.student_name,
+    session_date: invitation.session_date,
+    timeslot_start_time: invitation.timeslot_start_time,
+  });
+
+  // Check if session lost full attendance
+  if (wasFull) {
+    createNotification({
+      type: 'session_no_longer_full',
+      session_id: invitation.session_id,
+      session_date: invitation.session_date,
+    });
+  }
 
   // Reverse the priority increase that was applied when this student was invited
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
@@ -409,6 +477,26 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
   // Broadcast decline to session and invitation listeners
   broadcastSession(invitation.session_id, 'invitation_updated', { id: invitation.id, status: 'declined' });
   broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'declined' });
+
+  // Get student name for notification
+  const declinedStudent = db.prepare(
+    "SELECT first_name || ' ' || last_name AS student_name FROM students WHERE id = ?"
+  ).get(invitation.student_id) as { student_name: string } | undefined;
+  const declinedSession = db.prepare(
+    'SELECT date FROM training_sessions WHERE id = ?'
+  ).get(invitation.session_id) as { date: string } | undefined;
+  const declinedTimeslot = db.prepare(
+    'SELECT start_time FROM timeslots WHERE id = ?'
+  ).get(invitation.timeslot_id) as { start_time: string } | undefined;
+
+  createNotification({
+    type: 'invitation_declined',
+    invitation_id: invitation.id,
+    session_id: invitation.session_id,
+    student_name: declinedStudent?.student_name || 'Unknown',
+    session_date: declinedSession?.date || '',
+    timeslot_start_time: declinedTimeslot?.start_time,
+  });
 
   // Reverse the priority increase that was applied when this student was invited
   db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);

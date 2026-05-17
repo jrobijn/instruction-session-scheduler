@@ -15,6 +15,8 @@ import DisciplinesPage from './pages/DisciplinesPage';
 import GroupsPage from './pages/GroupsPage';
 import GroupDetailPage from './pages/GroupDetailPage';
 import InvitationPage from './pages/InvitationPage';
+import NotificationsPage from './pages/NotificationsPage';
+import NotificationBell from './components/NotificationBell';
 
 function AdminLayout() {
   const navigate = useNavigate();
@@ -46,6 +48,7 @@ function AdminLayout() {
         <NavLink to="/groups">{t.navGroups}</NavLink>
         <NavLink to="/settings">{t.navSettings}</NavLink>
         <div className="spacer" />
+        <NotificationBell />
         <div className="theme-wrapper">
           <svg className="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
@@ -87,6 +90,7 @@ function AdminLayout() {
         <Route path="/timetables" element={<TimetablesPage />} />
         <Route path="/timetables/:id" element={<TimetableDetailPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="*" element={<Navigate to="/sessions" />} />
       </Routes>
     </div>

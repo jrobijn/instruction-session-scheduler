@@ -368,6 +368,28 @@ const nl: Translations = {
   invitationNotFound: 'Uitnodiging niet gevonden.',
   expiresAt: (time: string, date: string) => `Deze uitnodiging verloopt om ${time} op ${date}.`,
   expiresIn: (minutes: number) => minutes <= 0 ? 'Verloopt binnenkort' : minutes < 60 ? `Verloopt over ${minutes}m` : `Verloopt over ${Math.floor(minutes / 60)}u ${minutes % 60}m`,
+
+  // Notifications
+  notifications: 'Meldingen',
+  notificationsTitle: (count: number) => `Meldingen (${count})`,
+  noNotifications: 'Geen meldingen',
+  noNotificationsHint: 'Meldingen verschijnen hier wanneer leerlingen reageren op uitnodigingen.',
+  markAllRead: 'Alles als gelezen markeren',
+  viewAllNotifications: 'Alle meldingen bekijken',
+  notificationConfirmed: (name: string, date: string) => `${name} heeft deelname bevestigd voor ${date}`,
+  notificationDeclined: (name: string, date: string) => `${name} heeft uitnodiging afgewezen voor ${date}`,
+  notificationExpired: (name: string, date: string) => `Uitnodiging van ${name} is verlopen voor ${date}`,
+  notificationCancelled: (name: string, date: string) => `${name} heeft deelname geannuleerd voor ${date}`,
+  notificationSessionFull: (date: string) => `Alle plekken bevestigd voor sessie op ${date}`,
+  notificationSessionNoLongerFull: (date: string) => `Sessie op ${date} is niet meer volledig bevestigd`,
+  notificationTimeAgo: (minutes: number) => {
+    if (minutes < 1) return 'zojuist';
+    if (minutes < 60) return `${minutes}m geleden`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}u geleden`;
+    const days = Math.floor(hours / 24);
+    return `${days}d geleden`;
+  },
 };
 
 export default nl;

@@ -20,6 +20,7 @@ import { subscribe, broadcast } from './sseClients.js';
 import disciplinesRouter from './routes/disciplines.js';
 import groupsRouter from './routes/groups.js';
 import buddyGroupsRouter from './routes/buddyGroups.js';
+import notificationsRouter from './routes/notifications.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -110,6 +111,26 @@ app.use('/api/settings', requireAdmin, settingsRouter);
 app.use('/api/disciplines', requireAdmin, disciplinesRouter);
 app.use('/api/groups', requireAdmin, groupsRouter);
 app.use('/api/buddy-groups', requireAdmin, buddyGroupsRouter);
+
+// SSE: real-time notification updates (admin, authenticated via cookie)
+app.get('/api/notifications/events', (req: Request, res: Response) => {
+  const token = req.cookies?.auth_token;
+  if (!token) { res.status(401).json({ error: 'Authentication required' }); return; }
+  try {
+    jwt.verify(token, JWT_SECRET);
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token' }); return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('\n');
+  subscribe('notifications', res);
+});
+
+app.use('/api/notifications', requireAdmin, notificationsRouter);
 
 // Public routes
 app.use('/api/invitations', invitationsRouter);
