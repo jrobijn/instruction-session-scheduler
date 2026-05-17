@@ -235,7 +235,8 @@ router.get('/:id/non-members', (req: Request, res: Response) => {
   if (!q) { res.json([]); return; }
 
   const students = db.prepare(`
-    SELECT s.id, s.first_name, s.last_name, s.email
+    SELECT s.id, s.first_name, s.last_name, s.email,
+      (SELECT g.name FROM student_groups sg JOIN groups g ON g.id = sg.group_id WHERE sg.student_id = s.id) AS current_group_name
     FROM students s
     WHERE s.active = 1
       AND s.id NOT IN (SELECT student_id FROM student_groups WHERE group_id = ?)

@@ -24,6 +24,7 @@ interface SearchResult {
   first_name: string;
   last_name: string;
   email: string;
+  current_group_name?: string;
 }
 
 interface DisciplineItem {
@@ -104,6 +105,9 @@ export default function GroupDetailPage() {
   };
 
   const handleAddMember = async (student: SearchResult) => {
+    if (student.current_group_name) {
+      if (!confirm(t.confirmMoveStudent(student.first_name + ' ' + student.last_name, student.current_group_name))) return;
+    }
     try {
       await api.addGroupMember(Number(id), student.id);
       setSearchQuery('');

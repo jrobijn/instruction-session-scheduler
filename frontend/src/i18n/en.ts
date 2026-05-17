@@ -138,6 +138,7 @@ const en = {
   noMembers: 'No members',
   noMembersHint: 'Add students to this group using the search above.',
   confirmRemoveMember: 'Remove this student from the group?',
+  confirmMoveStudent: (name: string, fromGroup: string) => `${name} is currently in "${fromGroup}". Move them to this group?`,
   groupNotFound: 'Group not found',
   groupNotFoundText: 'Group not found.',
   disciplinesSection: 'Disciplines',

@@ -140,6 +140,7 @@ const nl: Translations = {
   noMembers: 'Geen leden',
   noMembersHint: 'Voeg leerlingen toe aan deze groep via het zoekveld hierboven.',
   confirmRemoveMember: 'Deze leerling uit de groep verwijderen?',
+  confirmMoveStudent: (name: string, fromGroup: string) => `${name} zit momenteel in "${fromGroup}". Verplaatsen naar deze groep?`,
   groupNotFound: 'Groep niet gevonden',
   groupNotFoundText: 'Groep niet gevonden.',
   disciplinesSection: 'Disciplines',
