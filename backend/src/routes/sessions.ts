@@ -27,6 +27,9 @@ router.get('/', (_req: Request, res: Response) => {
     SELECT ts.*,
       (SELECT COUNT(*) FROM session_slots WHERE session_id = ts.id AND removed = 0) AS instructor_count,
       (SELECT COUNT(*) FROM invitations WHERE session_id = ts.id) AS invitation_count,
+      (SELECT COUNT(*) FROM invitations WHERE session_id = ts.id AND status = 'confirmed') AS confirmed_count,
+      (SELECT COUNT(*) FROM session_slots WHERE session_id = ts.id AND removed = 0) *
+        (SELECT COUNT(*) FROM timeslots WHERE timetable_id = ts.timetable_id) AS total_slots,
       tt.name AS timetable_name
     FROM training_sessions ts
     LEFT JOIN timetables tt ON tt.id = ts.timetable_id

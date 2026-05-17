@@ -189,6 +189,7 @@ const en = {
   timetable: 'Timetable',
   instructors: 'Instructors',
   invitations: 'Invitations',
+  attendance: 'Attendance',
   confirmDeleteSession: 'Are you sure you want to delete this session?',
   newSessionTitle: 'New Training Session',
   selectDate: 'Select a date...',

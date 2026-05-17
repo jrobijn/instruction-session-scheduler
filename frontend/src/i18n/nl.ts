@@ -191,6 +191,7 @@ const nl: Translations = {
   timetable: 'Rooster',
   instructors: 'Instructeurs',
   invitations: 'Uitnodigingen',
+  attendance: 'Aanwezigheid',
   confirmDeleteSession: 'Weet je zeker dat je deze sessie wilt verwijderen?',
   newSessionTitle: 'Nieuwe trainingssessie',
   selectDate: 'Selecteer een datum...',

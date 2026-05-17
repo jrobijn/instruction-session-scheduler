@@ -13,6 +13,8 @@ interface Session {
   timetable_name: string | null;
   instructor_count: number;
   invitation_count: number;
+  confirmed_count: number;
+  total_slots: number;
 }
 
 interface Timetable {
@@ -136,7 +138,26 @@ export default function SessionsPage() {
                 </td>
                 <td>{s.timetable_name || t.noData}</td>
                 <td>{s.instructor_count}</td>
-                <td>{s.invitation_count}</td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ display: 'inline-flex', width: '48px', flexShrink: 0, justifyContent: 'center' }}>
+                      {s.invitation_count > 0 && (
+                        <span className="badge badge-draft" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap' }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="12" height="12">
+                            <rect x="2" y="4" width="20" height="16" rx="2" />
+                            <path d="M22 4L12 13 2 4" />
+                          </svg>
+                          {s.invitation_count}
+                        </span>
+                      )}
+                    </span>
+                    {s.total_slots > 0 && (s.status === 'invitations_sent' || s.status === 'completed') ? (
+                      <span className={`badge ${s.confirmed_count >= s.total_slots ? 'badge-confirmed' : 'badge-pending'}`}>
+                        {s.confirmed_count}/{s.total_slots}
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
                 <td>
                   <ActionDropdown actions={[
                     { label: t.view, onClick: () => navigate(`/sessions/${s.id}`) },
