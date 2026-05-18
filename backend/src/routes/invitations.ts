@@ -6,7 +6,7 @@ import {
   scheduleInvitationExpiry, cancelInvitationExpiry,
   getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
 } from '../expiryTimers.js';
-import { broadcastSession, broadcast } from '../sseClients.js';
+import { broadcastSession, broadcast, broadcastSessionsList } from '../sseClients.js';
 import { createNotification } from './notifications.js';
 
 const router = Router();
@@ -223,6 +223,11 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
   if (fullInv) {
     broadcastSession(invitation.session_id, 'invitation_added', fullInv);
   }
+  broadcastSessionsList('session_counts_updated', {
+    session_id: invitation.session_id,
+    invitation_count: (db.prepare('SELECT COUNT(*) AS c FROM invitations WHERE session_id = ?').get(invitation.session_id) as any).c,
+    confirmed_count: (db.prepare("SELECT COUNT(*) AS c FROM invitations WHERE session_id = ? AND status = 'confirmed'").get(invitation.session_id) as any).c,
+  });
 
   return { name: replacementStudent.first_name + ' ' + replacementStudent.last_name, email: replacementStudent.email };
 }
@@ -250,6 +255,11 @@ export async function processExpiredInvitation(invitationId: number): Promise<vo
   // Broadcast expiry to session and invitation listeners
   broadcastSession(inv.session_id, 'invitation_updated', { id: inv.id, status: 'expired' });
   broadcast(`invitation:${inv.token}`, 'invitation_updated', { status: 'expired' });
+  broadcastSessionsList('session_counts_updated', {
+    session_id: inv.session_id,
+    invitation_count: (db.prepare('SELECT COUNT(*) AS c FROM invitations WHERE session_id = ?').get(inv.session_id) as any).c,
+    confirmed_count: (db.prepare("SELECT COUNT(*) AS c FROM invitations WHERE session_id = ? AND status = 'confirmed'").get(inv.session_id) as any).c,
+  });
 
   createNotification({
     type: 'invitation_expired',
@@ -362,6 +372,11 @@ router.post('/:token/confirm', async (req: Request, res: Response) => {
     discipline_name: confirmedDisciplineName, discipline_abbreviation: confirmedDisciplineAbbr,
   });
   broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'confirmed' });
+  broadcastSessionsList('session_counts_updated', {
+    session_id: invitation.session_id,
+    invitation_count: (db.prepare('SELECT COUNT(*) AS c FROM invitations WHERE session_id = ?').get(invitation.session_id) as any).c,
+    confirmed_count: (db.prepare("SELECT COUNT(*) AS c FROM invitations WHERE session_id = ? AND status = 'confirmed'").get(invitation.session_id) as any).c,
+  });
 
   createNotification({
     type: 'invitation_confirmed',
@@ -436,6 +451,11 @@ router.post('/:token/cancel', async (req: Request, res: Response) => {
   // Broadcast cancellation to session and invitation listeners
   broadcastSession(invitation.session_id, 'invitation_updated', { id: invitation.id, status: 'cancelled' });
   broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'cancelled' });
+  broadcastSessionsList('session_counts_updated', {
+    session_id: invitation.session_id,
+    invitation_count: (db.prepare('SELECT COUNT(*) AS c FROM invitations WHERE session_id = ?').get(invitation.session_id) as any).c,
+    confirmed_count: (db.prepare("SELECT COUNT(*) AS c FROM invitations WHERE session_id = ? AND status = 'confirmed'").get(invitation.session_id) as any).c,
+  });
 
   createNotification({
     type: 'invitation_cancelled',
@@ -521,6 +541,11 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
   // Broadcast decline to session and invitation listeners
   broadcastSession(invitation.session_id, 'invitation_updated', { id: invitation.id, status: 'declined' });
   broadcast(`invitation:${req.params.token}`, 'invitation_updated', { status: 'declined' });
+  broadcastSessionsList('session_counts_updated', {
+    session_id: invitation.session_id,
+    invitation_count: (db.prepare('SELECT COUNT(*) AS c FROM invitations WHERE session_id = ?').get(invitation.session_id) as any).c,
+    confirmed_count: (db.prepare("SELECT COUNT(*) AS c FROM invitations WHERE session_id = ? AND status = 'confirmed'").get(invitation.session_id) as any).c,
+  });
 
   // Get student name for notification
   const declinedStudent = db.prepare(

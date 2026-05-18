@@ -30,3 +30,7 @@ export function broadcast(channel: Channel, event: string, data: any) {
 export function broadcastSession(sessionId: number, event: string, data: any) {
   broadcast(`session:${sessionId}`, event, data);
 }
+
+export function broadcastSessionsList(event: string, data: any) {
+  broadcast('sessions-list', event, data);
+}
