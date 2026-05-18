@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ActionDropdown from '../components/ActionDropdown';
 import DatePicker from 'react-datepicker';
-import { api } from '../api';
+import { api, API_BASE } from '../api';
 import { useT } from '../i18n';
 
 interface Session {
@@ -56,6 +56,20 @@ export default function SessionsPage() {
   };
 
   useEffect(() => { load(); }, []);
+
+  // SSE: real-time session count updates
+  useEffect(() => {
+    const es = new EventSource(`${API_BASE}/sessions/events`, { withCredentials: true });
+    es.addEventListener('session_counts_updated', (e) => {
+      const data = JSON.parse(e.data);
+      setSessions(prev => prev.map(s =>
+        s.id === data.session_id
+          ? { ...s, invitation_count: data.invitation_count, confirmed_count: data.confirmed_count }
+          : s
+      ));
+    });
+    return () => es.close();
+  }, []);
 
   const isClubDay = (d: Date) => clubDays.includes(d.getDay());
 

@@ -53,6 +53,10 @@ export default function NotificationBell() {
       setUnreadCount(data.unread_count);
       setNotifications(prev => [data.notification, ...prev].slice(0, 10));
     });
+    evtSource.addEventListener('unread_count_updated', (e) => {
+      const data = JSON.parse(e.data);
+      setUnreadCount(data.unread_count);
+    });
     evtSource.onerror = () => { evtSource.close(); };
     return () => evtSource.close();
   }, []);

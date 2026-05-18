@@ -84,6 +84,24 @@ app.get('/api/auth/me', (req: Request, res: Response) => {
   }
 });
 
+// SSE: real-time sessions list updates (admin, authenticated via cookie)
+app.get('/api/sessions/events', (req: Request, res: Response) => {
+  const token = req.cookies?.auth_token;
+  if (!token) { res.status(401).json({ error: 'Authentication required' }); return; }
+  try {
+    jwt.verify(token, JWT_SECRET);
+  } catch {
+    res.status(403).json({ error: 'Invalid or expired token' }); return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write('\n');
+  subscribe('sessions-list', res);
+});
+
 // SSE: real-time session updates (admin, authenticated via cookie)
 app.get('/api/sessions/:id/events', (req: Request, res: Response) => {
   const token = req.cookies?.auth_token;

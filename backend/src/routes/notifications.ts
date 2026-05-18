@@ -29,12 +29,15 @@ router.post('/:id/read', (req: Request, res: Response) => {
   const id = parseInt(req.params.id as string);
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid id' }); return; }
   db.prepare('UPDATE notifications SET read = 1 WHERE id = ?').run(id);
+  const unreadCount = (db.prepare('SELECT COUNT(*) AS count FROM notifications WHERE read = 0').get() as { count: number }).count;
+  broadcast('notifications', 'unread_count_updated', { unread_count: unreadCount });
   res.json({ success: true });
 });
 
 // Mark all notifications as read
 router.post('/read-all', (_req: Request, res: Response) => {
   db.prepare('UPDATE notifications SET read = 1 WHERE read = 0').run();
+  broadcast('notifications', 'unread_count_updated', { unread_count: 0 });
   res.json({ success: true });
 });
 
