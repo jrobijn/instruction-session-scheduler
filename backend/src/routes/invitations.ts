@@ -86,6 +86,8 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
   const originalGroupId = invitation.group_id as number | null;
   let replacementStudent = null;
   let replacementGroupId = originalGroupId;
+  let sameGroupMatch = false;
+  let candidateRank = 0;
 
   // First pass: find a replacement from the same group as the original invitation
   for (const student of nextStudent) {
@@ -98,16 +100,19 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     if (!studentGroupId || !timetableGroupIds.has(studentGroupId)) continue;
     if (!discGroupIds.has(studentGroupId)) continue;
 
+    candidateRank++;
     const inSameGroup = originalGroupId ? studentGroupId === originalGroupId : true;
     if (inSameGroup) {
       replacementStudent = student;
       replacementGroupId = studentGroupId;
+      sameGroupMatch = true;
       break;
     }
   }
 
   // Second pass: if no same-group replacement found, try any timetable group
   if (!replacementStudent && originalGroupId && timetableGroupIds.size > 0) {
+    candidateRank = 0;
     for (const student of nextStudent) {
       const studentPrefs = prefsByStudent.get(student.id);
       if (studentPrefs && studentPrefs.size > 0 && !studentPrefs.has(invitation.timeslot_id)) continue;
@@ -118,17 +123,56 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
       if (!studentGroupId || !timetableGroupIds.has(studentGroupId)) continue;
       if (!discGroupIds.has(studentGroupId)) continue;
 
+      candidateRank++;
       replacementStudent = student;
       replacementGroupId = studentGroupId;
+      sameGroupMatch = false;
       break;
     }
   }
 
   if (!replacementStudent) return null;
 
+  // Get the replaced student's name for the decision log
+  const replacedStudentRow = db.prepare(
+    "SELECT first_name || ' ' || last_name AS name FROM students WHERE id = ?"
+  ).get(invitation.student_id) as { name: string } | undefined;
+  const replacedGroupRow = replacementGroupId
+    ? db.prepare('SELECT name, color FROM groups WHERE id = ?').get(replacementGroupId) as { name: string; color: string } | undefined
+    : undefined;
+
+  // Get the replacement student's preferred timeslots for the decision log
+  const replacementPrefs = prefsByStudent.get(replacementStudent.id);
+  let preferredTimeslots: string[] | null = null;
+  if (replacementPrefs && replacementPrefs.size > 0 && sessionInfo?.timetable_id) {
+    const tslots = db.prepare('SELECT id, start_time FROM timeslots WHERE timetable_id = ? ORDER BY start_time ASC')
+      .all(sessionInfo.timetable_id) as Array<{ id: number; start_time: string }>;
+    preferredTimeslots = tslots.filter(t => replacementPrefs.has(t.id)).map(t => t.start_time);
+  }
+
+  const clubDaysStr = (db.prepare("SELECT value FROM settings WHERE key = 'club_days'").get() as any)?.value || '0|1|2|3|4|5|6';
+  const clubDaysSet = new Set(clubDaysStr.split('|').map(Number));
+  const preferredDaysFiltered = replacementStudent.preferred_days
+    ? replacementStudent.preferred_days.split('|').map(Number).filter((d: number) => clubDaysSet.has(d))
+    : null;
+  const preferredDays = preferredDaysFiltered && preferredDaysFiltered.length < clubDaysSet.size ? preferredDaysFiltered : null;
+  const decisionLog = JSON.stringify({
+    trigger: 'replacement',
+    student_priority: replacementStudent.priority,
+    candidate_rank: candidateRank,
+    candidates_considered: nextStudent.length,
+    group_name: replacedGroupRow?.name || null,
+    group_color: replacedGroupRow?.color || null,
+    replaced_student: replacedStudentRow?.name || null,
+    replacement_reason: invitation.status || 'vacated',
+    same_group_match: sameGroupMatch,
+    preferred_timeslots: preferredTimeslots,
+    preferred_days: preferredDays,
+  });
+
   const token = crypto.randomUUID();
-  db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.slot_id, replacementGroupId, token);
+  db.prepare('INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.slot_id, replacementGroupId, token, decisionLog);
 
   // Increment priority for the replacement student
   db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?').run(replacementStudent.id);

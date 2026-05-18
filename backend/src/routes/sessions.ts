@@ -363,12 +363,12 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   // Get groups assigned to this timetable with percentages (in timetable definition order)
   const timetableGroups = db.prepare(`
-    SELECT tg.group_id, tg.percentage, g.name AS group_name
+    SELECT tg.group_id, tg.percentage, g.name AS group_name, g.color AS group_color
     FROM timetable_groups tg
     JOIN groups g ON g.id = tg.group_id
     WHERE tg.timetable_id = ?
     ORDER BY tg.position ASC
-  `).all(session.timetable_id) as Array<{ group_id: number; percentage: number; group_name: string }>;
+  `).all(session.timetable_id) as Array<{ group_id: number; percentage: number; group_name: string; group_color: string }>;
 
   if (timetableGroups.length === 0) {
     res.status(400).json({ error: 'No groups assigned to this timetable' }); return;
@@ -515,9 +515,17 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     }
   }
 
+  // Build maps from group id to group name/color for decision log
+  const groupNameMap = new Map<number, string>();
+  const groupColorMap = new Map<number, string>();
+  for (const tg of timetableGroups) {
+    groupNameMap.set(tg.group_id, tg.group_name);
+    groupColorMap.set(tg.group_id, tg.group_color);
+  }
+
   // Helper: assign a student to the best available slot
   // nearTimeslotIdx: optional hint to prefer slots near this timeslot index (for buddy scheduling)
-  function assignStudent(student: any, sessionId: string, groupId: number | null, nearTimeslotIdx?: number): any | null {
+  function assignStudent(student: any, sessionId: string, groupId: number | null, context?: { candidateRank: number; candidatesConsidered: number; groupQuota?: string; buddyOf?: string; overflow?: boolean }, nearTimeslotIdx?: number): any | null {
     const storedPrefs = prefsByStudent.get(student.id);
     const preferredIds = storedPrefs && storedPrefs.size > 0 ? storedPrefs : allTimeslotIds;
 
@@ -559,13 +567,36 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     slotAvailable[assignedIdx] = false;
     const slot = slotGrid[assignedIdx];
     const token = crypto.randomUUID();
-    insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.slot_id, token, groupId);
+    const storedPrefsForLog = prefsByStudent.get(student.id);
+    const preferredTimeslots = storedPrefsForLog && storedPrefsForLog.size > 0
+      ? timeslots.filter((t: any) => storedPrefsForLog.has(t.id)).map((t: any) => t.start_time)
+      : null;
+    const clubDaysStr = (db.prepare("SELECT value FROM settings WHERE key = 'club_days'").get() as any)?.value || '0|1|2|3|4|5|6';
+    const clubDaysSet = new Set(clubDaysStr.split('|').map(Number));
+    const preferredDaysFiltered = student.preferred_days
+      ? student.preferred_days.split('|').map(Number).filter((d: number) => clubDaysSet.has(d))
+      : null;
+    const preferredDays = preferredDaysFiltered && preferredDaysFiltered.length < clubDaysSet.size ? preferredDaysFiltered : null;
+    const decisionLog = JSON.stringify({
+      trigger: 'batch_schedule',
+      student_priority: student.priority,
+      candidate_rank: context?.candidateRank ?? 0,
+      candidates_considered: context?.candidatesConsidered ?? 0,
+      group_name: groupId ? (groupNameMap.get(groupId) || null) : null,
+      group_color: groupId ? (groupColorMap.get(groupId) || null) : null,
+      group_quota: context?.groupQuota || null,
+      preferred_timeslots: preferredTimeslots,
+      preferred_days: preferredDays,
+      buddy_placed_near: context?.buddyOf || null,
+      overflow: context?.overflow || false,
+    });
+    insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.slot_id, token, groupId, decisionLog);
     return { ...student, token, timeslot_id: slot.timeslot.id, slot_id: slot.instructor.slot_id, start_time: slot.timeslot.start_time, group_id: groupId, timeslotIdx: slot.timeslotIdx };
   }
 
   const insertInvitation = db.prepare(`
-    INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, decision_log)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertMany = db.transaction(() => {
@@ -577,11 +608,14 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
       const groupStudents = studentsByGroup.get(gsc.group_id) || [];
       let groupSlotsUsed = 0;
       const processedInGroup = new Set<number>();
+      const tg = timetableGroups.find(t => t.group_id === gsc.group_id);
+      const groupQuota = `${gsc.slots} slots (${tg?.percentage ?? 0}%)`;
 
       for (const student of groupStudents) {
         if (processedInGroup.has(student.id)) continue;
         if (groupSlotsUsed >= gsc.slots) break;
-        const result = assignStudent(student, req.params.id as string, gsc.group_id);
+        const candidateRank = groupStudents.indexOf(student) + 1;
+        const result = assignStudent(student, req.params.id as string, gsc.group_id, { candidateRank, candidatesConsidered: groupStudents.length, groupQuota });
         if (!result) continue; // This student's preferred slots are full, try next student
         invited.push(result);
         invitedStudentIds.add(student.id);
@@ -595,7 +629,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
             if (!buddyIds.has(buddyStudent.id)) continue;
             if (processedInGroup.has(buddyStudent.id)) continue;
             if (groupSlotsUsed >= gsc.slots) break;
-            const buddyResult = assignStudent(buddyStudent, req.params.id as string, gsc.group_id, result.timeslotIdx);
+            const buddyCandidateRank = groupStudents.indexOf(buddyStudent) + 1;
+            const buddyResult = assignStudent(buddyStudent, req.params.id as string, gsc.group_id, { candidateRank: buddyCandidateRank, candidatesConsidered: groupStudents.length, groupQuota, buddyOf: result.first_name + ' ' + result.last_name }, result.timeslotIdx);
             if (!buddyResult) continue; // This buddy couldn't be placed, try others
             invited.push(buddyResult);
             invitedStudentIds.add(buddyStudent.id);
@@ -607,11 +642,14 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     }
 
     // Second pass: fill any remaining slots with uninvited eligible students (regardless of group)
+    let overflowRank = 0;
+    const overflowCandidates = allEligibleStudents.filter(s => !invitedStudentIds.has(s.id) && assignedStudents.has(s.id));
     for (const student of allEligibleStudents) {
       if (invitedStudentIds.has(student.id)) continue;
       if (!assignedStudents.has(student.id)) continue;
+      overflowRank++;
       const studentGroupId = groupByStudent.get(student.id) ?? null;
-      const result = assignStudent(student, req.params.id as string, studentGroupId);
+      const result = assignStudent(student, req.params.id as string, studentGroupId, { candidateRank: overflowRank, candidatesConsidered: overflowCandidates.length, overflow: true });
       if (!result) continue; // This student's preferred slots are full, try next student
       invited.push(result);
     }
