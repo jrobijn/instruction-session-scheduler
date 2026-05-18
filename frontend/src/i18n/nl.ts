@@ -372,6 +372,26 @@ const nl: Translations = {
 
   // Notifications
   notifications: 'Meldingen',
+
+  // Algorithm explainability
+  decisionLogTitle: 'Waarom deze leerling?',
+  decisionTriggerBatch: 'Batchplanning',
+  decisionTriggerReplacement: 'Vervanging',
+  decisionPriority: 'Prioriteit',
+  decisionCandidateRank: (rank: number, total: number) => `Gekozen als #${rank} van ${total} in aanmerking komende leerlingen`,
+  decisionGroup: 'Groep',
+  decisionGroupQuota: 'Groepstoewijzing',
+  decisionPreferredTimeslots: 'Geaccepteerde tijdsloten',
+  decisionPreferredDays: 'Geaccepteerde dagen',
+  decisionBuddyPlacedNear: (name: string) => `Naast buddy geplaatst: ${name}`,
+  decisionOverflow: 'Toegewezen in overloopronde (alle groepsquota vol)',
+  decisionReplacedStudent: (name: string) => name ? `Vervangt ${name}` : 'Vervangt',
+  decisionReplacementReason: (reason: string) => {
+    const map: Record<string, string> = { declined: 'afgewezen', expired: 'verlopen', cancelled: 'geannuleerd', admin_cancelled: 'ingetrokken' };
+    return `Vorige leerling ${map[reason] || reason}`;
+  },
+  decisionSameGroupMatch: 'Zelfde groep als origineel',
+  decisionCrossGroupMatch: 'Vervanging uit andere groep',
   notificationsTitle: (count: number) => `Meldingen (${count})`,
   noNotifications: 'Geen meldingen',
   noNotificationsHint: 'Meldingen verschijnen hier wanneer leerlingen reageren op uitnodigingen.',

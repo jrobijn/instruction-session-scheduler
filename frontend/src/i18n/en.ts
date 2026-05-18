@@ -370,6 +370,26 @@ const en = {
 
   // Notifications
   notifications: 'Notifications',
+
+  // Algorithm explainability
+  decisionLogTitle: 'Why this student?',
+  decisionTriggerBatch: 'Batch scheduling',
+  decisionTriggerReplacement: 'Replacement',
+  decisionPriority: 'Priority',
+  decisionCandidateRank: (rank: number, total: number) => `Picked #${rank} out of ${total} eligible students`,
+  decisionGroup: 'Group',
+  decisionGroupQuota: 'Group allocation',
+  decisionPreferredTimeslots: 'Accepted timeslots',
+  decisionPreferredDays: 'Accepted days',
+  decisionBuddyPlacedNear: (name: string) => `Placed near buddy: ${name}`,
+  decisionOverflow: 'Assigned in overflow pass (all group quotas filled)',
+  decisionReplacedStudent: (name: string) => name ? `Replacing ${name}` : 'Replacing',
+  decisionReplacementReason: (reason: string) => {
+    const map: Record<string, string> = { declined: 'declined', expired: 'expired', cancelled: 'cancelled', admin_cancelled: 'withdrawn' };
+    return `Previous student ${map[reason] || reason}`;
+  },
+  decisionSameGroupMatch: 'Same group as original',
+  decisionCrossGroupMatch: 'Cross-group replacement',
   notificationsTitle: (count: number) => `Notifications (${count})`,
   noNotifications: 'No notifications',
   noNotificationsHint: 'Notifications will appear here when students respond to invitations.',

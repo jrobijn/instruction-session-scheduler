@@ -508,6 +508,12 @@ export function initializeDatabase(): void {
     db.pragma('foreign_keys = ON');
   }
 
+  // Add decision_log column to invitations if missing
+  const invColsDecLog = db.prepare("PRAGMA table_info(invitations)").all() as Array<{ name: string }>;
+  if (!invColsDecLog.some(c => c.name === 'decision_log')) {
+    db.exec('ALTER TABLE invitations ADD COLUMN decision_log TEXT');
+  }
+
   // Add session_id column to notifications if missing
   const notifCols = db.prepare("PRAGMA table_info(notifications)").all() as Array<{ name: string }>;
   if (notifCols.length > 0 && !notifCols.some(c => c.name === 'session_id')) {
