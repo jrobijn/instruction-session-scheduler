@@ -508,6 +508,18 @@ export function initializeDatabase(): void {
     db.pragma('foreign_keys = ON');
   }
 
+  // Add deleted_at column to students if missing
+  const studentCols5 = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
+  if (!studentCols5.some(c => c.name === 'deleted_at')) {
+    db.exec('ALTER TABLE students ADD COLUMN deleted_at TEXT');
+  }
+
+  // Add deleted_at column to instructors if missing
+  const instructorCols = db.prepare("PRAGMA table_info(instructors)").all() as Array<{ name: string }>;
+  if (!instructorCols.some(c => c.name === 'deleted_at')) {
+    db.exec('ALTER TABLE instructors ADD COLUMN deleted_at TEXT');
+  }
+
   // Add decision_log column to invitations if missing
   const invColsDecLog = db.prepare("PRAGMA table_info(invitations)").all() as Array<{ name: string }>;
   if (!invColsDecLog.some(c => c.name === 'decision_log')) {
