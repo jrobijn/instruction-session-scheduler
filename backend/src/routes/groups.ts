@@ -192,7 +192,7 @@ router.get('/:id/members', (req: Request, res: Response) => {
     SELECT s.id, s.first_name, s.last_name, s.email, s.active
     FROM students s
     JOIN student_groups sg ON sg.student_id = s.id
-    WHERE sg.group_id = ?
+    WHERE sg.group_id = ? AND s.deleted_at IS NULL
     ORDER BY s.last_name ASC, s.first_name ASC
   `).all(req.params.id);
   res.json(members);
@@ -206,7 +206,7 @@ router.post('/:id/members', (req: Request, res: Response) => {
   const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id) as any;
   if (!group) { res.status(404).json({ error: 'Group not found' }); return; }
 
-  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(student_id) as any;
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(student_id) as any;
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   const setGroup = db.transaction(() => {
@@ -239,6 +239,7 @@ router.get('/:id/non-members', (req: Request, res: Response) => {
       (SELECT g.name FROM student_groups sg JOIN groups g ON g.id = sg.group_id WHERE sg.student_id = s.id) AS current_group_name
     FROM students s
     WHERE s.active = 1
+      AND s.deleted_at IS NULL
       AND s.id NOT IN (SELECT student_id FROM student_groups WHERE group_id = ?)
       AND (s.first_name || ' ' || s.last_name LIKE ? OR s.email LIKE ?)
     ORDER BY s.last_name ASC, s.first_name ASC

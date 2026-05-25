@@ -25,10 +25,10 @@ function broadcastSessionCounts(sessionId: number) {
 // Normalize priorities so the minimum active student has priority 1
 function normalizePriorities() {
   const minPriority = (db.prepare(
-    "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
+    "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND deleted_at IS NULL AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
   ).get() as any)?.m;
   if (minPriority != null && minPriority !== 1) {
-    db.prepare('UPDATE students SET priority = priority - ?').run(minPriority - 1);
+    db.prepare('UPDATE students SET priority = priority - ? WHERE deleted_at IS NULL').run(minPriority - 1);
   }
 }
 
@@ -100,7 +100,7 @@ router.get('/:id', (req: Request, res: Response) => {
   const buddyNameMap = new Map<number, string>();
   for (const bgId of buddyGroupIds) {
     const members = db.prepare(
-      `SELECT s.first_name FROM students s JOIN buddy_group_members bgm ON bgm.student_id = s.id WHERE bgm.buddy_group_id = ?`
+      `SELECT s.first_name FROM students s JOIN buddy_group_members bgm ON bgm.student_id = s.id WHERE bgm.buddy_group_id = ? AND s.deleted_at IS NULL`
     ).all(bgId) as { first_name: string }[];
     buddyNameMap.set(bgId, members.map(m => m.first_name).join(' & '));
   }
@@ -307,7 +307,7 @@ router.post('/:id/instructors/:instructorId/replace', (req: Request, res: Respon
   if (!oldAssignment) { res.status(404).json({ error: 'Original instructor not assigned to this session' }); return; }
 
   // Verify new instructor exists
-  const newInstructor = db.prepare('SELECT * FROM instructors WHERE id = ?').get(newInstructorId) as any;
+  const newInstructor = db.prepare('SELECT * FROM instructors WHERE id = ? AND deleted_at IS NULL').get(newInstructorId) as any;
   if (!newInstructor) { res.status(400).json({ error: 'New instructor not found' }); return; }
 
   // Verify new instructor is not already actively assigned
@@ -407,6 +407,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   const allEligibleStudents = db.prepare(`
     SELECT s.* FROM students s
     WHERE s.active = 1
+      AND s.deleted_at IS NULL
       AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
       AND (s.cooldown_until IS NULL OR s.cooldown_until <= ?)
       AND s.id NOT IN (
@@ -828,6 +829,7 @@ router.get('/:id/available-students', (req: Request, res: Response) => {
     SELECT s.id, s.first_name, s.last_name, s.email
     FROM students s
     WHERE s.active = 1
+      AND s.deleted_at IS NULL
       AND (s.first_name || ' ' || s.last_name LIKE ? OR s.email LIKE ?)
       ${placeholders}
     ORDER BY s.last_name ASC, s.first_name ASC

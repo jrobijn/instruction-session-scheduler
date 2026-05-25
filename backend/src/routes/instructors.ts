@@ -13,13 +13,13 @@ function escapeCsvField(value: string | number | null | undefined): string {
 
 // List all instructors
 router.get('/', (_req: Request, res: Response) => {
-  const instructors = db.prepare('SELECT * FROM instructors ORDER BY last_name ASC, first_name ASC').all();
+  const instructors = db.prepare('SELECT * FROM instructors WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC').all();
   res.json(instructors);
 });
 
 // Export instructors as CSV
 router.get('/export', (_req: Request, res: Response) => {
-  const instructors = db.prepare('SELECT first_name, last_name, email, active FROM instructors ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; active: number }[];
+  const instructors = db.prepare('SELECT first_name, last_name, email, active FROM instructors WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; active: number }[];
   const header = 'first_name,last_name,email,active';
   const rows = instructors.map(i => [i.first_name, i.last_name, i.email, i.active].map(escapeCsvField).join(','));
   const csv = [header, ...rows].join('\n');
@@ -83,7 +83,7 @@ router.post('/import', (req: Request, res: Response) => {
       }
 
       try {
-        const existing = db.prepare('SELECT id FROM instructors WHERE email = ?').get(email) as { id: number } | undefined;
+        const existing = db.prepare('SELECT id FROM instructors WHERE email = ? AND deleted_at IS NULL').get(email) as { id: number } | undefined;
         if (existing) {
           db.prepare('UPDATE instructors SET first_name = ?, last_name = ? WHERE id = ?').run(first_name, last_name, existing.id);
         } else {
@@ -103,7 +103,7 @@ router.post('/import', (req: Request, res: Response) => {
 
 // Get single instructor
 router.get('/:id', (req: Request, res: Response) => {
-  const instructor = db.prepare('SELECT * FROM instructors WHERE id = ?').get(req.params.id);
+  const instructor = db.prepare('SELECT * FROM instructors WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!instructor) { res.status(404).json({ error: 'Instructor not found' }); return; }
   res.json(instructor);
 });
@@ -129,7 +129,7 @@ router.post('/', (req: Request, res: Response) => {
 // Update instructor
 router.put('/:id', (req: Request, res: Response) => {
   const { first_name, last_name, email, active } = req.body;
-  const instructor = db.prepare('SELECT * FROM instructors WHERE id = ?').get(req.params.id);
+  const instructor = db.prepare('SELECT * FROM instructors WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!instructor) { res.status(404).json({ error: 'Instructor not found' }); return; }
 
   try {
@@ -153,10 +153,13 @@ router.put('/:id', (req: Request, res: Response) => {
   }
 });
 
-// Delete instructor
+// Delete instructor (soft-delete)
 router.delete('/:id', (req: Request, res: Response) => {
-  const result = db.prepare('DELETE FROM instructors WHERE id = ?').run(req.params.id);
-  if (result.changes === 0) { res.status(404).json({ error: 'Instructor not found' }); return; }
+  const instructor = db.prepare('SELECT id FROM instructors WHERE id = ? AND deleted_at IS NULL').get(req.params.id) as any;
+  if (!instructor) { res.status(404).json({ error: 'Instructor not found' }); return; }
+
+  // Soft-delete: mark as deleted and deactivate
+  db.prepare("UPDATE instructors SET deleted_at = datetime('now'), active = 0 WHERE id = ?").run(req.params.id);
   res.json({ success: true });
 });
 

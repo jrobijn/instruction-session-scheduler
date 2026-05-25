@@ -13,7 +13,7 @@ function escapeCsvField(value: string | number | null | undefined): string {
 
 // List all students
 router.get('/', (_req: Request, res: Response) => {
-  const students = db.prepare('SELECT * FROM students ORDER BY last_name ASC, first_name ASC').all() as any[];
+  const students = db.prepare('SELECT * FROM students WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC').all() as any[];
   // Attach group for each student (single group per student)
   const groupMemberships = db.prepare(`
     SELECT sg.student_id, g.id AS group_id, g.name AS group_name, g.color AS group_color
@@ -49,7 +49,7 @@ router.get('/', (_req: Request, res: Response) => {
 
 // Export students as CSV
 router.get('/export', (_req: Request, res: Response) => {
-  const students = db.prepare('SELECT first_name, last_name, email, membership_id, attended_sessions, no_show_count, priority, preferred_days, active FROM students ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; membership_id: string; attended_sessions: number; no_show_count: number; priority: number; preferred_days: string; active: number }[];
+  const students = db.prepare('SELECT first_name, last_name, email, membership_id, attended_sessions, no_show_count, priority, preferred_days, active FROM students WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; membership_id: string; attended_sessions: number; no_show_count: number; priority: number; preferred_days: string; active: number }[];
   const header = 'first_name,last_name,email,membership_id,attended_sessions,no_show_count,priority,preferred_days,active';
   const rows = students.map(s => [s.first_name, s.last_name, s.email, s.membership_id, s.attended_sessions, s.no_show_count, s.priority, s.preferred_days, s.active].map(escapeCsvField).join(','));
   const csv = [header, ...rows].join('\n');
@@ -151,7 +151,7 @@ router.post('/import', (req: Request, res: Response) => {
       }
 
       try {
-        const existing = db.prepare('SELECT id FROM students WHERE email = ?').get(email) as { id: number } | undefined;
+        const existing = db.prepare('SELECT id FROM students WHERE email = ? AND deleted_at IS NULL').get(email) as { id: number } | undefined;
         if (existing) {
           db.prepare(`UPDATE students SET first_name = ?, last_name = ?, membership_id = ?${
             attended_sessions != null && !isNaN(attended_sessions) ? ', attended_sessions = ?' : ''
@@ -213,7 +213,7 @@ router.post('/import', (req: Request, res: Response) => {
 
 // Get single student
 router.get('/:id', (req: Request, res: Response) => {
-  const student = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+  const student = db.prepare('SELECT * FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
   res.json(student);
 });
@@ -245,7 +245,7 @@ router.post('/', (req: Request, res: Response) => {
 // Update student
 router.put('/:id', (req: Request, res: Response) => {
   const { first_name, last_name, email, membership_id, attended_sessions, active, preferred_days } = req.body;
-  const student = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+  const student = db.prepare('SELECT * FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   try {
@@ -272,10 +272,26 @@ router.put('/:id', (req: Request, res: Response) => {
   }
 });
 
-// Delete student
+// Delete student (soft-delete)
 router.delete('/:id', (req: Request, res: Response) => {
-  const result = db.prepare('DELETE FROM students WHERE id = ?').run(req.params.id);
-  if (result.changes === 0) { res.status(404).json({ error: 'Student not found' }); return; }
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id) as any;
+  if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
+
+  // Cancel any active (invited/scheduled) invitations for this student
+  const activeInvitations = db.prepare(
+    "SELECT id FROM invitations WHERE student_id = ? AND status IN ('invited', 'scheduled')"
+  ).all(req.params.id) as Array<{ id: number }>;
+  for (const inv of activeInvitations) {
+    db.prepare("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?").run(inv.id);
+  }
+
+  // Reverse priority increments for cancelled invitations
+  if (activeInvitations.length > 0) {
+    db.prepare('UPDATE students SET priority = priority - ? WHERE id = ?').run(activeInvitations.length, req.params.id);
+  }
+
+  // Soft-delete: mark as deleted and deactivate
+  db.prepare("UPDATE students SET deleted_at = datetime('now'), active = 0 WHERE id = ?").run(req.params.id);
   res.json({ success: true });
 });
 
@@ -283,7 +299,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 
 // Get preferred timeslots for a student (grouped by timetable)
 router.get('/:id/preferred-timeslots', (req: Request, res: Response) => {
-  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   const rows = db.prepare(
@@ -305,7 +321,7 @@ router.put('/:id/preferred-timeslots/:timetableId', (req: Request, res: Response
   const { timeslot_ids } = req.body;
   if (!Array.isArray(timeslot_ids)) { res.status(400).json({ error: 'timeslot_ids array is required' }); return; }
 
-  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   const timetable = db.prepare('SELECT id FROM timetables WHERE id = ?').get(req.params.timetableId) as any;
@@ -341,7 +357,7 @@ router.put('/:id/preferred-timeslots/:timetableId', (req: Request, res: Response
 
 // Get group for a student
 router.get('/:id/groups', (req: Request, res: Response) => {
-  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   const group = db.prepare(`
@@ -356,7 +372,7 @@ router.get('/:id/groups', (req: Request, res: Response) => {
 router.put('/:id/groups', (req: Request, res: Response) => {
   const { group_id } = req.body;
 
-  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   const setGroup = db.transaction(() => {
@@ -376,7 +392,7 @@ router.put('/:id/cooldown', (req: Request, res: Response) => {
   const { days } = req.body;
   if (typeof days !== 'number' || days <= 0) { res.status(400).json({ error: 'A positive number of days is required' }); return; }
 
-  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   const cooldownUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
@@ -388,7 +404,7 @@ router.put('/:id/cooldown', (req: Request, res: Response) => {
 
 // Clear cooldown for a student
 router.delete('/:id/cooldown', (req: Request, res: Response) => {
-  const student = db.prepare('SELECT id FROM students WHERE id = ?').get(req.params.id);
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   db.prepare('UPDATE students SET cooldown_until = NULL WHERE id = ?').run(req.params.id);

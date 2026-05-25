@@ -28,10 +28,10 @@ function checkSessionFullAttendance(sessionId: number): { isFull: boolean; total
 // Normalize priorities so the minimum active student has priority 1
 function normalizePriorities() {
   const minPriority = (db.prepare(
-    "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
+    "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND deleted_at IS NULL AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
   ).get() as any)?.m;
   if (minPriority != null && minPriority !== 1) {
-    db.prepare('UPDATE students SET priority = priority - ?').run(minPriority - 1);
+    db.prepare('UPDATE students SET priority = priority - ? WHERE deleted_at IS NULL').run(minPriority - 1);
   }
 }
 
@@ -60,6 +60,7 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
   const nextStudent = db.prepare(`
     SELECT * FROM students
     WHERE active = 1
+      AND deleted_at IS NULL
       AND ('|' || preferred_days || '|') LIKE '%|' || ? || '|%'
       AND (cooldown_until IS NULL OR cooldown_until <= ?)
       AND id NOT IN (${alreadyInvited.map(() => '?').join(',')})
