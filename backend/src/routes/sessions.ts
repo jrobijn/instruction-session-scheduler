@@ -8,6 +8,7 @@ import {
 } from '../expiryTimers.js';
 import { broadcastSession, broadcast, broadcastSessionsList } from '../sseClients.js';
 import { findAndInviteReplacement } from './invitations.js';
+import { normalizePriorities, weightedPickGroup } from '../priority.js';
 
 const router = Router();
 
@@ -19,16 +20,6 @@ function broadcastSessionCounts(sessionId: number) {
   `).get(sessionId, sessionId) as { invitation_count: number; confirmed_count: number } | undefined;
   if (row) {
     broadcastSessionsList('session_counts_updated', { session_id: sessionId, ...row });
-  }
-}
-
-// Normalize priorities so the minimum active student has priority 1
-function normalizePriorities() {
-  const minPriority = (db.prepare(
-    "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND deleted_at IS NULL AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
-  ).get() as any)?.m;
-  if (minPriority != null && minPriority !== 1) {
-    db.prepare('UPDATE students SET priority = priority - ? WHERE deleted_at IS NULL').run(minPriority - 1);
   }
 }
 
@@ -254,7 +245,7 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
       db.prepare("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?").run(inv.id);
       cancelInvitationExpiry(inv.id);
       broadcast(`invitation:${inv.token}`, 'invitation_updated', { status: 'admin_cancelled' });
-      db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
+      db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?').run(inv.student_id);
       if (inv.email_sent) {
         try {
           await sendAdminCancellationEmail({
@@ -273,7 +264,7 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
     } else if (inv.status === 'scheduled') {
       // Pre-send: just delete and reverse priority
       db.prepare('DELETE FROM invitations WHERE id = ?').run(inv.id);
-      db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
+      db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?').run(inv.student_id);
     }
     // declined/expired/cancelled/admin_cancelled: leave as-is (no priority reversal needed)
   }
@@ -363,7 +354,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   const removedStudents = db.prepare(
     'SELECT DISTINCT student_id FROM invitations WHERE session_id = ? AND group_id IS NOT NULL'
   ).all(req.params.id) as Array<{ student_id: number }>;
-  const decrementPriority = db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?');
+  const decrementPriority = db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?');
   for (const { student_id } of removedStudents) {
     decrementPriority.run(student_id);
   }
@@ -405,7 +396,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   // Filter by preferred_days matching the session's day of week
   const sessionDow = String(new Date(session.date + 'T00:00:00').getDay());
   const allEligibleStudents = db.prepare(`
-    SELECT s.* FROM students s
+    SELECT s.*, sg.priority AS priority FROM students s
+    JOIN student_groups sg ON sg.student_id = s.id
     WHERE s.active = 1
       AND s.deleted_at IS NULL
       AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
@@ -415,7 +407,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
         JOIN training_sessions ts ON ts.id = inv.session_id
         WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')
       )
-    ORDER BY s.priority ASC, s.last_name ASC, s.first_name ASC
+    ORDER BY sg.priority ASC, s.last_name ASC, s.first_name ASC
   `).all(sessionDow, session.date, session.date) as any[];
 
   // Load group memberships for all students
@@ -653,15 +645,28 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
       }
     }
 
-    // Second pass: fill any remaining slots with uninvited eligible students (regardless of group)
-    let overflowRank = 0;
+    // Second pass: fill any remaining slots with uninvited eligible students from any group.
+    // Priorities are only comparable within a group, so for each remaining slot we pick a group
+    // at random (weighted by the group's timetable percentage) and take its highest-priority
+    // uninvited candidate.
     const overflowCandidates = allEligibleStudents.filter(s => !invitedStudentIds.has(s.id) && assignedStudents.has(s.id));
-    for (const student of allEligibleStudents) {
-      if (invitedStudentIds.has(student.id)) continue;
-      if (!assignedStudents.has(student.id)) continue;
+    const overflowQueues = new Map<number, any[]>();
+    for (const student of overflowCandidates) {
+      const gid = groupByStudent.get(student.id);
+      if (gid === undefined) continue;
+      if (!overflowQueues.has(gid)) overflowQueues.set(gid, []);
+      overflowQueues.get(gid)!.push(student); // already priority-ordered
+    }
+    const percentageByGroup = new Map<number, number>(timetableGroups.map(tg => [tg.group_id, tg.percentage]));
+    let overflowRank = 0;
+    while (overflowQueues.size > 0) {
+      const groupIds = [...overflowQueues.keys()];
+      const pickedGroupId = weightedPickGroup(groupIds, percentageByGroup);
+      const queue = overflowQueues.get(pickedGroupId)!;
+      const student = queue.shift()!;
+      if (queue.length === 0) overflowQueues.delete(pickedGroupId);
       overflowRank++;
-      const studentGroupId = groupByStudent.get(student.id) ?? null;
-      const result = assignStudent(student, req.params.id as string, studentGroupId, { candidateRank: overflowRank, candidatesConsidered: overflowCandidates.length, overflow: true });
+      const result = assignStudent(student, req.params.id as string, pickedGroupId, { candidateRank: overflowRank, candidatesConsidered: overflowCandidates.length, overflow: true });
       if (!result) continue; // This student's preferred slots are full, try next student
       invited.push(result);
     }
@@ -671,8 +676,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   const invited = insertMany();
 
-  // Increment priority for each newly invited student
-  const incrementPriority = db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?');
+  // Increment priority (within group) for each newly invited student
+  const incrementPriority = db.prepare('UPDATE student_groups SET priority = priority + 1 WHERE student_id = ?');
   for (const inv of invited) {
     incrementPriority.run(inv.id);
   }
@@ -875,7 +880,7 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
   ).run(req.params.id, student_id, timeslot_id, slot.id, token);
 
   // Increment priority for the manually added student
-  db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?').run(student_id);
+  db.prepare('UPDATE student_groups SET priority = priority + 1 WHERE student_id = ?').run(student_id);
   normalizePriorities();
 
   // If session was draft, move to scheduled
@@ -936,7 +941,7 @@ router.delete('/:id/invitations/:invitationId', (req: Request, res: Response) =>
   db.prepare('DELETE FROM invitations WHERE id = ? AND session_id = ?').run(req.params.invitationId, req.params.id);
 
   // Reverse priority for the removed student
-  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
+  db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?').run(invitation.student_id);
   normalizePriorities();
 
   // If no invitations left, revert to draft
@@ -985,7 +990,7 @@ router.post('/:id/invitations/:invitationId/admin-cancel', async (req: Request, 
   broadcastSessionCounts(Number(req.params.id));
 
   // Reverse the priority increase that was applied when this student was invited
-  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
+  db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?').run(invitation.student_id);
   normalizePriorities();
 
   // Send admin cancellation email if the invitation was already sent to the student
@@ -1084,7 +1089,7 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
   `).run(req.params.id);
 
   // Reverse priority for all affected students
-  const decrementPriority = db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?');
+  const decrementPriority = db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?');
   for (const { student_id } of allCancelledStudents) {
     decrementPriority.run(student_id);
   }

@@ -8,6 +8,7 @@ import {
 } from '../expiryTimers.js';
 import { broadcastSession, broadcast, broadcastSessionsList } from '../sseClients.js';
 import { createNotification } from './notifications.js';
+import { normalizePriorities, weightedPickGroup } from '../priority.js';
 
 const router = Router();
 
@@ -25,16 +26,6 @@ function checkSessionFullAttendance(sessionId: number): { isFull: boolean; total
   return { isFull: confirmedCount >= totalSlots, totalSlots, confirmedCount };
 }
 
-// Normalize priorities so the minimum active student has priority 1
-function normalizePriorities() {
-  const minPriority = (db.prepare(
-    "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND deleted_at IS NULL AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
-  ).get() as any)?.m;
-  if (minPriority != null && minPriority !== 1) {
-    db.prepare('UPDATE students SET priority = priority - ? WHERE deleted_at IS NULL').run(minPriority - 1);
-  }
-}
-
 // Shared helper: find and invite a replacement student for a vacated slot
 export async function findAndInviteReplacement(invitation: any): Promise<{ name: string; email: string } | null> {
   const alreadyInvited = (db.prepare(`
@@ -45,12 +36,12 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     'SELECT timetable_id FROM training_sessions WHERE id = ?'
   ).get(invitation.session_id) as { timetable_id: number | null };
 
-  const timetableGroupIds = new Set(
-    sessionInfo?.timetable_id
-      ? (db.prepare('SELECT group_id FROM timetable_groups WHERE timetable_id = ?')
-          .all(sessionInfo.timetable_id) as Array<{ group_id: number }>).map(r => r.group_id)
-      : []
-  );
+  const timetableGroupRows = sessionInfo?.timetable_id
+    ? (db.prepare('SELECT group_id, percentage FROM timetable_groups WHERE timetable_id = ?')
+        .all(sessionInfo.timetable_id) as Array<{ group_id: number; percentage: number }>)
+    : [];
+  const timetableGroupIds = new Set(timetableGroupRows.map(r => r.group_id));
+  const percentageByGroup = new Map<number, number>(timetableGroupRows.map(r => [r.group_id, r.percentage]));
 
   const discGroupIds = new Set(
     (db.prepare('SELECT DISTINCT dg.group_id FROM discipline_groups dg JOIN disciplines d ON d.id = dg.discipline_id WHERE d.active = 1')
@@ -58,18 +49,19 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
   );
 
   const nextStudent = db.prepare(`
-    SELECT * FROM students
-    WHERE active = 1
-      AND deleted_at IS NULL
-      AND ('|' || preferred_days || '|') LIKE '%|' || ? || '|%'
-      AND (cooldown_until IS NULL OR cooldown_until <= ?)
-      AND id NOT IN (${alreadyInvited.map(() => '?').join(',')})
-      AND id NOT IN (
+    SELECT s.*, sg.priority AS priority FROM students s
+    JOIN student_groups sg ON sg.student_id = s.id
+    WHERE s.active = 1
+      AND s.deleted_at IS NULL
+      AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
+      AND (s.cooldown_until IS NULL OR s.cooldown_until <= ?)
+      AND s.id NOT IN (${alreadyInvited.map(() => '?').join(',')})
+      AND s.id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
         WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')
       )
-    ORDER BY priority ASC, last_name ASC, first_name ASC
+    ORDER BY sg.priority ASC, s.last_name ASC, s.first_name ASC
   `).all(String(new Date(invitation.session_date + 'T00:00:00').getDay()), invitation.session_date, ...alreadyInvited, invitation.session_date) as any[];
 
   // Load preferred timeslots to only invite students who prefer this timeslot
@@ -89,6 +81,7 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
   let replacementGroupId = originalGroupId;
   let sameGroupMatch = false;
   let candidateRank = 0;
+  let candidatesConsidered = nextStudent.length;
 
   // First pass: find a replacement from the same group as the original invitation
   for (const student of nextStudent) {
@@ -111,9 +104,11 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     }
   }
 
-  // Second pass: if no same-group replacement found, try any timetable group
+  // Second pass: if no same-group replacement found, try any timetable group. Priorities are
+  // only comparable within a group, so bucket eligible candidates by group, pick a group at
+  // random weighted by its timetable percentage, then take that group's highest-priority candidate.
   if (!replacementStudent && originalGroupId && timetableGroupIds.size > 0) {
-    candidateRank = 0;
+    const candidatesByGroup = new Map<number, any[]>();
     for (const student of nextStudent) {
       const studentPrefs = prefsByStudent.get(student.id);
       if (studentPrefs && studentPrefs.size > 0 && !studentPrefs.has(invitation.timeslot_id)) continue;
@@ -124,11 +119,18 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
       if (!studentGroupId || !timetableGroupIds.has(studentGroupId)) continue;
       if (!discGroupIds.has(studentGroupId)) continue;
 
-      candidateRank++;
-      replacementStudent = student;
-      replacementGroupId = studentGroupId;
+      if (!candidatesByGroup.has(studentGroupId)) candidatesByGroup.set(studentGroupId, []);
+      candidatesByGroup.get(studentGroupId)!.push(student); // already priority-ordered
+    }
+
+    if (candidatesByGroup.size > 0) {
+      const pickedGroupId = weightedPickGroup([...candidatesByGroup.keys()], percentageByGroup);
+      const queue = candidatesByGroup.get(pickedGroupId)!;
+      replacementStudent = queue[0];
+      replacementGroupId = pickedGroupId;
       sameGroupMatch = false;
-      break;
+      candidateRank = 1;
+      candidatesConsidered = queue.length;
     }
   }
 
@@ -161,7 +163,7 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     trigger: 'replacement',
     student_priority: replacementStudent.priority,
     candidate_rank: candidateRank,
-    candidates_considered: nextStudent.length,
+    candidates_considered: candidatesConsidered,
     group_name: replacedGroupRow?.name || null,
     group_color: replacedGroupRow?.color || null,
     replaced_student: replacedStudentRow?.name || null,
@@ -176,7 +178,7 @@ export async function findAndInviteReplacement(invitation: any): Promise<{ name:
     .run(invitation.session_id, replacementStudent.id, invitation.timeslot_id, invitation.slot_id, replacementGroupId, token, decisionLog);
 
   // Increment priority for the replacement student
-  db.prepare('UPDATE students SET priority = priority + 1 WHERE id = ?').run(replacementStudent.id);
+  db.prepare('UPDATE student_groups SET priority = priority + 1 WHERE student_id = ?').run(replacementStudent.id);
   normalizePriorities();
 
   try {
@@ -250,7 +252,7 @@ export async function processExpiredInvitation(invitationId: number): Promise<vo
   if (inv.session_status === 'completed' || inv.session_status === 'cancelled') return;
 
   db.prepare("UPDATE invitations SET status = 'expired', responded_at = datetime('now') WHERE id = ?").run(inv.id);
-  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(inv.student_id);
+  db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?').run(inv.student_id);
   normalizePriorities();
 
   // Broadcast expiry to session and invitation listeners
@@ -477,7 +479,7 @@ router.post('/:token/cancel', async (req: Request, res: Response) => {
   }
 
   // Reverse the priority increase that was applied when this student was invited
-  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
+  db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?').run(invitation.student_id);
   normalizePriorities();
 
   // Send cancellation confirmation email
@@ -569,7 +571,7 @@ router.post('/:token/decline', async (req: Request, res: Response) => {
   });
 
   // Reverse the priority increase that was applied when this student was invited
-  db.prepare('UPDATE students SET priority = priority - 1 WHERE id = ?').run(invitation.student_id);
+  db.prepare('UPDATE student_groups SET priority = priority - 1 WHERE student_id = ?').run(invitation.student_id);
   normalizePriorities();
 
   const replacement = await findAndInviteReplacement(invitation);

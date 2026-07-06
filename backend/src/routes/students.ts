@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../database.js';
+import { normalizePriorities } from '../priority.js';
 
 const router = Router();
 
@@ -49,34 +50,29 @@ router.get('/', (_req: Request, res: Response) => {
 
 // Export students as CSV
 router.get('/export', (_req: Request, res: Response) => {
-  const students = db.prepare('SELECT first_name, last_name, email, membership_id, attended_sessions, no_show_count, priority, preferred_days, active FROM students WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; membership_id: string; attended_sessions: number; no_show_count: number; priority: number; preferred_days: string; active: number }[];
-  const header = 'first_name,last_name,email,membership_id,attended_sessions,no_show_count,priority,preferred_days,active';
-  const rows = students.map(s => [s.first_name, s.last_name, s.email, s.membership_id, s.attended_sessions, s.no_show_count, s.priority, s.preferred_days, s.active].map(escapeCsvField).join(','));
+  const students = db.prepare('SELECT first_name, last_name, email, membership_id, attended_sessions, no_show_count, preferred_days, active FROM students WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC').all() as { first_name: string; last_name: string; email: string; membership_id: string; attended_sessions: number; no_show_count: number; preferred_days: string; active: number }[];
+  const header = 'first_name,last_name,email,membership_id,attended_sessions,no_show_count,preferred_days,active';
+  const rows = students.map(s => [s.first_name, s.last_name, s.email, s.membership_id, s.attended_sessions, s.no_show_count, s.preferred_days, s.active].map(escapeCsvField).join(','));
   const csv = [header, ...rows].join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="students.csv"');
   res.send(csv);
 });
 
-// Bulk update student priorities
+// Bulk update student priorities (per-group)
 router.put('/priorities', (req: Request, res: Response) => {
   const { updates } = req.body;
   if (!Array.isArray(updates)) { res.status(400).json({ error: 'updates array is required' }); return; }
 
-  const update = db.prepare('UPDATE students SET priority = ? WHERE id = ?');
+  const update = db.prepare('UPDATE student_groups SET priority = ? WHERE student_id = ?');
   const run = db.transaction(() => {
     for (const { id, priority } of updates) {
       if (typeof id === 'number' && typeof priority === 'number' && priority >= 0) {
         update.run(priority, id);
       }
     }
-    // Normalize so the minimum active student has priority 1
-    const minPriority = (db.prepare(
-      "SELECT MIN(priority) AS m FROM students WHERE active = 1 AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))"
-    ).get() as any)?.m;
-    if (minPriority != null && minPriority !== 1) {
-      db.prepare('UPDATE students SET priority = priority - ?').run(minPriority - 1);
-    }
+    // Normalize each group so its minimum active student has priority 1
+    normalizePriorities();
   });
   run();
   res.json({ success: true, count: updates.length });
@@ -97,7 +93,6 @@ router.post('/import', (req: Request, res: Response) => {
   const membershipIdIdx = header.indexOf('membership_id');
   const attendedSessionsIdx = header.indexOf('attended_sessions');
   const noShowCountIdx = header.indexOf('no_show_count');
-  const priorityIdx = header.indexOf('priority');
   const preferredDaysIdx = header.indexOf('preferred_days');
   const activeIdx = header.indexOf('active');
 
@@ -140,7 +135,6 @@ router.post('/import', (req: Request, res: Response) => {
       const membership_id = membershipIdIdx !== -1 ? (fields[membershipIdIdx]?.trim() || '') : '';
       const attended_sessions = attendedSessionsIdx !== -1 ? parseInt(fields[attendedSessionsIdx]?.trim(), 10) : undefined;
       const no_show_count = noShowCountIdx !== -1 ? parseInt(fields[noShowCountIdx]?.trim(), 10) : undefined;
-      const priority = priorityIdx !== -1 ? parseInt(fields[priorityIdx]?.trim(), 10) : undefined;
       const preferred_days = preferredDaysIdx !== -1 ? (fields[preferredDaysIdx]?.trim() || '') : '';
       const active = activeIdx !== -1 ? parseInt(fields[activeIdx]?.trim(), 10) : undefined;
 
@@ -156,14 +150,12 @@ router.post('/import', (req: Request, res: Response) => {
           db.prepare(`UPDATE students SET first_name = ?, last_name = ?, membership_id = ?${
             attended_sessions != null && !isNaN(attended_sessions) ? ', attended_sessions = ?' : ''
           }${no_show_count != null && !isNaN(no_show_count) ? ', no_show_count = ?' : ''
-          }${priority != null && !isNaN(priority) ? ', priority = ?' : ''
           }${preferred_days ? ', preferred_days = ?' : ''
           }${active != null && !isNaN(active) ? ', active = ?' : ''
           } WHERE id = ?`).run(
             first_name, last_name, membership_id,
             ...(attended_sessions != null && !isNaN(attended_sessions) ? [attended_sessions] : []),
             ...(no_show_count != null && !isNaN(no_show_count) ? [no_show_count] : []),
-            ...(priority != null && !isNaN(priority) ? [priority] : []),
             ...(preferred_days ? [preferred_days] : []),
             ...(active != null && !isNaN(active) ? [active] : []),
             existing.id
@@ -178,20 +170,17 @@ router.post('/import', (req: Request, res: Response) => {
           const result = db.prepare(`INSERT INTO students (first_name, last_name, email, membership_id${
             attended_sessions != null && !isNaN(attended_sessions) ? ', attended_sessions' : ''
           }${no_show_count != null && !isNaN(no_show_count) ? ', no_show_count' : ''
-          }${priority != null && !isNaN(priority) ? ', priority' : ''
           }${preferred_days ? ', preferred_days' : ''
           }${active != null && !isNaN(active) ? ', active' : ''
           }) VALUES (?, ?, ?, ?${
             attended_sessions != null && !isNaN(attended_sessions) ? ', ?' : ''
           }${no_show_count != null && !isNaN(no_show_count) ? ', ?' : ''
-          }${priority != null && !isNaN(priority) ? ', ?' : ''
           }${preferred_days ? ', ?' : ''
           }${active != null && !isNaN(active) ? ', ?' : ''
           })`).run(
             first_name, last_name, email, membership_id,
             ...(attended_sessions != null && !isNaN(attended_sessions) ? [attended_sessions] : []),
             ...(no_show_count != null && !isNaN(no_show_count) ? [no_show_count] : []),
-            ...(priority != null && !isNaN(priority) ? [priority] : []),
             ...(preferred_days ? [preferred_days] : []),
             ...(active != null && !isNaN(active) ? [active] : []),
           );
@@ -287,7 +276,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 
   // Reverse priority increments for cancelled invitations
   if (activeInvitations.length > 0) {
-    db.prepare('UPDATE students SET priority = priority - ? WHERE id = ?').run(activeInvitations.length, req.params.id);
+    db.prepare('UPDATE student_groups SET priority = priority - ? WHERE student_id = ?').run(activeInvitations.length, req.params.id);
   }
 
   // Soft-delete: mark as deleted and deactivate

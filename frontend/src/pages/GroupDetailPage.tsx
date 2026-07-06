@@ -17,6 +17,7 @@ interface Member {
   last_name: string;
   email: string;
   active: number;
+  priority: number;
 }
 
 interface SearchResult {
@@ -52,6 +53,11 @@ export default function GroupDetailPage() {
   // Disciplines state
   const [disciplines, setDisciplines] = useState<DisciplineItem[]>([]);
   const [allDisciplines, setAllDisciplines] = useState<DisciplineItem[]>([]);
+
+  // Priority editing state (scoped to this group's members)
+  const [priorityMode, setPriorityMode] = useState(false);
+  const [editedPriorities, setEditedPriorities] = useState<Record<number, number>>({});
+  const [showPrioritySavePrompt, setShowPrioritySavePrompt] = useState(false);
 
   const load = async () => {
     try {
@@ -140,6 +146,47 @@ export default function GroupDetailPage() {
     } catch (err: any) {
       alert(err.message);
     }
+  };
+
+  const getMemberPriority = (m: Member) =>
+    priorityMode && m.id in editedPriorities ? editedPriorities[m.id] : m.priority;
+
+  const togglePriorityMode = () => {
+    if (priorityMode) {
+      const changedCount = Object.entries(editedPriorities).filter(
+        ([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio
+      ).length;
+      if (changedCount > 0) {
+        setShowPrioritySavePrompt(true);
+      } else {
+        setPriorityMode(false);
+        setEditedPriorities({});
+      }
+    } else {
+      setPriorityMode(true);
+      setEditedPriorities({});
+    }
+  };
+
+  const savePriorities = async () => {
+    const updates = Object.entries(editedPriorities)
+      .filter(([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio)
+      .map(([mid, priority]) => ({ id: Number(mid), priority }));
+    try {
+      await api.bulkUpdatePriorities(updates);
+      await load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+    setPriorityMode(false);
+    setEditedPriorities({});
+    setShowPrioritySavePrompt(false);
+  };
+
+  const discardPriorities = () => {
+    setPriorityMode(false);
+    setEditedPriorities({});
+    setShowPrioritySavePrompt(false);
   };
 
   if (loading) return <div className="page"><p>{t.loading}</p></div>;
@@ -240,36 +287,63 @@ export default function GroupDetailPage() {
               <p>{t.noMembersHint}</p>
             </div>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>{t.firstName}</th>
-                  <th>{t.lastName}</th>
-                  <th>{t.email}</th>
-                  <th>{t.status}</th>
-                  <th>{t.actions}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map(m => (
-                  <tr key={m.id}>
-                    <td>{m.first_name}</td>
-                    <td>{m.last_name}</td>
-                    <td>{m.email}</td>
-                    <td>
-                      <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                        {m.active ? t.active : t.inactive}
-                      </span>
-                    </td>
-                    <td>
-                      <ActionDropdown actions={[
-                        { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
-                      ]} />
-                    </td>
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+                <button
+                  className={`btn ${priorityMode ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={togglePriorityMode}
+                >
+                  {priorityMode ? t.finishAdjusting : t.adjustPriorities}
+                </button>
+              </div>
+              {priorityMode && (
+                <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
+                  {t.priorityModeHint}
+                </div>
+              )}
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t.priority}</th>
+                    <th>{t.firstName}</th>
+                    <th>{t.lastName}</th>
+                    <th>{t.email}</th>
+                    <th>{t.status}</th>
+                    <th>{t.actions}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {members.map(m => (
+                    <tr key={m.id}>
+                      <td>
+                        {priorityMode ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [m.id]: Math.max(0, getMemberPriority(m) - 1) })}>−</button>
+                            <span style={{ minWidth: '2ch', textAlign: 'center', fontWeight: getMemberPriority(m) !== m.priority ? 700 : 400, color: getMemberPriority(m) !== m.priority ? '#2563eb' : undefined }}>{getMemberPriority(m)}</span>
+                            <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [m.id]: getMemberPriority(m) + 1 })}>+</button>
+                          </span>
+                        ) : (
+                          m.priority
+                        )}
+                      </td>
+                      <td>{m.first_name}</td>
+                      <td>{m.last_name}</td>
+                      <td>{m.email}</td>
+                      <td>
+                        <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
+                          {m.active ? t.active : t.inactive}
+                        </span>
+                      </td>
+                      <td>
+                        <ActionDropdown actions={[
+                          { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
+                        ]} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
         </>
       )}
@@ -310,6 +384,23 @@ export default function GroupDetailPage() {
             </div>
           )}
         </>
+      )}
+
+      {showPrioritySavePrompt && (
+        <div className="modal-overlay" onClick={discardPriorities}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <h2>{t.adjustPriorities}</h2>
+            <p>{t.prioritySavePrompt(
+              Object.entries(editedPriorities).filter(
+                ([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio
+              ).length
+            )}</p>
+            <div className="modal-actions">
+              <button className="btn btn-outline" onClick={discardPriorities}>{t.discardChanges}</button>
+              <button className="btn btn-primary" onClick={savePriorities}>{t.saveChanges}</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

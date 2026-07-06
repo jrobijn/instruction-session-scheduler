@@ -106,7 +106,7 @@ A student is eligible for scheduling only if **all** of the following are true:
 5. **Group membership**: the student belongs to a group that is assigned to the session's timetable
 6. **Discipline access**: the student's group has at least one active discipline linked via `discipline_groups`
 
-Eligible students are sorted by **priority ascending** (lowest first), then alphabetically by last name and first name. Priority starts at 1 and is incremented each time a student is invited, ensuring that students who have been invited least often are selected first. Priorities are normalized after each operation so the lowest active student always has priority 1.
+Within each group, eligible students are sorted by **priority ascending** (lowest first), then alphabetically by last name and first name. Priority is stored **per group** (each student belongs to exactly one group), starts at 1, and is incremented each time a student is invited, ensuring that members who have been invited least often within their group are selected first. Priorities are normalized per group after each operation so the lowest active member of each group always has priority 1. Because priority values are only comparable within a group, the algorithm never compares priorities across groups.
 
 ### Group Allocation
 
@@ -114,7 +114,7 @@ Each timetable assigns groups with percentage allocations (e.g. Group A: 60%, Gr
 
 1. Computes the number of slots per group: `floor(available_slots × percentage / 100)`
 2. Distributes any remainder slots round-robin across groups (in timetable-defined order)
-3. Fills each group's quota from its eligible students, ordered by priority
+3. Fills each group's quota from its eligible members, ordered by that group's priority
 
 ### Timeslot Assignment
 
@@ -132,24 +132,24 @@ Students linked in a **buddy group** are scheduled together:
 
 ### Overflow Pass
 
-After each group's quota is filled, a second pass fills any remaining empty slots with eligible students from any timetable group, still ordered by priority. This ensures no slots go to waste when some groups have fewer eligible students than their allocation.
+After each group's quota is filled, a second pass fills any remaining empty slots with eligible students from any timetable group. Because priorities are only comparable within a group, the pass repeatedly picks a group at **random, weighted by each group's timetable percentage**, then takes that group's highest-priority remaining candidate. This ensures no slots go to waste when some groups have fewer eligible students than their allocation, while keeping overflow selection proportional to each group's share.
 
 ### Auto-Replacement Algorithm
 
 When a student declines or their invitation expires, the replacement algorithm (`findAndInviteReplacement`) finds a substitute:
 
-1. **Same-group preference**: first tries to find a replacement from the same group as the original invitation
-2. **Cross-group fallback**: if no same-group student is available, tries any group assigned to the timetable
+1. **Same-group preference**: first tries to find a replacement from the same group as the original invitation, ordered by that group's priority
+2. **Cross-group fallback**: if no same-group student is available, buckets eligible candidates by group and picks a group at **random, weighted by each group's timetable percentage**, then takes that group's highest-priority candidate
 3. The replacement must pass the same eligibility filters (active, preferred days, no cooldown, not already invited on the same date, preferred timeslot match, discipline access)
 4. The replacement inherits the exact timeslot and instructor slot of the declined/expired invitation
 5. An invitation email is sent immediately and the expiry timer starts
 
 ### Priority Management
 
-- Each time a student is invited (whether by schedule generation or as a replacement), their priority is incremented by 1
+- Priority is stored per group; each time a student is invited (whether by schedule generation or as a replacement), their priority within their group is incremented by 1
 - When schedule generation removes previous auto-generated invitations, the priority increment for those students is reversed
-- After any priority change, all priorities are normalized so the lowest active, non-cooldown student has priority 1
-- Administrators can also manually adjust student priorities via the UI
+- After any priority change, priorities are normalized per group so the lowest active, non-cooldown member of each group has priority 1
+- Administrators can manually adjust member priorities from the **Group detail page** (Members tab)
 
 ## Tech Stack
 

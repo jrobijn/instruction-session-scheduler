@@ -11,7 +11,6 @@ interface Student {
   membership_id: string;
   attended_sessions: number;
   no_show_count: number;
-  priority: number;
   preferred_days: string;
   active: number;
   cooldown_until: string | null;
@@ -44,9 +43,6 @@ export default function StudentsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [cooldownModal, setCooldownModal] = useState<Student | null>(null);
   const [cooldownDays, setCooldownDays] = useState(7);
-  const [priorityMode, setPriorityMode] = useState(false);
-  const [editedPriorities, setEditedPriorities] = useState<Record<number, number>>({});
-  const [showPrioritySavePrompt, setShowPrioritySavePrompt] = useState(false);
   const [expandedStudent, setExpandedStudent] = useState<number | null>(null);
   const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
   const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
@@ -263,47 +259,6 @@ export default function StudentsPage() {
     }
   };
 
-  const getStudentPriority = (s: Student) =>
-    priorityMode && s.id in editedPriorities ? editedPriorities[s.id] : s.priority;
-
-  const togglePriorityMode = () => {
-    if (priorityMode) {
-      const changedCount = Object.entries(editedPriorities).filter(
-        ([id, prio]) => students.find(s => s.id === Number(id))?.priority !== prio
-      ).length;
-      if (changedCount > 0) {
-        setShowPrioritySavePrompt(true);
-      } else {
-        setPriorityMode(false);
-        setEditedPriorities({});
-      }
-    } else {
-      setPriorityMode(true);
-      setEditedPriorities({});
-    }
-  };
-
-  const savePriorities = async () => {
-    const updates = Object.entries(editedPriorities)
-      .filter(([id, prio]) => students.find(s => s.id === Number(id))?.priority !== prio)
-      .map(([id, priority]) => ({ id: Number(id), priority }));
-    try {
-      await api.bulkUpdatePriorities(updates);
-      await load();
-    } catch (err: any) {
-      alert(err.message);
-    }
-    setPriorityMode(false);
-    setEditedPriorities({});
-    setShowPrioritySavePrompt(false);
-  };
-
-  const discardPriorities = () => {
-    setPriorityMode(false);
-    setEditedPriorities({});
-    setShowPrioritySavePrompt(false);
-  };
-
   const toggleBuddyMode = () => {
     setBuddyMode(!buddyMode);
     setBuddySelection(new Set());
@@ -361,7 +316,6 @@ export default function StudentsPage() {
             <button
               className={`btn ${buddyMode ? 'btn-primary' : 'btn-outline'}`}
               onClick={toggleBuddyMode}
-              disabled={priorityMode}
               style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
             >
               {buddyMode ? t.finishBuddyMode : t.manageBuddies}
@@ -370,7 +324,6 @@ export default function StudentsPage() {
               className="btn btn-outline"
               onClick={toggleGroupBuddies}
               title={groupBuddies ? t.groupBuddiesOn : t.groupBuddiesOff}
-              disabled={priorityMode}
               style={{
                 padding: '0.4rem 0.5rem', lineHeight: 1, marginLeft: '-1px',
                 borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
@@ -382,25 +335,12 @@ export default function StudentsPage() {
               </svg>
             </button>
           </div>
-          <button
-            className={`btn ${priorityMode ? 'btn-primary' : 'btn-outline'}`}
-            onClick={togglePriorityMode}
-            disabled={buddyMode}
-          >
-            {priorityMode ? t.finishAdjusting : t.adjustPriorities}
-          </button>
-          <button className="btn btn-outline" onClick={handleExport} disabled={priorityMode || buddyMode}>{t.exportCsv}</button>
-          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} disabled={priorityMode || buddyMode}>{t.importCsv}</button>
+          <button className="btn btn-outline" onClick={handleExport} disabled={buddyMode}>{t.exportCsv}</button>
+          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} disabled={buddyMode}>{t.importCsv}</button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-          <button className="btn btn-primary" onClick={openCreate} disabled={priorityMode || buddyMode}>{t.addStudent}</button>
+          <button className="btn btn-primary" onClick={openCreate} disabled={buddyMode}>{t.addStudent}</button>
         </div>
       </div>
-
-      {priorityMode && (
-        <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-          {t.priorityModeHint}
-        </div>
-      )}
 
       {buddyMode && (
         <div className="alert alert-info" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -439,7 +379,6 @@ export default function StudentsPage() {
               <th className="sortable" onClick={() => toggleSort('membership_id')}>{t.membershipId}{sortIcon('membership_id')}</th>
               <th className="sortable" onClick={() => toggleSort('attended_sessions')}>{t.sessionsAttended}{sortIcon('attended_sessions')}</th>
               <th className="sortable" onClick={() => toggleSort('no_show_count')}>{t.noShows}{sortIcon('no_show_count')}</th>
-              <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
               <th></th>
               <th>{t.actions}</th>
@@ -522,17 +461,6 @@ export default function StudentsPage() {
                 <td>{s.attended_sessions}</td>
                 <td>{s.no_show_count}</td>
                 <td>
-                  {priorityMode ? (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <button className="btn btn-outline btn-sm" onClick={(e) => { e.stopPropagation(); setEditedPriorities({ ...editedPriorities, [s.id]: Math.max(0, getStudentPriority(s) - 1) }); }}>−</button>
-                      <span style={{ minWidth: '2ch', textAlign: 'center', fontWeight: getStudentPriority(s) !== s.priority ? 700 : 400, color: getStudentPriority(s) !== s.priority ? '#2563eb' : undefined }}>{getStudentPriority(s)}</span>
-                      <button className="btn btn-outline btn-sm" onClick={(e) => { e.stopPropagation(); setEditedPriorities({ ...editedPriorities, [s.id]: getStudentPriority(s) + 1 }); }}>+</button>
-                    </span>
-                  ) : (
-                    s.priority
-                  )}
-                </td>
-                <td>
                   <span className={`badge ${s.active ? 'badge-confirmed' : 'badge-declined'}`}>
                     {s.active ? t.active : t.inactive}
                   </span>
@@ -564,7 +492,7 @@ export default function StudentsPage() {
               </tr>
               {isExpanded && (
                 <tr key={`${s.id}-details`}>
-                  <td colSpan={buddyMode ? 9 : 8} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
+                  <td colSpan={buddyMode ? 8 : 7} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem 2rem' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
                         <strong>{t.firstName}:</strong> <span>{s.first_name}</span>
@@ -770,23 +698,6 @@ export default function StudentsPage() {
             <div className="modal-actions">
               <button className="btn btn-outline" onClick={() => setCooldownModal(null)}>{t.cancel}</button>
               <button className="btn btn-primary" onClick={handleSetCooldown} disabled={cooldownDays < 1}>{t.setCooldownButton}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showPrioritySavePrompt && (
-        <div className="modal-overlay" onClick={discardPriorities}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <h2>{t.adjustPriorities}</h2>
-            <p>{t.prioritySavePrompt(
-              Object.entries(editedPriorities).filter(
-                ([id, prio]) => students.find(s => s.id === Number(id))?.priority !== prio
-              ).length
-            )}</p>
-            <div className="modal-actions">
-              <button className="btn btn-outline" onClick={discardPriorities}>{t.discardChanges}</button>
-              <button className="btn btn-primary" onClick={savePriorities}>{t.saveChanges}</button>
             </div>
           </div>
         </div>
