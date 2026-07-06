@@ -4,28 +4,26 @@ import db from './database.js';
 // active (non-cooldown, non-deleted) member has priority 1. Groups are normalized
 // independently — priority values are only meaningful within a group.
 export function normalizePriorities(): void {
-  db.prepare(`
-    UPDATE student_groups
-    SET priority = priority - (
-      SELECT MIN(sg2.priority) - 1
-      FROM student_groups sg2
-      JOIN students s2 ON s2.id = sg2.student_id
-      WHERE sg2.group_id = student_groups.group_id
-        AND s2.active = 1
-        AND s2.deleted_at IS NULL
-        AND (s2.cooldown_until IS NULL OR s2.cooldown_until <= datetime('now'))
-    )
-    WHERE group_id IN (
-      SELECT sg3.group_id
-      FROM student_groups sg3
-      JOIN students s3 ON s3.id = sg3.student_id
-      WHERE s3.active = 1
-        AND s3.deleted_at IS NULL
-        AND (s3.cooldown_until IS NULL OR s3.cooldown_until <= datetime('now'))
-      GROUP BY sg3.group_id
-      HAVING MIN(sg3.priority) <> 1
-    )
-  `).run();
+  // Snapshot the per-group offset FIRST, then apply it. A single self-referencing
+  // UPDATE (SET priority = priority - (SELECT MIN(priority) - 1 ...)) is unsafe here:
+  // SQLite evaluates the correlated subquery against the partially-updated table, so
+  // once the first row drops to 1 the group MIN becomes 1 and the remaining rows are
+  // left unchanged. Computing the offsets up front makes the operation order-independent.
+  const groups = db.prepare(`
+    SELECT sg.group_id AS group_id, MIN(sg.priority) AS min_priority
+    FROM student_groups sg
+    JOIN students s ON s.id = sg.student_id
+    WHERE s.active = 1
+      AND s.deleted_at IS NULL
+      AND (s.cooldown_until IS NULL OR s.cooldown_until <= datetime('now'))
+    GROUP BY sg.group_id
+    HAVING MIN(sg.priority) <> 1
+  `).all() as Array<{ group_id: number; min_priority: number }>;
+
+  const update = db.prepare('UPDATE student_groups SET priority = priority - ? WHERE group_id = ?');
+  for (const g of groups) {
+    update.run(g.min_priority - 1, g.group_id);
+  }
 }
 
 // Pick a group from the given list, weighted by each group's weight (e.g. timetable
