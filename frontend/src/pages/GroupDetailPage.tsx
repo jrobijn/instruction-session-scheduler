@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
-import { useT } from '../i18n';
+import { useT, getLocale } from '../i18n';
 
 interface GroupDetail {
   id: number;
@@ -19,6 +19,7 @@ interface Member {
   email: string;
   active: number;
   priority: number;
+  cooldown_until: string | null;
 }
 
 interface SearchResult {
@@ -170,6 +171,14 @@ export default function GroupDetailPage() {
 
   const getMemberPriority = (m: Member) =>
     priorityMode && m.id in editedPriorities ? editedPriorities[m.id] : m.priority;
+
+  const getCooldownInfo = (m: Member) => {
+    if (!m.cooldown_until || new Date(m.cooldown_until + 'Z') <= new Date()) return null;
+    const until = new Date(m.cooldown_until + 'Z');
+    const days = Math.ceil((until.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    const dateLocale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
+    return { days, date: until.toLocaleDateString(dateLocale) };
+  };
 
   const togglePriorityMode = () => {
     if (priorityMode) {
@@ -369,9 +378,21 @@ export default function GroupDetailPage() {
                         )}
                       </td>
                       <td>
-                        <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                          {m.active ? t.active : t.inactive}
-                        </span>
+                        {(() => {
+                          const cooldownInfo = getCooldownInfo(m);
+                          if (cooldownInfo) {
+                            return (
+                              <span className="badge badge-pending" title={t.cooldownDetail(cooldownInfo.days, cooldownInfo.date)}>
+                                {t.cooldown}
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
+                              {m.active ? t.active : t.inactive}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td>
                         <ActionDropdown actions={[
