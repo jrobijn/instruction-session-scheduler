@@ -106,6 +106,7 @@ export function initializeDatabase(): void {
       name TEXT NOT NULL UNIQUE,
       color TEXT NOT NULL DEFAULT '#3b82f6',
       is_default INTEGER NOT NULL DEFAULT 0,
+      new_member_priority TEXT NOT NULL DEFAULT 'lowest',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -560,6 +561,14 @@ export function initializeDatabase(): void {
         WHERE student_id IN (SELECT student_id FROM ranked)
       `);
     }
+  }
+
+  // Add new_member_priority column to groups if missing (controls how a new member's
+  // priority is assigned: 'highest' = priority 1 (existing members pushed back), or
+  // 'lowest' = MAX(priority) + 1 (new member goes after all existing members).
+  const groupNewMemberCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
+  if (!groupNewMemberCols.some(c => c.name === 'new_member_priority')) {
+    db.exec("ALTER TABLE groups ADD COLUMN new_member_priority TEXT NOT NULL DEFAULT 'lowest'");
   }
 
   // Migrate notifications CHECK constraint to include new types

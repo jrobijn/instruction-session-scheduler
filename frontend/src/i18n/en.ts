@@ -159,6 +159,15 @@ const en = {
   noDisciplinesAssignedHint: 'Add disciplines to this group to control which disciplines these students can choose.',
   confirmRemoveDiscipline: 'Remove this discipline from the group?',
 
+  // Group settings
+  settingsSection: 'Settings',
+  newMemberPriorityTitle: 'New member priority',
+  newMemberPriorityHint: 'Choose which priority a student receives when they are added to this group.',
+  newMemberPriorityLowest: 'Lowest priority (back of the queue)',
+  newMemberPriorityLowestHint: 'The new member is placed after all existing members, so they are invited last.',
+  newMemberPriorityHighest: 'Highest priority (front of the queue)',
+  newMemberPriorityHighestHint: 'The new member takes priority 1 and every existing member is pushed back one level.',
+
   // Buddy groups
   buddyGroupsTitle: (count: number) => `Buddy Groups (${count})`,
   noBuddyGroupsYet: 'No buddy groups yet',

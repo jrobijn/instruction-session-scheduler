@@ -9,6 +9,7 @@ interface GroupDetail {
   name: string;
   is_default: number;
   active: number;
+  new_member_priority: 'highest' | 'lowest';
 }
 
 interface Member {
@@ -39,7 +40,7 @@ export default function GroupDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const t = useT();
-  const [tab, setTab] = useState<'members' | 'disciplines'>('members');
+  const [tab, setTab] = useState<'members' | 'disciplines' | 'settings'>('members');
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,6 +190,17 @@ export default function GroupDetailPage() {
     setShowPrioritySavePrompt(false);
   };
 
+  const handleChangeNewMemberPriority = async (value: 'highest' | 'lowest') => {
+    if (!group || group.new_member_priority === value) return;
+    setGroup({ ...group, new_member_priority: value });
+    try {
+      await api.updateGroup(group.id, { new_member_priority: value });
+    } catch (err: any) {
+      alert(err.message);
+      load();
+    }
+  };
+
   if (loading) return <div className="page"><p>{t.loading}</p></div>;
   if (error) return <div className="page"><div className="alert alert-error">{error}</div></div>;
   if (!group) return <div className="page"><p>{t.groupNotFoundText}</p></div>;
@@ -230,6 +242,18 @@ export default function GroupDetailPage() {
           }}
         >
           {t.disciplinesSection} ({disciplines.length})
+        </button>
+        <button
+          className={`tab-btn${tab === 'settings' ? ' active' : ''}`}
+          onClick={() => setTab('settings')}
+          style={{
+            padding: '0.5rem 1.25rem', border: 'none', background: 'none', cursor: 'pointer',
+            borderBottom: tab === 'settings' ? '2px solid var(--primary)' : '2px solid transparent',
+            marginBottom: '-2px', fontWeight: tab === 'settings' ? 600 : 400,
+            color: tab === 'settings' ? 'var(--primary)' : 'var(--text-muted)'
+          }}
+        >
+          {t.settingsSection}
         </button>
       </div>
 
@@ -384,6 +408,51 @@ export default function GroupDetailPage() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'settings' && (
+        <div style={{ maxWidth: '640px' }}>
+          <h3 style={{ marginTop: 0 }}>{t.newMemberPriorityTitle}</h3>
+          <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.newMemberPriorityHint}</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
+              padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
+              borderColor: group.new_member_priority === 'lowest' ? 'var(--primary, #3b82f6)' : 'var(--border)',
+              background: group.new_member_priority === 'lowest' ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
+            }}>
+              <input
+                type="radio"
+                name="new_member_priority"
+                checked={group.new_member_priority === 'lowest'}
+                onChange={() => handleChangeNewMemberPriority('lowest')}
+                style={{ marginTop: '0.2rem' }}
+              />
+              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontWeight: 500 }}>{t.newMemberPriorityLowest}</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityLowestHint}</span>
+              </span>
+            </label>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
+              padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
+              borderColor: group.new_member_priority === 'highest' ? 'var(--primary, #3b82f6)' : 'var(--border)',
+              background: group.new_member_priority === 'highest' ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
+            }}>
+              <input
+                type="radio"
+                name="new_member_priority"
+                checked={group.new_member_priority === 'highest'}
+                onChange={() => handleChangeNewMemberPriority('highest')}
+                style={{ marginTop: '0.2rem' }}
+              />
+              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontWeight: 500 }}>{t.newMemberPriorityHighest}</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityHighestHint}</span>
+              </span>
+            </label>
+          </div>
+        </div>
       )}
 
       {showPrioritySavePrompt && (
