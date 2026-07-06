@@ -60,6 +60,25 @@ export default function GroupDetailPage() {
   const [editedPriorities, setEditedPriorities] = useState<Record<number, number>>({});
   const [showPrioritySavePrompt, setShowPrioritySavePrompt] = useState(false);
 
+  // Members table sorting
+  const [sortCol, setSortCol] = useState<keyof Member>('last_name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const toggleSort = (col: keyof Member) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sortIcon = (col: keyof Member) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const sortedMembers = [...members].sort((a, b) => {
+    const av = a[sortCol], bv = b[sortCol];
+    let cmp: number;
+    if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv));
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
   const load = async () => {
     try {
       const [groupsData, membersData, discData, allDiscData] = await Promise.all([
@@ -328,17 +347,16 @@ export default function GroupDetailPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>{t.priority}</th>
-                    <th>{t.firstName}</th>
-                    <th>{t.lastName}</th>
-                    <th>{t.email}</th>
-                    <th>{t.status}</th>
+                    <th className="sortable" onClick={() => toggleSort('last_name')}>{t.name}{sortIcon('last_name')}</th>
+                    <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
+                    <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
                     <th>{t.actions}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {members.map(m => (
+                  {sortedMembers.map(m => (
                     <tr key={m.id}>
+                      <td>{m.first_name} {m.last_name}</td>
                       <td>
                         {priorityMode ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -350,9 +368,6 @@ export default function GroupDetailPage() {
                           m.priority
                         )}
                       </td>
-                      <td>{m.first_name}</td>
-                      <td>{m.last_name}</td>
-                      <td>{m.email}</td>
                       <td>
                         <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
                           {m.active ? t.active : t.inactive}
