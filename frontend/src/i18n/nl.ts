@@ -161,6 +161,15 @@ const nl: Translations = {
   noDisciplinesAssignedHint: 'Voeg disciplines toe aan deze groep om te bepalen welke disciplines deze leerlingen kunnen kiezen.',
   confirmRemoveDiscipline: 'Deze discipline uit de groep verwijderen?',
 
+  // Group settings
+  settingsSection: 'Instellingen',
+  newMemberPriorityTitle: 'Prioriteit nieuw lid',
+  newMemberPriorityHint: 'Kies welke prioriteit een leerling krijgt wanneer die aan deze groep wordt toegevoegd.',
+  newMemberPriorityLowest: 'Laagste prioriteit (achteraan de rij)',
+  newMemberPriorityLowestHint: 'Het nieuwe lid komt na alle bestaande leden en wordt dus als laatste uitgenodigd.',
+  newMemberPriorityHighest: 'Hoogste prioriteit (vooraan de rij)',
+  newMemberPriorityHighestHint: 'Het nieuwe lid krijgt prioriteit 1 en elk bestaand lid schuift één niveau naar achteren.',
+
   // Buddy groups
   buddyGroupsTitle: (count: number) => `Buddygroepen (${count})`,
   noBuddyGroupsYet: 'Nog geen buddygroepen',
@@ -191,6 +200,7 @@ const nl: Translations = {
   timetable: 'Rooster',
   instructors: 'Instructeurs',
   invitations: 'Uitnodigingen',
+  activeInvitations: 'Actieve uitnodigingen',
   attendance: 'Aanwezigheid',
   confirmDeleteSession: 'Weet je zeker dat je deze sessie wilt verwijderen?',
   newSessionTitle: 'Nieuwe trainingssessie',

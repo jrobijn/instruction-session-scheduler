@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import ActionDropdown from '../components/ActionDropdown';
-import { useT } from '../i18n';
+import { useT, getLocale } from '../i18n';
 
 interface GroupDetail {
   id: number;
   name: string;
   is_default: number;
   active: number;
+  new_member_priority: 'highest' | 'lowest';
 }
 
 interface Member {
@@ -17,6 +18,24 @@ interface Member {
   last_name: string;
   email: string;
   active: number;
+  priority: number;
+  cooldown_until: string | null;
+  preferred_days: string;
+}
+
+interface Timetable {
+  id: number;
+  name: string;
+  active: number;
+  status: string;
+  timeslots?: Array<{ id: number; start_time: string }>;
+}
+
+interface StudentInvitation {
+  id: number;
+  status: string;
+  session_date: string;
+  start_time: string;
 }
 
 interface SearchResult {
@@ -38,7 +57,7 @@ export default function GroupDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const t = useT();
-  const [tab, setTab] = useState<'members' | 'disciplines'>('members');
+  const [tab, setTab] = useState<'members' | 'disciplines' | 'settings'>('members');
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,13 +72,68 @@ export default function GroupDetailPage() {
   const [disciplines, setDisciplines] = useState<DisciplineItem[]>([]);
   const [allDisciplines, setAllDisciplines] = useState<DisciplineItem[]>([]);
 
+  // Priority editing state (scoped to this group's members)
+  const [priorityMode, setPriorityMode] = useState(false);
+  const [editedPriorities, setEditedPriorities] = useState<Record<number, number>>({});
+  const [showPrioritySavePrompt, setShowPrioritySavePrompt] = useState(false);
+
+  // Members table sorting
+  const [sortCol, setSortCol] = useState<keyof Member>('last_name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleSort = (col: keyof Member) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sortIcon = (col: keyof Member) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const sortedMembers = [...members].sort((a, b) => {
+    const av = a[sortCol], bv = b[sortCol];
+    let cmp: number;
+    if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv));
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  // Expandable member details
+  const [expandedMember, setExpandedMember] = useState<number | null>(null);
+  const [clubDays, setClubDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
+  const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
+  const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
+  const [detailInvitations, setDetailInvitations] = useState<StudentInvitation[]>([]);
+
+  const openMemberDetails = async (memberId: number) => {
+    setExpandedMember(memberId);
+    try {
+      const allTt = await api.getTimetables();
+      const active = allTt.filter((tt: Timetable) => tt.active && tt.status === 'saved');
+      const withTs = await Promise.all(active.map(async (tt: Timetable) => {
+        const detail = await api.getTimetable(tt.id);
+        return { ...tt, timeslots: detail.timeslots };
+      }));
+      setDetailTimetables(withTs);
+      const [prefs, invitations] = await Promise.all([
+        api.getStudentPreferredTimeslots(memberId),
+        api.getStudentInvitations(memberId),
+      ]);
+      setDetailTimeslotPrefs(prefs);
+      setDetailInvitations(invitations);
+    } catch {
+      setDetailTimetables([]);
+      setDetailTimeslotPrefs({});
+      setDetailInvitations([]);
+    }
+  };
+
+
   const load = async () => {
     try {
-      const [groupsData, membersData, discData, allDiscData] = await Promise.all([
+      const [groupsData, membersData, discData, allDiscData, settingsData] = await Promise.all([
         api.getGroups(),
         api.getGroupMembers(Number(id)),
         api.getGroupDisciplines(Number(id)),
-        api.getDisciplines()
+        api.getDisciplines(),
+        api.getSettings()
       ]);
       const g = groupsData.find((g: GroupDetail) => g.id === Number(id));
       if (!g) { setError(t.groupNotFound); return; }
@@ -67,6 +141,7 @@ export default function GroupDetailPage() {
       setMembers(membersData);
       setDisciplines(discData);
       setAllDisciplines(allDiscData.filter((d: DisciplineItem) => d.active));
+      setClubDays((settingsData.club_days || '0|1|2|3|4|5|6').split('|').map(Number));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -142,6 +217,66 @@ export default function GroupDetailPage() {
     }
   };
 
+  const getMemberPriority = (m: Member) =>
+    priorityMode && m.id in editedPriorities ? editedPriorities[m.id] : m.priority;
+
+  const getCooldownInfo = (m: Member) => {
+    if (!m.cooldown_until || new Date(m.cooldown_until + 'Z') <= new Date()) return null;
+    const until = new Date(m.cooldown_until + 'Z');
+    const days = Math.ceil((until.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    const dateLocale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
+    return { days, date: until.toLocaleDateString(dateLocale) };
+  };
+
+  const togglePriorityMode = () => {
+    if (priorityMode) {
+      const changedCount = Object.entries(editedPriorities).filter(
+        ([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio
+      ).length;
+      if (changedCount > 0) {
+        setShowPrioritySavePrompt(true);
+      } else {
+        setPriorityMode(false);
+        setEditedPriorities({});
+      }
+    } else {
+      setPriorityMode(true);
+      setEditedPriorities({});
+    }
+  };
+
+  const savePriorities = async () => {
+    const updates = Object.entries(editedPriorities)
+      .filter(([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio)
+      .map(([mid, priority]) => ({ id: Number(mid), priority }));
+    try {
+      await api.bulkUpdatePriorities(updates);
+      await load();
+    } catch (err: any) {
+      alert(err.message);
+    }
+    setPriorityMode(false);
+    setEditedPriorities({});
+    setShowPrioritySavePrompt(false);
+  };
+
+  const discardPriorities = () => {
+    setPriorityMode(false);
+    setEditedPriorities({});
+    setShowPrioritySavePrompt(false);
+  };
+
+  const handleChangeNewMemberPriority = async (value: 'highest' | 'lowest') => {
+    if (!group || group.new_member_priority === value) return;
+    setGroup({ ...group, new_member_priority: value });
+    try {
+      await api.updateGroup(group.id, { new_member_priority: value });
+    } catch (err: any) {
+      alert(err.message);
+      load();
+    }
+  };
+
   if (loading) return <div className="page"><p>{t.loading}</p></div>;
   if (error) return <div className="page"><div className="alert alert-error">{error}</div></div>;
   if (!group) return <div className="page"><p>{t.groupNotFoundText}</p></div>;
@@ -183,6 +318,18 @@ export default function GroupDetailPage() {
           }}
         >
           {t.disciplinesSection} ({disciplines.length})
+        </button>
+        <button
+          className={`tab-btn${tab === 'settings' ? ' active' : ''}`}
+          onClick={() => setTab('settings')}
+          style={{
+            padding: '0.5rem 1.25rem', border: 'none', background: 'none', cursor: 'pointer',
+            borderBottom: tab === 'settings' ? '2px solid var(--primary)' : '2px solid transparent',
+            marginBottom: '-2px', fontWeight: tab === 'settings' ? 600 : 400,
+            color: tab === 'settings' ? 'var(--primary)' : 'var(--text-muted)'
+          }}
+        >
+          {t.settingsSection}
         </button>
       </div>
 
@@ -240,36 +387,126 @@ export default function GroupDetailPage() {
               <p>{t.noMembersHint}</p>
             </div>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>{t.firstName}</th>
-                  <th>{t.lastName}</th>
-                  <th>{t.email}</th>
-                  <th>{t.status}</th>
-                  <th>{t.actions}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map(m => (
-                  <tr key={m.id}>
-                    <td>{m.first_name}</td>
-                    <td>{m.last_name}</td>
-                    <td>{m.email}</td>
-                    <td>
-                      <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                        {m.active ? t.active : t.inactive}
-                      </span>
-                    </td>
-                    <td>
-                      <ActionDropdown actions={[
-                        { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
-                      ]} />
-                    </td>
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+                <button
+                  className={`btn ${priorityMode ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={togglePriorityMode}
+                >
+                  {priorityMode ? t.finishAdjusting : t.adjustPriorities}
+                </button>
+              </div>
+              {priorityMode && (
+                <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
+                  {t.priorityModeHint}
+                </div>
+              )}
+              <table>
+                <thead>
+                  <tr>
+                    <th className="sortable" onClick={() => toggleSort('last_name')}>{t.name}{sortIcon('last_name')}</th>
+                    <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
+                    <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
+                    <th>{t.actions}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sortedMembers.map(m => {
+                    const isExpanded = expandedMember === m.id;
+                    return (
+                    <>
+                    <tr
+                      key={m.id}
+                      onClick={() => { if (priorityMode) return; if (isExpanded) setExpandedMember(null); else openMemberDetails(m.id); }}
+                      style={{ cursor: priorityMode ? 'default' : 'pointer' }}
+                    >
+                      <td>{m.first_name} {m.last_name}</td>
+                      <td onClick={e => { if (priorityMode) e.stopPropagation(); }}>
+                        {priorityMode ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [m.id]: Math.max(0, getMemberPriority(m) - 1) })}>−</button>
+                            <span style={{ minWidth: '2ch', textAlign: 'center', fontWeight: getMemberPriority(m) !== m.priority ? 700 : 400, color: getMemberPriority(m) !== m.priority ? '#2563eb' : undefined }}>{getMemberPriority(m)}</span>
+                            <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [m.id]: getMemberPriority(m) + 1 })}>+</button>
+                          </span>
+                        ) : (
+                          m.priority
+                        )}
+                      </td>
+                      <td>
+                        {(() => {
+                          const cooldownInfo = getCooldownInfo(m);
+                          if (cooldownInfo) {
+                            return (
+                              <span className="badge badge-pending" title={t.cooldownDetail(cooldownInfo.days, cooldownInfo.date)}>
+                                {t.cooldown}
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className={`badge ${m.active ? 'badge-confirmed' : 'badge-declined'}`}>
+                              {m.active ? t.active : t.inactive}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        <ActionDropdown actions={[
+                          { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
+                        ]} />
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr key={`${m.id}-details`}>
+                        <td colSpan={4} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem 2rem' }}>
+                            <div>
+                              <div>
+                                <strong>{t.preferredDays}:</strong>
+                                <div style={{ marginTop: '0.25rem' }}>{m.preferred_days ? m.preferred_days.split('|').filter(d => clubDays.includes(Number(d))).map(d => t.days[Number(d)]).join(', ') || t.noData : t.noData}</div>
+                              </div>
+                              {detailTimetables.length > 0 && (
+                                <div style={{ marginTop: '0.5rem' }}>
+                                  <strong>{t.preferredTimeslots}:</strong>
+                                  {detailTimetables.map(tt => {
+                                    const slots = tt.timeslots || [];
+                                    const prefIds = detailTimeslotPrefs[tt.id];
+                                    const display = prefIds && prefIds.length > 0
+                                      ? slots.filter(sl => prefIds.includes(sl.id)).map(sl => sl.start_time.slice(0, 5)).join(', ')
+                                      : null;
+                                    return (
+                                      <div key={tt.id} style={{ marginTop: '0.25rem' }}>
+                                        <em>{tt.name}:</em> {display || t.noData}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <strong>{t.activeInvitations}:</strong>
+                              {detailInvitations.length > 0 ? (
+                                <div style={{ marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                  {detailInvitations.map(inv => (
+                                    <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                      <span>{new Date(inv.session_date + 'T00:00:00').toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB')} — {inv.start_time.slice(0, 5)}</span>
+                                      <span className={`badge ${inv.status === 'confirmed' ? 'badge-confirmed' : 'badge-pending'}`}>{t.statusMap(inv.status)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ marginTop: '0.25rem' }}>{t.noData}</div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
           )}
         </>
       )}
@@ -310,6 +547,68 @@ export default function GroupDetailPage() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'settings' && (
+        <div style={{ maxWidth: '640px' }}>
+          <h3 style={{ marginTop: 0 }}>{t.newMemberPriorityTitle}</h3>
+          <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.newMemberPriorityHint}</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
+              padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
+              borderColor: group.new_member_priority === 'lowest' ? 'var(--primary, #3b82f6)' : 'var(--border)',
+              background: group.new_member_priority === 'lowest' ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
+            }}>
+              <input
+                type="radio"
+                name="new_member_priority"
+                checked={group.new_member_priority === 'lowest'}
+                onChange={() => handleChangeNewMemberPriority('lowest')}
+                style={{ marginTop: '0.2rem' }}
+              />
+              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontWeight: 500 }}>{t.newMemberPriorityLowest}</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityLowestHint}</span>
+              </span>
+            </label>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
+              padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
+              borderColor: group.new_member_priority === 'highest' ? 'var(--primary, #3b82f6)' : 'var(--border)',
+              background: group.new_member_priority === 'highest' ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
+            }}>
+              <input
+                type="radio"
+                name="new_member_priority"
+                checked={group.new_member_priority === 'highest'}
+                onChange={() => handleChangeNewMemberPriority('highest')}
+                style={{ marginTop: '0.2rem' }}
+              />
+              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontWeight: 500 }}>{t.newMemberPriorityHighest}</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityHighestHint}</span>
+              </span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {showPrioritySavePrompt && (
+        <div className="modal-overlay" onClick={discardPriorities}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <h2>{t.adjustPriorities}</h2>
+            <p>{t.prioritySavePrompt(
+              Object.entries(editedPriorities).filter(
+                ([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio
+              ).length
+            )}</p>
+            <div className="modal-actions">
+              <button className="btn btn-outline" onClick={discardPriorities}>{t.discardChanges}</button>
+              <button className="btn btn-primary" onClick={savePriorities}>{t.saveChanges}</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

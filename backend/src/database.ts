@@ -106,6 +106,7 @@ export function initializeDatabase(): void {
       name TEXT NOT NULL UNIQUE,
       color TEXT NOT NULL DEFAULT '#3b82f6',
       is_default INTEGER NOT NULL DEFAULT 0,
+      new_member_priority TEXT NOT NULL DEFAULT 'lowest',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -113,6 +114,7 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS student_groups (
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      priority INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY(student_id, group_id),
       UNIQUE(student_id)
     );
@@ -536,6 +538,37 @@ export function initializeDatabase(): void {
         SELECT inv.session_id FROM invitations inv WHERE inv.id = notifications.invitation_id
       ) WHERE session_id IS NULL AND invitation_id IS NOT NULL
     `);
+  }
+
+  // Migrate priority from global (students.priority) to per-group (student_groups.priority)
+  const sgPriorityCols = db.prepare("PRAGMA table_info(student_groups)").all() as Array<{ name: string }>;
+  if (!sgPriorityCols.some(c => c.name === 'priority')) {
+    db.exec('ALTER TABLE student_groups ADD COLUMN priority INTEGER NOT NULL DEFAULT 1');
+    // Backfill from the old global students.priority using DENSE_RANK per group so each
+    // group gets gapless 1..n values while preserving relative order and existing ties.
+    const studentsHavePriority = (db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>)
+      .some(c => c.name === 'priority');
+    if (studentsHavePriority) {
+      db.exec(`
+        WITH ranked AS (
+          SELECT sg.student_id,
+                 DENSE_RANK() OVER (PARTITION BY sg.group_id ORDER BY s.priority) AS new_priority
+          FROM student_groups sg
+          JOIN students s ON s.id = sg.student_id
+        )
+        UPDATE student_groups
+        SET priority = (SELECT new_priority FROM ranked WHERE ranked.student_id = student_groups.student_id)
+        WHERE student_id IN (SELECT student_id FROM ranked)
+      `);
+    }
+  }
+
+  // Add new_member_priority column to groups if missing (controls how a new member's
+  // priority is assigned: 'highest' = priority 1 (existing members pushed back), or
+  // 'lowest' = MAX(priority) + 1 (new member goes after all existing members).
+  const groupNewMemberCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
+  if (!groupNewMemberCols.some(c => c.name === 'new_member_priority')) {
+    db.exec("ALTER TABLE groups ADD COLUMN new_member_priority TEXT NOT NULL DEFAULT 'lowest'");
   }
 
   // Migrate notifications CHECK constraint to include new types
