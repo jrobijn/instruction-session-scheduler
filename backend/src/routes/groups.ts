@@ -195,7 +195,7 @@ router.get('/:id/members', (req: Request, res: Response) => {
   if (!group) { res.status(404).json({ error: 'Group not found' }); return; }
 
   const members = db.prepare(`
-    SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, sg.priority AS priority
+    SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, s.preferred_days, sg.priority AS priority
     FROM students s
     JOIN student_groups sg ON sg.student_id = s.id
     WHERE sg.group_id = ? AND s.deleted_at IS NULL

@@ -20,6 +20,22 @@ interface Member {
   active: number;
   priority: number;
   cooldown_until: string | null;
+  preferred_days: string;
+}
+
+interface Timetable {
+  id: number;
+  name: string;
+  active: number;
+  status: string;
+  timeslots?: Array<{ id: number; start_time: string }>;
+}
+
+interface StudentInvitation {
+  id: number;
+  status: string;
+  session_date: string;
+  start_time: string;
 }
 
 interface SearchResult {
@@ -64,7 +80,6 @@ export default function GroupDetailPage() {
   // Members table sorting
   const [sortCol, setSortCol] = useState<keyof Member>('last_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-
   const toggleSort = (col: keyof Member) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
@@ -80,13 +95,45 @@ export default function GroupDetailPage() {
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
+  // Expandable member details
+  const [expandedMember, setExpandedMember] = useState<number | null>(null);
+  const [clubDays, setClubDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
+  const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
+  const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
+  const [detailInvitations, setDetailInvitations] = useState<StudentInvitation[]>([]);
+
+  const openMemberDetails = async (memberId: number) => {
+    setExpandedMember(memberId);
+    try {
+      const allTt = await api.getTimetables();
+      const active = allTt.filter((tt: Timetable) => tt.active && tt.status === 'saved');
+      const withTs = await Promise.all(active.map(async (tt: Timetable) => {
+        const detail = await api.getTimetable(tt.id);
+        return { ...tt, timeslots: detail.timeslots };
+      }));
+      setDetailTimetables(withTs);
+      const [prefs, invitations] = await Promise.all([
+        api.getStudentPreferredTimeslots(memberId),
+        api.getStudentInvitations(memberId),
+      ]);
+      setDetailTimeslotPrefs(prefs);
+      setDetailInvitations(invitations);
+    } catch {
+      setDetailTimetables([]);
+      setDetailTimeslotPrefs({});
+      setDetailInvitations([]);
+    }
+  };
+
+
   const load = async () => {
     try {
-      const [groupsData, membersData, discData, allDiscData] = await Promise.all([
+      const [groupsData, membersData, discData, allDiscData, settingsData] = await Promise.all([
         api.getGroups(),
         api.getGroupMembers(Number(id)),
         api.getGroupDisciplines(Number(id)),
-        api.getDisciplines()
+        api.getDisciplines(),
+        api.getSettings()
       ]);
       const g = groupsData.find((g: GroupDetail) => g.id === Number(id));
       if (!g) { setError(t.groupNotFound); return; }
@@ -94,6 +141,7 @@ export default function GroupDetailPage() {
       setMembers(membersData);
       setDisciplines(discData);
       setAllDisciplines(allDiscData.filter((d: DisciplineItem) => d.active));
+      setClubDays((settingsData.club_days || '0|1|2|3|4|5|6').split('|').map(Number));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -363,10 +411,17 @@ export default function GroupDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedMembers.map(m => (
-                    <tr key={m.id}>
+                  {sortedMembers.map(m => {
+                    const isExpanded = expandedMember === m.id;
+                    return (
+                    <>
+                    <tr
+                      key={m.id}
+                      onClick={() => { if (priorityMode) return; if (isExpanded) setExpandedMember(null); else openMemberDetails(m.id); }}
+                      style={{ cursor: priorityMode ? 'default' : 'pointer' }}
+                    >
                       <td>{m.first_name} {m.last_name}</td>
-                      <td>
+                      <td onClick={e => { if (priorityMode) e.stopPropagation(); }}>
                         {priorityMode ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                             <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [m.id]: Math.max(0, getMemberPriority(m) - 1) })}>−</button>
@@ -394,13 +449,61 @@ export default function GroupDetailPage() {
                           );
                         })()}
                       </td>
-                      <td>
+                      <td onClick={e => e.stopPropagation()}>
                         <ActionDropdown actions={[
                           { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
                         ]} />
                       </td>
                     </tr>
-                  ))}
+                    {isExpanded && (
+                      <tr key={`${m.id}-details`}>
+                        <td colSpan={4} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem 2rem' }}>
+                            <div>
+                              <div>
+                                <strong>{t.preferredDays}:</strong>
+                                <div style={{ marginTop: '0.25rem' }}>{m.preferred_days ? m.preferred_days.split('|').filter(d => clubDays.includes(Number(d))).map(d => t.days[Number(d)]).join(', ') || t.noData : t.noData}</div>
+                              </div>
+                              {detailTimetables.length > 0 && (
+                                <div style={{ marginTop: '0.5rem' }}>
+                                  <strong>{t.preferredTimeslots}:</strong>
+                                  {detailTimetables.map(tt => {
+                                    const slots = tt.timeslots || [];
+                                    const prefIds = detailTimeslotPrefs[tt.id];
+                                    const display = prefIds && prefIds.length > 0
+                                      ? slots.filter(sl => prefIds.includes(sl.id)).map(sl => sl.start_time.slice(0, 5)).join(', ')
+                                      : null;
+                                    return (
+                                      <div key={tt.id} style={{ marginTop: '0.25rem' }}>
+                                        <em>{tt.name}:</em> {display || t.noData}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <strong>{t.activeInvitations}:</strong>
+                              {detailInvitations.length > 0 ? (
+                                <div style={{ marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                  {detailInvitations.map(inv => (
+                                    <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                      <span>{new Date(inv.session_date + 'T00:00:00').toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB')} — {inv.start_time.slice(0, 5)}</span>
+                                      <span className={`badge ${inv.status === 'confirmed' ? 'badge-confirmed' : 'badge-pending'}`}>{t.statusMap(inv.status)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ marginTop: '0.25rem' }}>{t.noData}</div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </>
+                    );
+                  })}
                 </tbody>
               </table>
             </>

@@ -207,6 +207,23 @@ router.get('/:id', (req: Request, res: Response) => {
   res.json(student);
 });
 
+// Get accepted/pending invitations for a student
+router.get('/:id/invitations', (req: Request, res: Response) => {
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+  if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
+
+  const invitations = db.prepare(`
+    SELECT i.id, i.status, ts.date AS session_date, tsl.start_time
+    FROM invitations i
+    JOIN training_sessions ts ON ts.id = i.session_id
+    JOIN timeslots tsl ON tsl.id = i.timeslot_id
+    WHERE i.student_id = ? AND i.status IN ('confirmed', 'invited', 'scheduled')
+      AND ts.status != 'completed'
+    ORDER BY ts.date ASC, tsl.start_time ASC
+  `).all(req.params.id);
+  res.json(invitations);
+});
+
 // Create student
 router.post('/', (req: Request, res: Response) => {
   const { first_name, last_name, email, membership_id } = req.body;
