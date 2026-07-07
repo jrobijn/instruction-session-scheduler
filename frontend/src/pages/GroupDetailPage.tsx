@@ -10,6 +10,7 @@ interface GroupDetail {
   is_default: number;
   active: number;
   new_member_priority: 'highest' | 'lowest' | 'average';
+  reactivated_member_priority: 'highest' | 'lowest' | 'average';
 }
 
 interface Member {
@@ -271,6 +272,17 @@ export default function GroupDetailPage() {
     setGroup({ ...group, new_member_priority: value });
     try {
       await api.updateGroup(group.id, { new_member_priority: value });
+    } catch (err: any) {
+      alert(err.message);
+      load();
+    }
+  };
+
+  const handleChangeReactivatedMemberPriority = async (value: 'highest' | 'lowest' | 'average') => {
+    if (!group || group.reactivated_member_priority === value) return;
+    setGroup({ ...group, reactivated_member_priority: value });
+    try {
+      await api.updateGroup(group.id, { reactivated_member_priority: value });
     } catch (err: any) {
       alert(err.message);
       load();
@@ -549,68 +561,52 @@ export default function GroupDetailPage() {
         </>
       )}
 
-      {tab === 'settings' && (
-        <div style={{ maxWidth: '640px' }}>
-          <h3 style={{ marginTop: 0 }}>{t.newMemberPriorityTitle}</h3>
-          <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.newMemberPriorityHint}</p>
+      {tab === 'settings' && (() => {
+        const priorityOptions: Array<{ value: 'lowest' | 'average' | 'highest'; label: string; hint: string }> = [
+          { value: 'lowest', label: t.newMemberPriorityLowest, hint: t.newMemberPriorityLowestHint },
+          { value: 'average', label: t.newMemberPriorityAverage, hint: t.newMemberPriorityAverageHint },
+          { value: 'highest', label: t.newMemberPriorityHighest, hint: t.newMemberPriorityHighestHint },
+        ];
+        const renderChoice = (
+          radioName: string,
+          current: 'lowest' | 'average' | 'highest',
+          onChange: (v: 'lowest' | 'average' | 'highest') => void,
+        ) => (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
-            <label style={{
-              display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
-              padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
-              borderColor: group.new_member_priority === 'lowest' ? 'var(--primary, #3b82f6)' : 'var(--border)',
-              background: group.new_member_priority === 'lowest' ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
-            }}>
-              <input
-                type="radio"
-                name="new_member_priority"
-                checked={group.new_member_priority === 'lowest'}
-                onChange={() => handleChangeNewMemberPriority('lowest')}
-                style={{ marginTop: '0.2rem' }}
-              />
-              <span style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontWeight: 500 }}>{t.newMemberPriorityLowest}</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityLowestHint}</span>
-              </span>
-            </label>
-            <label style={{
-              display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
-              padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
-              borderColor: group.new_member_priority === 'average' ? 'var(--primary, #3b82f6)' : 'var(--border)',
-              background: group.new_member_priority === 'average' ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
-            }}>
-              <input
-                type="radio"
-                name="new_member_priority"
-                checked={group.new_member_priority === 'average'}
-                onChange={() => handleChangeNewMemberPriority('average')}
-                style={{ marginTop: '0.2rem' }}
-              />
-              <span style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontWeight: 500 }}>{t.newMemberPriorityAverage}</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityAverageHint}</span>
-              </span>
-            </label>
-            <label style={{
-              display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
-              padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
-              borderColor: group.new_member_priority === 'highest' ? 'var(--primary, #3b82f6)' : 'var(--border)',
-              background: group.new_member_priority === 'highest' ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
-            }}>
-              <input
-                type="radio"
-                name="new_member_priority"
-                checked={group.new_member_priority === 'highest'}
-                onChange={() => handleChangeNewMemberPriority('highest')}
-                style={{ marginTop: '0.2rem' }}
-              />
-              <span style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontWeight: 500 }}>{t.newMemberPriorityHighest}</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityHighestHint}</span>
-              </span>
-            </label>
+            {priorityOptions.map(opt => (
+              <label key={opt.value} style={{
+                display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
+                padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
+                borderColor: current === opt.value ? 'var(--primary, #3b82f6)' : 'var(--border)',
+                background: current === opt.value ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
+              }}>
+                <input
+                  type="radio"
+                  name={radioName}
+                  checked={current === opt.value}
+                  onChange={() => onChange(opt.value)}
+                  style={{ marginTop: '0.2rem' }}
+                />
+                <span style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontWeight: 500 }}>{opt.label}</span>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{opt.hint}</span>
+                </span>
+              </label>
+            ))}
           </div>
-        </div>
-      )}
+        );
+        return (
+          <div style={{ maxWidth: '640px' }}>
+            <h3 style={{ marginTop: 0 }}>{t.newMemberPriorityTitle}</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.newMemberPriorityHint}</p>
+            {renderChoice('new_member_priority', group.new_member_priority, handleChangeNewMemberPriority)}
+
+            <h3 style={{ marginTop: '2rem' }}>{t.reactivatedMemberPriorityTitle}</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.reactivatedMemberPriorityHint}</p>
+            {renderChoice('reactivated_member_priority', group.reactivated_member_priority, handleChangeReactivatedMemberPriority)}
+          </div>
+        );
+      })()}
 
       {showPrioritySavePrompt && (
         <div className="modal-overlay" onClick={discardPriorities}>

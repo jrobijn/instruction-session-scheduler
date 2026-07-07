@@ -169,6 +169,8 @@ const en = {
   newMemberPriorityHighestHint: 'The new member takes priority 1 and every existing member is pushed back one level.',
   newMemberPriorityAverage: 'Average priority (middle of the queue)',
   newMemberPriorityAverageHint: 'The new member takes the rounded average priority of existing members, placing them in the middle of the queue.',
+  reactivatedMemberPriorityTitle: 'Reactivated member priority',
+  reactivatedMemberPriorityHint: 'Choose which priority a student receives when they become active again in this group.',
 
   // Buddy groups
   buddyGroupsTitle: (count: number) => `Buddy Groups (${count})`,

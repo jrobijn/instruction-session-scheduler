@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../database.js';
-import { normalizePriorities } from '../priority.js';
+import { normalizePriorities, assignMemberPriority } from '../priority.js';
 
 const router = Router();
 
@@ -124,12 +124,16 @@ router.post('/', (req: Request, res: Response) => {
 
 // Update group
 router.put('/:id', (req: Request, res: Response) => {
-  const { name, active, new_member_priority } = req.body;
+  const { name, active, new_member_priority, reactivated_member_priority } = req.body;
   const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id) as any;
   if (!group) { res.status(404).json({ error: 'Group not found' }); return; }
 
-  if (new_member_priority != null && new_member_priority !== 'highest' && new_member_priority !== 'lowest' && new_member_priority !== 'average') {
+  const validModes = ['highest', 'lowest', 'average'];
+  if (new_member_priority != null && !validModes.includes(new_member_priority)) {
     res.status(400).json({ error: "new_member_priority must be 'highest', 'lowest' or 'average'" }); return;
+  }
+  if (reactivated_member_priority != null && !validModes.includes(reactivated_member_priority)) {
+    res.status(400).json({ error: "reactivated_member_priority must be 'highest', 'lowest' or 'average'" }); return;
   }
 
   try {
@@ -138,9 +142,10 @@ router.put('/:id', (req: Request, res: Response) => {
         name = COALESCE(?, name),
         active = COALESCE(?, active),
         color = COALESCE(?, color),
-        new_member_priority = COALESCE(?, new_member_priority)
+        new_member_priority = COALESCE(?, new_member_priority),
+        reactivated_member_priority = COALESCE(?, reactivated_member_priority)
       WHERE id = ?
-    `).run(name ?? null, active ?? null, req.body.color ?? null, new_member_priority ?? null, req.params.id);
+    `).run(name ?? null, active ?? null, req.body.color ?? null, new_member_priority ?? null, reactivated_member_priority ?? null, req.params.id);
 
     const updated = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
     res.json(updated);
@@ -199,7 +204,7 @@ router.get('/:id/members', (req: Request, res: Response) => {
     FROM students s
     JOIN student_groups sg ON sg.student_id = s.id
     WHERE sg.group_id = ? AND s.deleted_at IS NULL
-    ORDER BY sg.priority ASC, s.last_name ASC, s.first_name ASC
+    ORDER BY sg.priority IS NULL, sg.priority ASC, s.last_name ASC, s.first_name ASC
   `).all(req.params.id);
   res.json(members);
 });
@@ -217,21 +222,8 @@ router.post('/:id/members', (req: Request, res: Response) => {
 
   const setGroup = db.transaction(() => {
     db.prepare('DELETE FROM student_groups WHERE student_id = ?').run(student_id);
-    if (group.new_member_priority === 'highest') {
-      // New member takes priority 1; push every existing member back by one level.
-      db.prepare('UPDATE student_groups SET priority = priority + 1 WHERE group_id = ?').run(req.params.id);
-      db.prepare('INSERT INTO student_groups (student_id, group_id, priority) VALUES (?, ?, 1)').run(student_id, req.params.id);
-    } else if (group.new_member_priority === 'average') {
-      // New member takes the (rounded) average priority of existing members.
-      const stats = db.prepare('SELECT AVG(priority) AS avg, COUNT(*) AS cnt FROM student_groups WHERE group_id = ?').get(req.params.id) as any;
-      const target = stats && stats.cnt > 0 ? Math.round(stats.avg) : 1;
-      db.prepare('INSERT INTO student_groups (student_id, group_id, priority) VALUES (?, ?, ?)').run(student_id, req.params.id, target);
-    } else {
-      // New member goes after all existing members (MAX priority + 1).
-      const maxPriority = (db.prepare('SELECT MAX(priority) AS m FROM student_groups WHERE group_id = ?').get(req.params.id) as any)?.m;
-      const newPriority = (maxPriority ?? 0) + 1;
-      db.prepare('INSERT INTO student_groups (student_id, group_id, priority) VALUES (?, ?, ?)').run(student_id, req.params.id, newPriority);
-    }
+    const target = assignMemberPriority(req.params.id, group.new_member_priority);
+    db.prepare('INSERT INTO student_groups (student_id, group_id, priority) VALUES (?, ?, ?)').run(student_id, req.params.id, target);
     normalizePriorities();
   });
   setGroup();
