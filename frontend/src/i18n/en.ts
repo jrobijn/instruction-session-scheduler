@@ -59,6 +59,7 @@ const en = {
   manageBuddies: 'Manage Buddies',
   groupBuddiesOn: 'Buddies are grouped together — click to sort normally',
   groupBuddiesOff: 'Buddies are sorted normally — click to group together',
+  buddyScheduledTogether: (name: string) => `Buddy group: ${name} — will be scheduled together when possible`,
   finishBuddyMode: 'Done',
   buddyModeHint: 'Select 2+ ungrouped students to create a buddy group, or use × to remove / "Ungroup" to dissolve.',
   groupSelected: (n: number) => `Group ${n} Students`,

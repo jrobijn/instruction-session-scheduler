@@ -200,13 +200,37 @@ router.get('/:id/members', (req: Request, res: Response) => {
   if (!group) { res.status(404).json({ error: 'Group not found' }); return; }
 
   const members = db.prepare(`
-    SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, s.preferred_days, sg.priority AS priority
+    SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, s.preferred_days, sg.priority AS priority,
+      bgm.buddy_group_id AS buddy_group_id
     FROM students s
     JOIN student_groups sg ON sg.student_id = s.id
+    LEFT JOIN buddy_group_members bgm ON bgm.student_id = s.id
     WHERE sg.group_id = ? AND s.deleted_at IS NULL
     ORDER BY sg.priority IS NULL, sg.priority ASC, s.last_name ASC, s.first_name ASC
-  `).all(req.params.id);
-  res.json(members);
+  `).all(req.params.id) as any[];
+
+  // Build buddy group names from member first names (matches students list behavior)
+  const buddyMemberships = db.prepare(`
+    SELECT bgm.student_id, bgm.buddy_group_id, s.first_name
+    FROM buddy_group_members bgm
+    JOIN students s ON s.id = bgm.student_id AND s.deleted_at IS NULL
+  `).all() as Array<{ student_id: number; buddy_group_id: number; first_name: string }>;
+  const buddyGroupNames = new Map<number, string[]>();
+  for (const m of buddyMemberships) {
+    if (!buddyGroupNames.has(m.buddy_group_id)) buddyGroupNames.set(m.buddy_group_id, []);
+    buddyGroupNames.get(m.buddy_group_id)!.push(m.first_name);
+  }
+
+  const result = members.map(m => {
+    const { buddy_group_id, ...rest } = m;
+    return {
+      ...rest,
+      buddy_group: buddy_group_id
+        ? { id: buddy_group_id, name: (buddyGroupNames.get(buddy_group_id) || []).join(' & ') }
+        : null,
+    };
+  });
+  res.json(result);
 });
 
 // Add a member to a group (replaces their current group since students can only be in one)

@@ -22,6 +22,7 @@ interface Member {
   priority: number;
   cooldown_until: string | null;
   preferred_days: string;
+  buddy_group?: { id: number; name: string } | null;
 }
 
 interface Timetable {
@@ -79,7 +80,7 @@ export default function GroupDetailPage() {
   const [showPrioritySavePrompt, setShowPrioritySavePrompt] = useState(false);
 
   // Members table sorting
-  const [sortCol, setSortCol] = useState<keyof Member>('last_name');
+  const [sortCol, setSortCol] = useState<keyof Member>('priority');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const toggleSort = (col: keyof Member) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -88,13 +89,48 @@ export default function GroupDetailPage() {
 
   const sortIcon = (col: keyof Member) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
-  const sortedMembers = [...members].sort((a, b) => {
-    const av = a[sortCol], bv = b[sortCol];
-    let cmp: number;
-    if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
-    else cmp = String(av).localeCompare(String(bv));
-    return sortDir === 'asc' ? cmp : -cmp;
-  });
+  const [groupBuddies, setGroupBuddies] = useState(() => localStorage.getItem('groupBuddies') !== 'false');
+
+  const toggleGroupBuddies = () => {
+    setGroupBuddies(prev => {
+      const next = !prev;
+      localStorage.setItem('groupBuddies', String(next));
+      return next;
+    });
+  };
+
+  const sortedMembers = (() => {
+    const base = [...members].sort((a, b) => {
+      const av = a[sortCol], bv = b[sortCol];
+      let cmp: number;
+      if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+      else cmp = String(av).localeCompare(String(bv));
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    // Group buddy members together: place them after the first buddy in sort order
+    if (!groupBuddies) return base;
+    const placed = new Set<number>();
+    const result: Member[] = [];
+    for (const m of base) {
+      if (placed.has(m.id)) continue;
+      result.push(m);
+      placed.add(m.id);
+      if (m.buddy_group) {
+        const buddies = base.filter(b => b.id !== m.id && !placed.has(b.id) && b.buddy_group?.id === m.buddy_group!.id);
+        for (const b of buddies) {
+          result.push(b);
+          placed.add(b.id);
+        }
+      }
+    }
+    return result;
+  })();
+
+  // Assign distinct colors to buddy groups
+  const BUDDY_COLORS = ['#e11d48', '#7c3aed', '#0891b2', '#c026d3', '#ea580c', '#4f46e5', '#059669'];
+  const buddyColorMap = new Map<number, string>();
+  const seenBuddyIds = [...new Set(sortedMembers.map(m => m.buddy_group?.id).filter(Boolean))] as number[];
+  seenBuddyIds.forEach((bgId, i) => buddyColorMap.set(bgId, BUDDY_COLORS[i % BUDDY_COLORS.length]));
 
   // Expandable member details
   const [expandedMember, setExpandedMember] = useState<number | null>(null);
@@ -401,6 +437,21 @@ export default function GroupDetailPage() {
           ) : (
             <>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+                {members.some(m => m.buddy_group) && (
+                  <button
+                    className="btn btn-outline"
+                    onClick={toggleGroupBuddies}
+                    title={groupBuddies ? t.groupBuddiesOn : t.groupBuddiesOff}
+                    style={{
+                      padding: '0.4rem 0.5rem', lineHeight: 1, marginRight: '0.5rem',
+                      ...(groupBuddies ? { background: 'var(--hover-row)', color: 'var(--text)' } : {}),
+                    }}
+                  >
+                    <svg style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                    </svg>
+                  </button>
+                )}
                 <button
                   className={`btn ${priorityMode ? 'btn-primary' : 'btn-outline'}`}
                   onClick={togglePriorityMode}
@@ -423,16 +474,35 @@ export default function GroupDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedMembers.map(m => {
+                  {sortedMembers.map((m, idx) => {
                     const isExpanded = expandedMember === m.id;
+                    // Buddy group visual grouping
+                    const hasBuddy = !!m.buddy_group;
+                    const buddyColor = hasBuddy ? buddyColorMap.get(m.buddy_group!.id) || '#3b82f6' : '';
+                    const isFirstInBuddy = hasBuddy && (idx === 0 || sortedMembers[idx - 1].buddy_group?.id !== m.buddy_group!.id);
+                    const isLastInBuddy = hasBuddy && (idx === sortedMembers.length - 1 || sortedMembers[idx + 1].buddy_group?.id !== m.buddy_group!.id);
+                    const buddyRowStyle = hasBuddy ? {
+                      borderLeft: `3px solid ${buddyColor}`,
+                      background: `${buddyColor}08`,
+                      ...(isFirstInBuddy ? { borderTop: `1px solid ${buddyColor}` } : {}),
+                      ...(isLastInBuddy ? { borderBottom: `1px solid ${buddyColor}` } : {}),
+                    } : {};
                     return (
                     <>
                     <tr
                       key={m.id}
                       onClick={() => { if (priorityMode) return; if (isExpanded) setExpandedMember(null); else openMemberDetails(m.id); }}
-                      style={{ cursor: priorityMode ? 'default' : 'pointer' }}
+                      style={{ cursor: priorityMode ? 'default' : 'pointer', ...buddyRowStyle }}
                     >
-                      <td>{m.first_name} {m.last_name}</td>
+                      <td>
+                        {m.first_name} {m.last_name}
+                        {m.buddy_group && (
+                          <svg style={{ width: '14px', height: '14px', flexShrink: 0, marginLeft: '0.4rem', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill={buddyColor} xmlns="http://www.w3.org/2000/svg">
+                            <title>{t.buddyScheduledTogether(m.buddy_group.name)}</title>
+                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                          </svg>
+                        )}
+                      </td>
                       <td onClick={e => { if (priorityMode) e.stopPropagation(); }}>
                         {priorityMode ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>

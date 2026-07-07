@@ -61,6 +61,7 @@ const nl: Translations = {
   manageBuddies: 'Buddies beheren',
   groupBuddiesOn: "Buddies worden gegroepeerd — klik om normaal te sorteren",
   groupBuddiesOff: "Buddies worden normaal gesorteerd — klik om te groeperen",
+  buddyScheduledTogether: (name: string) => `Buddygroep: ${name} — worden samen ingepland indien mogelijk`,
   finishBuddyMode: 'Klaar',
   buddyModeHint: 'Selecteer 2+ ongegroepeerde leerlingen om een buddygroep te maken, of gebruik × om te verwijderen / "Ontgroeperen" om op te heffen.',
   groupSelected: (n: number) => `${n} Leerlingen groeperen`,
