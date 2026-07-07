@@ -169,6 +169,8 @@ const nl: Translations = {
   newMemberPriorityLowestHint: 'Het nieuwe lid komt na alle bestaande leden en wordt dus als laatste uitgenodigd.',
   newMemberPriorityHighest: 'Hoogste prioriteit (vooraan de rij)',
   newMemberPriorityHighestHint: 'Het nieuwe lid krijgt prioriteit 1 en elk bestaand lid schuift één niveau naar achteren.',
+  newMemberPriorityAverage: 'Gemiddelde prioriteit (midden in de rij)',
+  newMemberPriorityAverageHint: 'Het nieuwe lid krijgt de afgeronde gemiddelde prioriteit van de bestaande leden en komt zo midden in de rij te staan.',
 
   // Buddy groups
   buddyGroupsTitle: (count: number) => `Buddygroepen (${count})`,
