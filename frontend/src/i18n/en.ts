@@ -167,6 +167,8 @@ const en = {
   newMemberPriorityLowestHint: 'The new member is placed after all existing members, so they are invited last.',
   newMemberPriorityHighest: 'Highest priority (front of the queue)',
   newMemberPriorityHighestHint: 'The new member takes priority 1 and every existing member is pushed back one level.',
+  newMemberPriorityAverage: 'Average priority (middle of the queue)',
+  newMemberPriorityAverageHint: 'The new member takes the rounded average priority of existing members, placing them in the middle of the queue.',
 
   // Buddy groups
   buddyGroupsTitle: (count: number) => `Buddy Groups (${count})`,

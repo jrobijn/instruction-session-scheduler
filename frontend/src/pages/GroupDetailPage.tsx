@@ -9,7 +9,7 @@ interface GroupDetail {
   name: string;
   is_default: number;
   active: number;
-  new_member_priority: 'highest' | 'lowest';
+  new_member_priority: 'highest' | 'lowest' | 'average';
 }
 
 interface Member {
@@ -266,7 +266,7 @@ export default function GroupDetailPage() {
     setShowPrioritySavePrompt(false);
   };
 
-  const handleChangeNewMemberPriority = async (value: 'highest' | 'lowest') => {
+  const handleChangeNewMemberPriority = async (value: 'highest' | 'lowest' | 'average') => {
     if (!group || group.new_member_priority === value) return;
     setGroup({ ...group, new_member_priority: value });
     try {
@@ -570,6 +570,24 @@ export default function GroupDetailPage() {
               <span style={{ display: 'flex', flexDirection: 'column' }}>
                 <span style={{ fontWeight: 500 }}>{t.newMemberPriorityLowest}</span>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityLowestHint}</span>
+              </span>
+            </label>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
+              padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
+              borderColor: group.new_member_priority === 'average' ? 'var(--primary, #3b82f6)' : 'var(--border)',
+              background: group.new_member_priority === 'average' ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
+            }}>
+              <input
+                type="radio"
+                name="new_member_priority"
+                checked={group.new_member_priority === 'average'}
+                onChange={() => handleChangeNewMemberPriority('average')}
+                style={{ marginTop: '0.2rem' }}
+              />
+              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontWeight: 500 }}>{t.newMemberPriorityAverage}</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.newMemberPriorityAverageHint}</span>
               </span>
             </label>
             <label style={{
