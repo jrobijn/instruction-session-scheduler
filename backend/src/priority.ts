@@ -20,7 +20,19 @@ export function normalizePriorities(): void {
     HAVING MIN(sg.priority) <> 1
   `).all() as Array<{ group_id: number; min_priority: number }>;
 
-  const update = db.prepare('UPDATE student_groups SET priority = priority - ? WHERE group_id = ?');
+  // Shift only the same population the MIN was computed over (active, non-cooldown,
+  // non-deleted). Cooled-down members keep a numeric priority so they remain schedulable
+  // for post-cooldown sessions; excluding them here freezes their value in place instead
+  // of dragging it negative, which would otherwise let them "save up" invitations.
+  const update = db.prepare(`
+    UPDATE student_groups SET priority = priority - ?
+    WHERE group_id = ? AND student_id IN (
+      SELECT id FROM students
+      WHERE active = 1
+        AND deleted_at IS NULL
+        AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))
+    )
+  `);
   for (const g of groups) {
     update.run(g.min_priority - 1, g.group_id);
   }
