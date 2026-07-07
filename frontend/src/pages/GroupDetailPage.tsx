@@ -22,6 +22,7 @@ interface Member {
   priority: number;
   cooldown_until: string | null;
   preferred_days: string;
+  active_invitations: number;
   buddy_group?: { id: number; name: string } | null;
 }
 
@@ -469,6 +470,7 @@ export default function GroupDetailPage() {
                   <tr>
                     <th className="sortable" onClick={() => toggleSort('last_name')}>{t.name}{sortIcon('last_name')}</th>
                     <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
+                    <th className="sortable" onClick={() => toggleSort('active_invitations')}>{t.invitationsColumn}{sortIcon('active_invitations')}</th>
                     <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
                     <th>{t.actions}</th>
                   </tr>
@@ -514,6 +516,7 @@ export default function GroupDetailPage() {
                           m.priority
                         )}
                       </td>
+                      <td>{m.active_invitations}</td>
                       <td>
                         {(() => {
                           const cooldownInfo = getCooldownInfo(m);
@@ -539,7 +542,7 @@ export default function GroupDetailPage() {
                     </tr>
                     {isExpanded && (
                       <tr key={`${m.id}-details`}>
-                        <td colSpan={4} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
+                        <td colSpan={5} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem 2rem' }}>
                             <div>
                               <div>

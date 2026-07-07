@@ -201,7 +201,11 @@ router.get('/:id/members', (req: Request, res: Response) => {
 
   const members = db.prepare(`
     SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, s.preferred_days, sg.priority AS priority,
-      bgm.buddy_group_id AS buddy_group_id
+      bgm.buddy_group_id AS buddy_group_id,
+      (SELECT COUNT(*) FROM invitations i
+        JOIN training_sessions ts ON ts.id = i.session_id
+        WHERE i.student_id = s.id AND i.status IN ('confirmed', 'invited', 'scheduled')
+          AND ts.status != 'completed') AS active_invitations
     FROM students s
     JOIN student_groups sg ON sg.student_id = s.id
     LEFT JOIN buddy_group_members bgm ON bgm.student_id = s.id

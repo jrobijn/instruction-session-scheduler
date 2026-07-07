@@ -204,6 +204,7 @@ const en = {
   instructors: 'Instructors',
   invitations: 'Invitations',
   activeInvitations: 'Active Invitations',
+  invitationsColumn: 'Invitations',
   attendance: 'Attendance',
   confirmDeleteSession: 'Are you sure you want to delete this session?',
   newSessionTitle: 'New Training Session',
