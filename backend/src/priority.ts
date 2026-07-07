@@ -26,6 +26,26 @@ export function normalizePriorities(): void {
   }
 }
 
+// Compute (and, for 'highest', apply the shift for) the priority a member should receive
+// when joining or re-entering a group, according to the given policy mode. AVG/MAX/COUNT
+// ignore NULLs, so un-ranked (inactive) members are naturally excluded. Returns the
+// priority the joining member should be assigned; the caller performs the INSERT/UPDATE.
+export function assignMemberPriority(groupId: number | string | string[], mode: string): number {
+  if (mode === 'highest') {
+    // New/returning member takes priority 1; push every ranked member back one level.
+    db.prepare('UPDATE student_groups SET priority = priority + 1 WHERE group_id = ? AND priority IS NOT NULL').run(groupId);
+    return 1;
+  }
+  if (mode === 'average') {
+    // Takes the rounded average priority of existing ranked members.
+    const stats = db.prepare('SELECT AVG(priority) AS avg, COUNT(priority) AS cnt FROM student_groups WHERE group_id = ?').get(groupId) as any;
+    return stats && stats.cnt > 0 ? Math.round(stats.avg) : 1;
+  }
+  // 'lowest' (default): goes after all ranked members (MAX priority + 1).
+  const maxPriority = (db.prepare('SELECT MAX(priority) AS m FROM student_groups WHERE group_id = ?').get(groupId) as any)?.m;
+  return (maxPriority ?? 0) + 1;
+}
+
 // Pick a group from the given list, weighted by each group's weight (e.g. timetable
 // percentage). Groups with no/zero weight fall back to uniform selection. Weights are
 // implicitly renormalized over the provided groups.

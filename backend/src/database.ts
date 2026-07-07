@@ -107,6 +107,7 @@ export function initializeDatabase(): void {
       color TEXT NOT NULL DEFAULT '#3b82f6',
       is_default INTEGER NOT NULL DEFAULT 0,
       new_member_priority TEXT NOT NULL DEFAULT 'lowest',
+      reactivated_member_priority TEXT NOT NULL DEFAULT 'lowest',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -114,7 +115,7 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS student_groups (
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-      priority INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER,
       PRIMARY KEY(student_id, group_id),
       UNIQUE(student_id)
     );
@@ -569,6 +570,40 @@ export function initializeDatabase(): void {
   const groupNewMemberCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
   if (!groupNewMemberCols.some(c => c.name === 'new_member_priority')) {
     db.exec("ALTER TABLE groups ADD COLUMN new_member_priority TEXT NOT NULL DEFAULT 'lowest'");
+  }
+
+  // Add reactivated_member_priority column to groups if missing (controls how a
+  // student's priority is assigned when they become active again, independent of
+  // new members — same options: 'highest' | 'lowest' | 'average').
+  const groupReactivatedCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
+  if (!groupReactivatedCols.some(c => c.name === 'reactivated_member_priority')) {
+    db.exec("ALTER TABLE groups ADD COLUMN reactivated_member_priority TEXT NOT NULL DEFAULT 'lowest'");
+  }
+
+  // Make student_groups.priority nullable: inactive students are un-ranked (NULL) and
+  // re-enter the queue on reactivation. SQLite cannot drop NOT NULL via ALTER, so rebuild
+  // the table when the existing column is still NOT NULL.
+  const studentGroupCols = db.prepare("PRAGMA table_info(student_groups)").all() as Array<{ name: string; notnull: number }>;
+  const sgPriorityCol = studentGroupCols.find(c => c.name === 'priority');
+  if (sgPriorityCol && sgPriorityCol.notnull === 1) {
+    db.exec(`
+      CREATE TABLE student_groups_new (
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+        priority INTEGER,
+        PRIMARY KEY(student_id, group_id),
+        UNIQUE(student_id)
+      );
+      INSERT INTO student_groups_new (student_id, group_id, priority)
+        SELECT student_id, group_id, priority FROM student_groups;
+      DROP TABLE student_groups;
+      ALTER TABLE student_groups_new RENAME TO student_groups;
+    `);
+    // Un-rank students that are already inactive.
+    db.exec(`
+      UPDATE student_groups SET priority = NULL
+      WHERE student_id IN (SELECT id FROM students WHERE active = 0)
+    `);
   }
 
   // Migrate notifications CHECK constraint to include new types

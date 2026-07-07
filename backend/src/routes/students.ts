@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../database.js';
-import { normalizePriorities } from '../priority.js';
+import { normalizePriorities, assignMemberPriority } from '../priority.js';
 
 const router = Router();
 
@@ -255,17 +255,39 @@ router.put('/:id', (req: Request, res: Response) => {
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   try {
-    db.prepare(`
-      UPDATE students SET
-        first_name = COALESCE(?, first_name),
-        last_name = COALESCE(?, last_name),
-        email = COALESCE(?, email),
-        membership_id = COALESCE(?, membership_id),
-        attended_sessions = COALESCE(?, attended_sessions),
-        active = COALESCE(?, active),
-        preferred_days = COALESCE(?, preferred_days)
-      WHERE id = ?
-    `).run(first_name ?? null, last_name ?? null, email ?? null, membership_id ?? null, attended_sessions ?? null, active ?? null, preferred_days ?? null, req.params.id);
+    const applyUpdate = db.transaction(() => {
+      db.prepare(`
+        UPDATE students SET
+          first_name = COALESCE(?, first_name),
+          last_name = COALESCE(?, last_name),
+          email = COALESCE(?, email),
+          membership_id = COALESCE(?, membership_id),
+          attended_sessions = COALESCE(?, attended_sessions),
+          active = COALESCE(?, active),
+          preferred_days = COALESCE(?, preferred_days)
+        WHERE id = ?
+      `).run(first_name ?? null, last_name ?? null, email ?? null, membership_id ?? null, attended_sessions ?? null, active ?? null, preferred_days ?? null, req.params.id);
+
+      // Priority follows active status: inactive students are un-ranked (NULL); when a
+      // student is reactivated they re-enter their group's queue per the group's
+      // reactivated_member_priority policy.
+      if (active != null && active !== (student as any).active) {
+        if (active === 0) {
+          db.prepare('UPDATE student_groups SET priority = NULL WHERE student_id = ?').run(req.params.id);
+          normalizePriorities();
+        } else {
+          const grp = db.prepare(
+            'SELECT sg.group_id AS group_id, g.reactivated_member_priority AS mode FROM student_groups sg JOIN groups g ON g.id = sg.group_id WHERE sg.student_id = ?'
+          ).get(req.params.id) as any;
+          if (grp) {
+            const target = assignMemberPriority(grp.group_id, grp.mode);
+            db.prepare('UPDATE student_groups SET priority = ? WHERE student_id = ?').run(target, req.params.id);
+            normalizePriorities();
+          }
+        }
+      }
+    });
+    applyUpdate();
 
     const updated = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
     res.json(updated);
@@ -298,6 +320,8 @@ router.delete('/:id', (req: Request, res: Response) => {
 
   // Soft-delete: mark as deleted and deactivate
   db.prepare("UPDATE students SET deleted_at = datetime('now'), active = 0 WHERE id = ?").run(req.params.id);
+  // Un-rank: a deleted student should not occupy a queue position.
+  db.prepare('UPDATE student_groups SET priority = NULL WHERE student_id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
