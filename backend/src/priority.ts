@@ -1,40 +1,41 @@
 import db from './database.js';
 
-// Normalize priorities per group so that, within each group, the lowest-priority
-// active (non-cooldown, non-deleted) member has priority 1. Groups are normalized
-// independently — priority values are only meaningful within a group.
+// Normalize priorities per group so that, within each group, the active
+// (non-cooldown, non-deleted) members form a dense 1..n ranking with no gaps.
+// Merely shifting the group minimum to 1 is not enough: when a member is removed,
+// deleted or enters cooldown its priority value disappears from the active set and
+// leaves a hole (e.g. 1, 3, 4). Renumbering with DENSE_RANK closes those holes while
+// preserving both the existing order and any ties. Groups are normalized independently
+// — priority values are only meaningful within a group.
 export function normalizePriorities(): void {
-  // Snapshot the per-group offset FIRST, then apply it. A single self-referencing
-  // UPDATE (SET priority = priority - (SELECT MIN(priority) - 1 ...)) is unsafe here:
-  // SQLite evaluates the correlated subquery against the partially-updated table, so
-  // once the first row drops to 1 the group MIN becomes 1 and the remaining rows are
-  // left unchanged. Computing the offsets up front makes the operation order-independent.
-  const groups = db.prepare(`
-    SELECT sg.group_id AS group_id, MIN(sg.priority) AS min_priority
+  // Snapshot the target ranks FIRST, then apply them. A self-referencing UPDATE that
+  // reads the group ordering while writing would evaluate its subquery against the
+  // partially-updated table and corrupt the ranking. Materializing the DENSE_RANK
+  // result into JS up front makes the writes order-independent.
+  //
+  // The population is restricted to active/non-cooldown/non-deleted members — the same
+  // set used everywhere else for queue ordering. Cooled-down members keep their numeric
+  // priority so they remain schedulable for post-cooldown sessions; excluding them here
+  // freezes their value in place instead of letting them "save up" invitations.
+  //
+  // DENSE_RANK (not ROW_NUMBER) keeps existing ties collapsed onto the same number;
+  // runtime tie-breaking is handled downstream by name ordering.
+  const ranks = db.prepare(`
+    SELECT sg.group_id AS group_id, sg.student_id AS student_id,
+           DENSE_RANK() OVER (PARTITION BY sg.group_id ORDER BY sg.priority) AS new_priority
     FROM student_groups sg
     JOIN students s ON s.id = sg.student_id
     WHERE s.active = 1
       AND s.deleted_at IS NULL
       AND (s.cooldown_until IS NULL OR s.cooldown_until <= datetime('now'))
-    GROUP BY sg.group_id
-    HAVING MIN(sg.priority) <> 1
-  `).all() as Array<{ group_id: number; min_priority: number }>;
+  `).all() as Array<{ group_id: number; student_id: number; new_priority: number }>;
 
-  // Shift only the same population the MIN was computed over (active, non-cooldown,
-  // non-deleted). Cooled-down members keep a numeric priority so they remain schedulable
-  // for post-cooldown sessions; excluding them here freezes their value in place instead
-  // of dragging it negative, which would otherwise let them "save up" invitations.
   const update = db.prepare(`
-    UPDATE student_groups SET priority = priority - ?
-    WHERE group_id = ? AND student_id IN (
-      SELECT id FROM students
-      WHERE active = 1
-        AND deleted_at IS NULL
-        AND (cooldown_until IS NULL OR cooldown_until <= datetime('now'))
-    )
+    UPDATE student_groups SET priority = ?
+    WHERE group_id = ? AND student_id = ? AND priority <> ?
   `);
-  for (const g of groups) {
-    update.run(g.min_priority - 1, g.group_id);
+  for (const r of ranks) {
+    update.run(r.new_priority, r.group_id, r.student_id, r.new_priority);
   }
 }
 
