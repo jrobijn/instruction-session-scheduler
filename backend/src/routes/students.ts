@@ -224,6 +224,27 @@ router.get('/:id/invitations', (req: Request, res: Response) => {
   res.json(invitations);
 });
 
+// Get full invitation history for a student (all statuses, most recent first)
+router.get('/:id/invitation-history', (req: Request, res: Response) => {
+  const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
+  if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
+
+  const history = db.prepare(`
+    SELECT i.id, i.status, i.invited_at, i.responded_at,
+           ts.date AS session_date, tsl.start_time,
+           d.name AS discipline_name,
+           g.name AS group_name, g.color AS group_color
+    FROM invitations i
+    JOIN training_sessions ts ON ts.id = i.session_id
+    JOIN timeslots tsl ON tsl.id = i.timeslot_id
+    LEFT JOIN disciplines d ON d.id = i.discipline_id
+    LEFT JOIN groups g ON g.id = i.group_id
+    WHERE i.student_id = ?
+    ORDER BY i.invited_at DESC, ts.date DESC, tsl.start_time DESC
+  `).all(req.params.id);
+  res.json(history);
+});
+
 // Create student
 router.post('/', (req: Request, res: Response) => {
   const { first_name, last_name, email, membership_id } = req.body;

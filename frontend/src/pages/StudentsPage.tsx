@@ -26,6 +26,18 @@ interface Timetable {
   timeslots?: Array<{ id: number; start_time: string }>;
 }
 
+interface InvitationHistoryEntry {
+  id: number;
+  status: string;
+  invited_at: string;
+  responded_at: string | null;
+  session_date: string;
+  start_time: string;
+  discipline_name: string | null;
+  group_name: string | null;
+  group_color: string | null;
+}
+
 
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -46,6 +58,9 @@ export default function StudentsPage() {
   const [expandedStudent, setExpandedStudent] = useState<number | null>(null);
   const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
   const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
+  const [historyModal, setHistoryModal] = useState<Student | null>(null);
+  const [historyEntries, setHistoryEntries] = useState<InvitationHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [buddyMode, setBuddyMode] = useState(false);
   const [buddySelection, setBuddySelection] = useState<Set<number>>(new Set());
   const [groupBuddies, setGroupBuddies] = useState(() => localStorage.getItem('groupBuddies') !== 'false');
@@ -98,6 +113,32 @@ export default function StudentsPage() {
   seenBuddyIds.forEach((bgId, i) => buddyColorMap.set(bgId, BUDDY_COLORS[i % BUDDY_COLORS.length]));
 
   const sortIcon = (col: keyof Student) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const invitationBadgeClass = (status: string) =>
+    status === 'confirmed' ? 'badge-confirmed' :
+    status === 'declined' || status === 'cancelled' || status === 'admin_cancelled' || status === 'expired' ? 'badge-declined' :
+    status === 'scheduled' ? 'badge-draft' :
+    'badge-pending';
+
+  const formatInvitedAt = (value: string) => {
+    const d = new Date(value.includes('Z') || value.includes('T') ? value : value.replace(' ', 'T') + 'Z');
+    const dateLocale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
+    return d.toLocaleString(dateLocale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const openHistory = async (student: Student) => {
+    setHistoryModal(student);
+    setHistoryEntries([]);
+    setHistoryLoading(true);
+    try {
+      const history = await api.getStudentInvitationHistory(student.id);
+      setHistoryEntries(history);
+    } catch {
+      setHistoryEntries([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   const load = async () => {
     try {
@@ -381,6 +422,7 @@ export default function StudentsPage() {
               <th className="sortable" onClick={() => toggleSort('no_show_count')}>{t.noShows}{sortIcon('no_show_count')}</th>
               <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
               <th></th>
+              <th></th>
               <th>{t.actions}</th>
             </tr>
           </thead>
@@ -483,6 +525,18 @@ export default function StudentsPage() {
                   )}
                 </td>
                 <td>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    title={t.invitationHistory}
+                    style={{ padding: '0.25rem 0.5rem', lineHeight: 1 }}
+                    onClick={(e) => { e.stopPropagation(); openHistory(s); }}
+                  >
+                    <svg style={{ width: '16px', height: '16px', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                    </svg>
+                  </button>
+                </td>
+                <td>
                   <ActionDropdown actions={[
                     { label: t.edit, onClick: () => openEdit(s) },
                     { label: s.active ? t.deactivate : t.activate, onClick: () => toggleActive(s) },
@@ -492,7 +546,7 @@ export default function StudentsPage() {
               </tr>
               {isExpanded && (
                 <tr key={`${s.id}-details`}>
-                  <td colSpan={buddyMode ? 8 : 7} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
+                  <td colSpan={buddyMode ? 9 : 8} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem 2rem' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.5rem', alignItems: 'baseline' }}>
                         <strong>{t.firstName}:</strong> <span>{s.first_name}</span>
@@ -698,6 +752,64 @@ export default function StudentsPage() {
             <div className="modal-actions">
               <button className="btn btn-outline" onClick={() => setCooldownModal(null)}>{t.cancel}</button>
               <button className="btn btn-primary" onClick={handleSetCooldown} disabled={cooldownDays < 1}>{t.setCooldownButton}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {historyModal && (
+        <div className="modal-overlay modal-overlay-blur" onClick={() => setHistoryModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: '920px', display: 'flex', flexDirection: 'column' }}>
+            <h2>{t.invitationHistory} — {historyModal.first_name} {historyModal.last_name}</h2>
+            {historyLoading ? (
+              <p>{t.loading}</p>
+            ) : historyEntries.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)' }}>{t.noInvitationHistory}</p>
+            ) : (
+              <div style={{ overflowY: 'auto', maxHeight: '60vh' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{t.invitationHistorySession}</th>
+                      <th>{t.timeslot}</th>
+                      <th>{t.group}</th>
+                      <th>{t.invitationHistoryInvitedAt}</th>
+                      <th>{t.invitationHistoryRespondedAt}</th>
+                      <th>{t.status}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyEntries.map(inv => {
+                      const dateLocale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
+                      const sessionDate = new Date(inv.session_date + 'T00:00:00').toLocaleDateString(dateLocale);
+                      return (
+                        <tr key={inv.id}>
+                          <td>{sessionDate}</td>
+                          <td>{inv.start_time.slice(0, 5)}</td>
+                          <td>
+                            {inv.group_name ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: inv.group_color || '#999', marginRight: 8, flexShrink: 0 }} />
+                                {inv.group_name}
+                              </span>
+                            ) : t.noData}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{formatInvitedAt(inv.invited_at)}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{inv.responded_at ? formatInvitedAt(inv.responded_at) : t.noData}</td>
+                          <td>
+                            <span className={`badge ${invitationBadgeClass(inv.status)}`}>
+                              {t.statusMap(inv.status)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="modal-actions">
+              <button className="btn btn-outline" onClick={() => setHistoryModal(null)}>{t.close}</button>
             </div>
           </div>
         </div>
