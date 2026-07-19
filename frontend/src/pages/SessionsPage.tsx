@@ -166,7 +166,7 @@ export default function SessionsPage() {
                       )}
                     </span>
                     {s.total_slots > 0 && (s.status === 'invitations_sent' || s.status === 'completed') ? (
-                      <span className={`badge ${s.confirmed_count >= s.total_slots ? 'badge-confirmed' : 'badge-pending'}`}>
+                      <span className={`badge ${s.status === 'completed' || s.confirmed_count >= s.total_slots ? 'badge-confirmed' : 'badge-pending'}`}>
                         {s.confirmed_count}/{s.total_slots}
                       </span>
                     ) : null}
