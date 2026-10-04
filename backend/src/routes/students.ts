@@ -1,7 +1,5 @@
 import { Router, Request, Response } from 'express';
 import db from '../database.js';
-import { normalizePriorities, assignMemberPriority } from '../priority.js';
-
 const router = Router();
 
 function escapeCsvField(value: string | number | null | undefined): string {
@@ -57,25 +55,6 @@ router.get('/export', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="students.csv"');
   res.send(csv);
-});
-
-// Bulk update student priorities (per-group)
-router.put('/priorities', (req: Request, res: Response) => {
-  const { updates } = req.body;
-  if (!Array.isArray(updates)) { res.status(400).json({ error: 'updates array is required' }); return; }
-
-  const update = db.prepare('UPDATE student_groups SET priority = ? WHERE student_id = ?');
-  const run = db.transaction(() => {
-    for (const { id, priority } of updates) {
-      if (typeof id === 'number' && typeof priority === 'number' && priority >= 0) {
-        update.run(priority, id);
-      }
-    }
-    // Normalize each group so its minimum active student has priority 1
-    normalizePriorities();
-  });
-  run();
-  res.json({ success: true, count: updates.length });
 });
 
 // Import students from CSV
@@ -163,7 +142,7 @@ router.post('/import', (req: Request, res: Response) => {
           if (defaultGroup) {
             const hasGroup = db.prepare('SELECT 1 FROM student_groups WHERE student_id = ?').get(existing.id);
             if (!hasGroup) {
-              db.prepare('INSERT INTO student_groups (student_id, group_id) VALUES (?, ?)').run(existing.id, defaultGroup.id);
+              db.prepare("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))").run(existing.id, defaultGroup.id);
             }
           }
         } else {
@@ -185,7 +164,7 @@ router.post('/import', (req: Request, res: Response) => {
             ...(active != null && !isNaN(active) ? [active] : []),
           );
           if (defaultGroup) {
-            db.prepare('INSERT INTO student_groups (student_id, group_id) VALUES (?, ?)').run(result.lastInsertRowid, defaultGroup.id);
+            db.prepare("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))").run(result.lastInsertRowid, defaultGroup.id);
           }
         }
         imported++;
@@ -256,7 +235,7 @@ router.post('/', (req: Request, res: Response) => {
     // Auto-add to default group
     const defaultGroup = db.prepare("SELECT id FROM groups WHERE is_default = 1").get() as { id: number } | undefined;
     if (defaultGroup) {
-      db.prepare('INSERT OR IGNORE INTO student_groups (student_id, group_id) VALUES (?, ?)').run(studentId, defaultGroup.id);
+      db.prepare("INSERT OR IGNORE INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))").run(studentId, defaultGroup.id);
     }
     const student = db.prepare('SELECT * FROM students WHERE id = ?').get(studentId);
     res.status(201).json(student);
@@ -289,23 +268,8 @@ router.put('/:id', (req: Request, res: Response) => {
         WHERE id = ?
       `).run(first_name ?? null, last_name ?? null, email ?? null, membership_id ?? null, attended_sessions ?? null, active ?? null, preferred_days ?? null, req.params.id);
 
-      // Priority follows active status: inactive students are un-ranked (NULL); when a
-      // student is reactivated they re-enter their group's queue per the group's
-      // reactivated_member_priority policy.
-      if (active != null && active !== (student as any).active) {
-        if (active === 0) {
-          db.prepare('UPDATE student_groups SET priority = NULL WHERE student_id = ?').run(req.params.id);
-          normalizePriorities();
-        } else {
-          const grp = db.prepare(
-            'SELECT sg.group_id AS group_id, g.reactivated_member_priority AS mode FROM student_groups sg JOIN groups g ON g.id = sg.group_id WHERE sg.student_id = ?'
-          ).get(req.params.id) as any;
-          if (grp) {
-            const target = assignMemberPriority(grp.group_id, grp.mode);
-            db.prepare('UPDATE student_groups SET priority = ? WHERE student_id = ?').run(target, req.params.id);
-            normalizePriorities();
-          }
-        }
+      if (active === 1 && (student as any).active === 0) {
+        db.prepare("UPDATE student_groups SET reactivated_at = datetime('now') WHERE student_id = ?").run(req.params.id);
       }
     });
     applyUpdate();
@@ -334,15 +298,8 @@ router.delete('/:id', (req: Request, res: Response) => {
     db.prepare("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?").run(inv.id);
   }
 
-  // Reverse priority increments for cancelled invitations
-  if (activeInvitations.length > 0) {
-    db.prepare('UPDATE student_groups SET priority = priority - ? WHERE student_id = ?').run(activeInvitations.length, req.params.id);
-  }
-
   // Soft-delete: mark as deleted and deactivate
   db.prepare("UPDATE students SET deleted_at = datetime('now'), active = 0 WHERE id = ?").run(req.params.id);
-  // Un-rank: a deleted student should not occupy a queue position.
-  db.prepare('UPDATE student_groups SET priority = NULL WHERE student_id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
@@ -412,7 +369,7 @@ router.get('/:id/groups', (req: Request, res: Response) => {
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
   const group = db.prepare(`
-    SELECT g.id, g.name, g.priority, g.is_default FROM groups g
+    SELECT g.id, g.name, g.is_default FROM groups g
     JOIN student_groups sg ON sg.group_id = g.id
     WHERE sg.student_id = ?
   `).get(req.params.id);
@@ -429,7 +386,7 @@ router.put('/:id/groups', (req: Request, res: Response) => {
   const setGroup = db.transaction(() => {
     db.prepare('DELETE FROM student_groups WHERE student_id = ?').run(req.params.id);
     if (group_id) {
-      db.prepare('INSERT INTO student_groups (student_id, group_id) VALUES (?, ?)').run(req.params.id, group_id);
+      db.prepare("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))").run(req.params.id, group_id);
     }
   });
   setGroup();
@@ -458,7 +415,8 @@ router.delete('/:id/cooldown', (req: Request, res: Response) => {
   const student = db.prepare('SELECT id FROM students WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!student) { res.status(404).json({ error: 'Student not found' }); return; }
 
-  db.prepare('UPDATE students SET cooldown_until = NULL WHERE id = ?').run(req.params.id);
+  // End the cooldown now rather than erasing it, so its end still counts for the queue position.
+  db.prepare("UPDATE students SET cooldown_until = datetime('now') WHERE id = ? AND cooldown_until > datetime('now')").run(req.params.id);
 
   const updated = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
   res.json(updated);

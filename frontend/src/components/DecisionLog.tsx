@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { useT } from '../i18n';
+import { useT, getLocale } from '../i18n';
 
 interface DecisionLogData {
   trigger: 'batch_schedule' | 'replacement';
-  student_priority: number;
+  student_priority?: number;
+  last_turn_at?: string | null;
+  invite_next?: boolean;
   candidate_rank: number;
   candidates_considered: number;
   group_name: string | null;
@@ -52,6 +54,15 @@ export default function DecisionLog({ decisionLog }: { decisionLog: string | nul
   }
 
   const isReplacement = data.trigger === 'replacement';
+  // Logs written before the queue model have no last_turn_at (and may carry student_priority).
+  const isLegacy = data.last_turn_at === undefined;
+  const queueReason = isLegacy
+    ? (data.student_priority !== undefined ? `${t.decisionPriority} ${data.student_priority}` : null)
+    : data.invite_next
+      ? t.decisionInviteNext
+      : data.last_turn_at
+        ? t.decisionLastInvited(new Date(data.last_turn_at.slice(0, 10) + 'T00:00:00').toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB'))
+        : t.decisionNeverInvited;
 
   return (
     <span ref={ref} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
@@ -117,7 +128,7 @@ export default function DecisionLog({ decisionLog }: { decisionLog: string | nul
 
           {/* Selection details */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            {/* Priority + Rank — unified element */}
+            {/* Queue position + reason — unified element */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: '0.6rem',
               background: 'var(--bg)', borderRadius: '0.5rem', padding: '0.45rem 0.6rem',
@@ -129,12 +140,14 @@ export default function DecisionLog({ decisionLog }: { decisionLog: string | nul
                 background: 'var(--primary)', color: 'white',
                 fontWeight: 700, fontSize: '0.85rem', flexShrink: 0,
               }}>
-                {data.student_priority}
+                {isLegacy && data.student_priority !== undefined ? data.student_priority : data.candidate_rank}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
-                <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>
-                  {t.decisionPriority} {data.student_priority}
-                </span>
+                {queueReason && (
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>
+                    {queueReason}
+                  </span>
+                )}
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                   {t.decisionCandidateRank(data.candidate_rank, data.candidates_considered)}
                 </span>

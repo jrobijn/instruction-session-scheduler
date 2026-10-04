@@ -9,9 +9,12 @@ interface GroupDetail {
   name: string;
   is_default: number;
   active: number;
-  new_member_priority: 'highest' | 'lowest' | 'average';
-  reactivated_member_priority: 'highest' | 'lowest' | 'average';
+  new_member_priority: 'front' | 'back';
+  reactivated_member_priority: 'front' | 'back';
+  cooldown_member_priority: 'front' | 'back';
 }
+
+type QueuePolicyField = 'new_member_priority' | 'reactivated_member_priority' | 'cooldown_member_priority';
 
 interface Member {
   id: number;
@@ -19,7 +22,10 @@ interface Member {
   last_name: string;
   email: string;
   active: number;
-  priority: number;
+  queue_position: number | null;
+  last_turn_at: string | null;
+  invite_next: boolean;
+  queue_override: { reason: 'joined' | 'reactivated' | 'cooldown'; at: string } | null;
   cooldown_until: string | null;
   preferred_days: string;
   active_invitations: number;
@@ -75,13 +81,8 @@ export default function GroupDetailPage() {
   const [disciplines, setDisciplines] = useState<DisciplineItem[]>([]);
   const [allDisciplines, setAllDisciplines] = useState<DisciplineItem[]>([]);
 
-  // Priority editing state (scoped to this group's members)
-  const [priorityMode, setPriorityMode] = useState(false);
-  const [editedPriorities, setEditedPriorities] = useState<Record<number, number>>({});
-  const [showPrioritySavePrompt, setShowPrioritySavePrompt] = useState(false);
-
   // Members table sorting
-  const [sortCol, setSortCol] = useState<keyof Member>('priority');
+  const [sortCol, setSortCol] = useState<keyof Member>('queue_position');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const toggleSort = (col: keyof Member) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -103,6 +104,8 @@ export default function GroupDetailPage() {
   const sortedMembers = (() => {
     const base = [...members].sort((a, b) => {
       const av = a[sortCol], bv = b[sortCol];
+      // Empty values (e.g. inactive members' queue position, never invited) always sort last
+      if (av == null || bv == null) return av == null ? (bv == null ? 0 : 1) : -1;
       let cmp: number;
       if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
       else cmp = String(av).localeCompare(String(bv));
@@ -255,9 +258,6 @@ export default function GroupDetailPage() {
     }
   };
 
-  const getMemberPriority = (m: Member) =>
-    priorityMode && m.id in editedPriorities ? editedPriorities[m.id] : m.priority;
-
   const getCooldownInfo = (m: Member) => {
     if (!m.cooldown_until || new Date(m.cooldown_until + 'Z') <= new Date()) return null;
     const until = new Date(m.cooldown_until + 'Z');
@@ -266,60 +266,20 @@ export default function GroupDetailPage() {
     return { days, date: until.toLocaleDateString(dateLocale) };
   };
 
-  const togglePriorityMode = () => {
-    if (priorityMode) {
-      const changedCount = Object.entries(editedPriorities).filter(
-        ([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio
-      ).length;
-      if (changedCount > 0) {
-        setShowPrioritySavePrompt(true);
-      } else {
-        setPriorityMode(false);
-        setEditedPriorities({});
-      }
-    } else {
-      setPriorityMode(true);
-      setEditedPriorities({});
-    }
-  };
-
-  const savePriorities = async () => {
-    const updates = Object.entries(editedPriorities)
-      .filter(([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio)
-      .map(([mid, priority]) => ({ id: Number(mid), priority }));
+  const handleToggleInviteNext = async (m: Member) => {
     try {
-      await api.bulkUpdatePriorities(updates);
-      await load();
-    } catch (err: any) {
-      alert(err.message);
-    }
-    setPriorityMode(false);
-    setEditedPriorities({});
-    setShowPrioritySavePrompt(false);
-  };
-
-  const discardPriorities = () => {
-    setPriorityMode(false);
-    setEditedPriorities({});
-    setShowPrioritySavePrompt(false);
-  };
-
-  const handleChangeNewMemberPriority = async (value: 'highest' | 'lowest' | 'average') => {
-    if (!group || group.new_member_priority === value) return;
-    setGroup({ ...group, new_member_priority: value });
-    try {
-      await api.updateGroup(group.id, { new_member_priority: value });
-    } catch (err: any) {
-      alert(err.message);
+      await api.setGroupMemberInviteNext(Number(id), m.id, !m.invite_next);
       load();
+    } catch (err: any) {
+      alert(err.message);
     }
   };
 
-  const handleChangeReactivatedMemberPriority = async (value: 'highest' | 'lowest' | 'average') => {
-    if (!group || group.reactivated_member_priority === value) return;
-    setGroup({ ...group, reactivated_member_priority: value });
+  const handleChangeQueuePolicy = async (field: QueuePolicyField, value: 'front' | 'back') => {
+    if (!group || group[field] === value) return;
+    setGroup({ ...group, [field]: value });
     try {
-      await api.updateGroup(group.id, { reactivated_member_priority: value });
+      await api.updateGroup(group.id, { [field]: value });
     } catch (err: any) {
       alert(err.message);
       load();
@@ -437,6 +397,7 @@ export default function GroupDetailPage() {
             </div>
           ) : (
             <>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 0 }}>{t.queueHint}</p>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
                 {members.some(m => m.buddy_group) && (
                   <button
@@ -453,23 +414,13 @@ export default function GroupDetailPage() {
                     </svg>
                   </button>
                 )}
-                <button
-                  className={`btn ${priorityMode ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={togglePriorityMode}
-                >
-                  {priorityMode ? t.finishAdjusting : t.adjustPriorities}
-                </button>
               </div>
-              {priorityMode && (
-                <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-                  {t.priorityModeHint}
-                </div>
-              )}
               <table>
                 <thead>
                   <tr>
+                    <th className="sortable" onClick={() => toggleSort('queue_position')}>{t.queuePosition}{sortIcon('queue_position')}</th>
                     <th className="sortable" onClick={() => toggleSort('last_name')}>{t.name}{sortIcon('last_name')}</th>
-                    <th className="sortable" onClick={() => toggleSort('priority')}>{t.priority}{sortIcon('priority')}</th>
+                    <th className="sortable" onClick={() => toggleSort('last_turn_at')}>{t.lastInvited}{sortIcon('last_turn_at')}</th>
                     <th className="sortable" onClick={() => toggleSort('active_invitations')}>{t.invitationsColumn}{sortIcon('active_invitations')}</th>
                     <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
                     <th>{t.actions}</th>
@@ -493,9 +444,38 @@ export default function GroupDetailPage() {
                     <>
                     <tr
                       key={m.id}
-                      onClick={() => { if (priorityMode) return; if (isExpanded) setExpandedMember(null); else openMemberDetails(m.id); }}
-                      style={{ cursor: priorityMode ? 'default' : 'pointer', ...buddyRowStyle }}
+                      onClick={() => { if (isExpanded) setExpandedMember(null); else openMemberDetails(m.id); }}
+                      style={{ cursor: 'pointer', ...buddyRowStyle }}
                     >
+                      <td>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                          {m.queue_position ?? '—'}
+                          {m.queue_override && !m.invite_next && m.queue_position != null && (
+                            <span
+                              title={t.queueOverrideTooltip(
+                                m.queue_override.reason,
+                                new Date(m.queue_override.at.replace(' ', 'T') + 'Z').toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB'),
+                              )}
+                              style={{ display: 'inline-flex', cursor: 'help' }}
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 7v6"/>
+                                <path d="M12 17h.01"/>
+                              </svg>
+                            </span>
+                          )}
+                          {m.invite_next && (
+                            <span title={t.inviteNextTooltip} style={{ display: 'inline-flex', cursor: 'help' }}>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 7v6"/>
+                                <path d="M12 17h.01"/>
+                              </svg>
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <td>
                         {m.first_name} {m.last_name}
                         {m.buddy_group && (
@@ -505,16 +485,10 @@ export default function GroupDetailPage() {
                           </svg>
                         )}
                       </td>
-                      <td onClick={e => { if (priorityMode) e.stopPropagation(); }}>
-                        {priorityMode ? (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [m.id]: Math.max(0, getMemberPriority(m) - 1) })}>−</button>
-                            <span style={{ minWidth: '2ch', textAlign: 'center', fontWeight: getMemberPriority(m) !== m.priority ? 700 : 400, color: getMemberPriority(m) !== m.priority ? '#2563eb' : undefined }}>{getMemberPriority(m)}</span>
-                            <button className="btn btn-outline btn-sm" onClick={() => setEditedPriorities({ ...editedPriorities, [m.id]: getMemberPriority(m) + 1 })}>+</button>
-                          </span>
-                        ) : (
-                          m.priority
-                        )}
+                      <td>
+                        {m.last_turn_at
+                          ? new Date(m.last_turn_at.slice(0, 10) + 'T00:00:00').toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB')
+                          : t.neverInvited}
                       </td>
                       <td>{m.active_invitations}</td>
                       <td>
@@ -536,13 +510,14 @@ export default function GroupDetailPage() {
                       </td>
                       <td onClick={e => e.stopPropagation()}>
                         <ActionDropdown actions={[
+                          { label: m.invite_next ? t.cancelInviteNext : t.inviteNext, onClick: () => handleToggleInviteNext(m) },
                           { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
                         ]} />
                       </td>
                     </tr>
                     {isExpanded && (
                       <tr key={`${m.id}-details`}>
-                        <td colSpan={5} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
+                        <td colSpan={6} style={{ background: 'var(--bg)', padding: '1rem 1.5rem' }}>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem 2rem' }}>
                             <div>
                               <div>
@@ -635,18 +610,16 @@ export default function GroupDetailPage() {
       )}
 
       {tab === 'settings' && (() => {
-        const priorityOptions: Array<{ value: 'lowest' | 'average' | 'highest'; label: string; hint: string }> = [
-          { value: 'lowest', label: t.newMemberPriorityLowest, hint: t.newMemberPriorityLowestHint },
-          { value: 'average', label: t.newMemberPriorityAverage, hint: t.newMemberPriorityAverageHint },
-          { value: 'highest', label: t.newMemberPriorityHighest, hint: t.newMemberPriorityHighestHint },
+        const queueOptions: Array<{ value: 'back' | 'front'; label: string; hint: string }> = [
+          { value: 'back', label: t.queueBack, hint: t.queueBackHint },
+          { value: 'front', label: t.queueFront, hint: t.queueFrontHint },
         ];
         const renderChoice = (
-          radioName: string,
-          current: 'lowest' | 'average' | 'highest',
-          onChange: (v: 'lowest' | 'average' | 'highest') => void,
+          radioName: QueuePolicyField,
+          current: 'back' | 'front',
         ) => (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
-            {priorityOptions.map(opt => (
+            {queueOptions.map(opt => (
               <label key={opt.value} style={{
                 display: 'flex', alignItems: 'flex-start', gap: '0.75rem', cursor: 'pointer',
                 padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid',
@@ -657,7 +630,7 @@ export default function GroupDetailPage() {
                   type="radio"
                   name={radioName}
                   checked={current === opt.value}
-                  onChange={() => onChange(opt.value)}
+                  onChange={() => handleChangeQueuePolicy(radioName, opt.value)}
                   style={{ marginTop: '0.2rem' }}
                 />
                 <span style={{ display: 'flex', flexDirection: 'column' }}>
@@ -670,33 +643,20 @@ export default function GroupDetailPage() {
         );
         return (
           <div style={{ maxWidth: '640px' }}>
-            <h3 style={{ marginTop: 0 }}>{t.newMemberPriorityTitle}</h3>
-            <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.newMemberPriorityHint}</p>
-            {renderChoice('new_member_priority', group.new_member_priority, handleChangeNewMemberPriority)}
+            <h3 style={{ marginTop: 0 }}>{t.newMemberQueueTitle}</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.newMemberQueueHint}</p>
+            {renderChoice('new_member_priority', group.new_member_priority)}
 
-            <h3 style={{ marginTop: '2rem' }}>{t.reactivatedMemberPriorityTitle}</h3>
-            <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.reactivatedMemberPriorityHint}</p>
-            {renderChoice('reactivated_member_priority', group.reactivated_member_priority, handleChangeReactivatedMemberPriority)}
+            <h3 style={{ marginTop: '2rem' }}>{t.reactivatedMemberQueueTitle}</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.reactivatedMemberQueueHint}</p>
+            {renderChoice('reactivated_member_priority', group.reactivated_member_priority)}
+
+            <h3 style={{ marginTop: '2rem' }}>{t.cooldownMemberQueueTitle}</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>{t.cooldownMemberQueueHint}</p>
+            {renderChoice('cooldown_member_priority', group.cooldown_member_priority)}
           </div>
         );
       })()}
-
-      {showPrioritySavePrompt && (
-        <div className="modal-overlay" onClick={discardPriorities}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-            <h2>{t.adjustPriorities}</h2>
-            <p>{t.prioritySavePrompt(
-              Object.entries(editedPriorities).filter(
-                ([mid, prio]) => members.find(m => m.id === Number(mid))?.priority !== prio
-              ).length
-            )}</p>
-            <div className="modal-actions">
-              <button className="btn btn-outline" onClick={discardPriorities}>{t.discardChanges}</button>
-              <button className="btn btn-primary" onClick={savePriorities}>{t.saveChanges}</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

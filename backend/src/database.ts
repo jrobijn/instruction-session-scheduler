@@ -21,7 +21,6 @@ export function initializeDatabase(): void {
       membership_id TEXT NOT NULL DEFAULT '',
       attended_sessions INTEGER NOT NULL DEFAULT 0,
       no_show_count INTEGER NOT NULL DEFAULT 0,
-      priority INTEGER NOT NULL DEFAULT 1,
       preferred_days TEXT NOT NULL DEFAULT '0|1|2|3|4|5|6',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -106,8 +105,9 @@ export function initializeDatabase(): void {
       name TEXT NOT NULL UNIQUE,
       color TEXT NOT NULL DEFAULT '#3b82f6',
       is_default INTEGER NOT NULL DEFAULT 0,
-      new_member_priority TEXT NOT NULL DEFAULT 'lowest',
-      reactivated_member_priority TEXT NOT NULL DEFAULT 'lowest',
+      new_member_priority TEXT NOT NULL DEFAULT 'back',
+      reactivated_member_priority TEXT NOT NULL DEFAULT 'back',
+      cooldown_member_priority TEXT NOT NULL DEFAULT 'back',
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -115,7 +115,9 @@ export function initializeDatabase(): void {
     CREATE TABLE IF NOT EXISTS student_groups (
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-      priority INTEGER,
+      joined_at TEXT,
+      reactivated_at TEXT,
+      invite_next_at TEXT,
       PRIMARY KEY(student_id, group_id),
       UNIQUE(student_id)
     );
@@ -390,17 +392,6 @@ export function initializeDatabase(): void {
     db.exec('ALTER TABLE students ADD COLUMN cooldown_until TEXT');
   }
 
-  // Add priority column to students if missing
-  const studentCols4 = db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>;
-  if (!studentCols4.some(c => c.name === 'priority')) {
-    db.exec('ALTER TABLE students ADD COLUMN priority INTEGER NOT NULL DEFAULT 1');
-    // Backfill: set priority = attended_sessions + 1, then normalize so min = 1
-    db.exec('UPDATE students SET priority = attended_sessions + 1');
-    const minP = (db.prepare('SELECT MIN(priority) AS m FROM students').get() as any)?.m || 1;
-    if (minP > 1) {
-      db.exec(`UPDATE students SET priority = priority - ${minP - 1}`);
-    }
-  }
   // Add removed column to session_slots if missing
   const slotCols = db.prepare("PRAGMA table_info(session_slots)").all() as Array<{ name: string }>;
   if (!slotCols.some(c => c.name === 'removed')) {
@@ -541,69 +532,50 @@ export function initializeDatabase(): void {
     `);
   }
 
-  // Migrate priority from global (students.priority) to per-group (student_groups.priority)
-  const sgPriorityCols = db.prepare("PRAGMA table_info(student_groups)").all() as Array<{ name: string }>;
-  if (!sgPriorityCols.some(c => c.name === 'priority')) {
-    db.exec('ALTER TABLE student_groups ADD COLUMN priority INTEGER NOT NULL DEFAULT 1');
-    // Backfill from the old global students.priority using DENSE_RANK per group so each
-    // group gets gapless 1..n values while preserving relative order and existing ties.
-    const studentsHavePriority = (db.prepare("PRAGMA table_info(students)").all() as Array<{ name: string }>)
-      .some(c => c.name === 'priority');
-    if (studentsHavePriority) {
-      db.exec(`
-        WITH ranked AS (
-          SELECT sg.student_id,
-                 DENSE_RANK() OVER (PARTITION BY sg.group_id ORDER BY s.priority) AS new_priority
-          FROM student_groups sg
-          JOIN students s ON s.id = sg.student_id
-        )
-        UPDATE student_groups
-        SET priority = (SELECT new_priority FROM ranked WHERE ranked.student_id = student_groups.student_id)
-        WHERE student_id IN (SELECT student_id FROM ranked)
-      `);
-    }
-  }
-
-  // Add new_member_priority column to groups if missing (controls how a new member's
-  // priority is assigned: 'highest' = priority 1 (existing members pushed back), or
-  // 'lowest' = MAX(priority) + 1 (new member goes after all existing members).
+  // Add queue policy columns to groups if missing ('front' | 'back')
   const groupNewMemberCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
   if (!groupNewMemberCols.some(c => c.name === 'new_member_priority')) {
-    db.exec("ALTER TABLE groups ADD COLUMN new_member_priority TEXT NOT NULL DEFAULT 'lowest'");
+    db.exec("ALTER TABLE groups ADD COLUMN new_member_priority TEXT NOT NULL DEFAULT 'back'");
   }
-
-  // Add reactivated_member_priority column to groups if missing (controls how a
-  // student's priority is assigned when they become active again, independent of
-  // new members — same options: 'highest' | 'lowest' | 'average').
   const groupReactivatedCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
   if (!groupReactivatedCols.some(c => c.name === 'reactivated_member_priority')) {
-    db.exec("ALTER TABLE groups ADD COLUMN reactivated_member_priority TEXT NOT NULL DEFAULT 'lowest'");
+    db.exec("ALTER TABLE groups ADD COLUMN reactivated_member_priority TEXT NOT NULL DEFAULT 'back'");
   }
 
-  // Make student_groups.priority nullable: inactive students are un-ranked (NULL) and
-  // re-enter the queue on reactivation. SQLite cannot drop NOT NULL via ALTER, so rebuild
-  // the table when the existing column is still NOT NULL.
-  const studentGroupCols = db.prepare("PRAGMA table_info(student_groups)").all() as Array<{ name: string; notnull: number }>;
-  const sgPriorityCol = studentGroupCols.find(c => c.name === 'priority');
-  if (sgPriorityCol && sgPriorityCol.notnull === 1) {
+  // Queue model: order is derived from invitation history; drop the old numeric priorities.
+  for (const table of ['students', 'student_groups']) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (cols.some(c => c.name === 'priority')) {
+      db.exec(`ALTER TABLE ${table} DROP COLUMN priority`);
+    }
+  }
+  const sgQueueCols = db.prepare("PRAGMA table_info(student_groups)").all() as Array<{ name: string }>;
+  if (!sgQueueCols.some(c => c.name === 'joined_at')) {
+    db.exec('ALTER TABLE student_groups ADD COLUMN joined_at TEXT');
+  }
+  if (!sgQueueCols.some(c => c.name === 'reactivated_at')) {
+    db.exec('ALTER TABLE student_groups ADD COLUMN reactivated_at TEXT');
+  }
+  // Superseded by joined_at/reactivated_at; its origin is unknown, so treat it as a join time.
+  if (sgQueueCols.some(c => c.name === 'activated_at')) {
     db.exec(`
-      CREATE TABLE student_groups_new (
-        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-        group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-        priority INTEGER,
-        PRIMARY KEY(student_id, group_id),
-        UNIQUE(student_id)
-      );
-      INSERT INTO student_groups_new (student_id, group_id, priority)
-        SELECT student_id, group_id, priority FROM student_groups;
-      DROP TABLE student_groups;
-      ALTER TABLE student_groups_new RENAME TO student_groups;
+      UPDATE student_groups SET joined_at = activated_at WHERE joined_at IS NULL AND activated_at IS NOT NULL;
+      ALTER TABLE student_groups DROP COLUMN activated_at;
     `);
-    // Un-rank students that are already inactive.
-    db.exec(`
-      UPDATE student_groups SET priority = NULL
-      WHERE student_id IN (SELECT id FROM students WHERE active = 0)
-    `);
+  }
+  if (!sgQueueCols.some(c => c.name === 'invite_next_at')) {
+    db.exec('ALTER TABLE student_groups ADD COLUMN invite_next_at TEXT');
+  }
+  // Map legacy policy values ('highest'|'lowest'|'average') onto 'front'|'back'.
+  db.exec(`
+    UPDATE groups SET new_member_priority = CASE WHEN new_member_priority = 'highest' THEN 'front' ELSE 'back' END
+    WHERE new_member_priority NOT IN ('front', 'back');
+    UPDATE groups SET reactivated_member_priority = CASE WHEN reactivated_member_priority = 'highest' THEN 'front' ELSE 'back' END
+    WHERE reactivated_member_priority NOT IN ('front', 'back');
+  `);
+  const groupCooldownCols = db.prepare("PRAGMA table_info(groups)").all() as Array<{ name: string }>;
+  if (!groupCooldownCols.some(c => c.name === 'cooldown_member_priority')) {
+    db.exec("ALTER TABLE groups ADD COLUMN cooldown_member_priority TEXT NOT NULL DEFAULT 'back'");
   }
 
   // Migrate notifications CHECK constraint to include new types
