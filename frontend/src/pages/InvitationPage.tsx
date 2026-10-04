@@ -132,6 +132,7 @@ export default function InvitationPage() {
               invitation.status === 'cancelled' ? 'badge-declined' :
               invitation.status === 'admin_cancelled' ? 'badge-declined' :
               invitation.status === 'expired' ? 'badge-declined' :
+              invitation.status === 'invalidated' ? 'badge-declined' :
               'badge-pending'
             }`}>
               {t.statusMap(invitation.status)}
@@ -170,6 +171,12 @@ export default function InvitationPage() {
         {invitation.status === 'expired' && !actionDone && (
           <div className="alert alert-error">
             {t.invitationExpiredMsg}
+          </div>
+        )}
+
+        {invitation.status === 'invalidated' && !actionDone && (
+          <div className="alert alert-error">
+            {t.invitationInvalidatedMsg}
           </div>
         )}
 

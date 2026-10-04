@@ -6,6 +6,9 @@ interface Settings {
   [key: string]: string;
 }
 
+// Intl.supportedValuesOf is ES2022; the frontend targets ES2020 libs.
+const TIME_ZONES: string[] = (Intl as unknown as { supportedValuesOf?: (key: 'timeZone') => string[] }).supportedValuesOf?.('timeZone') ?? [];
+
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({});
@@ -106,6 +109,23 @@ export default function SettingsPage() {
           </div>
             <small style={{ color: 'var(--text-muted)' }}>{t.settingClubDaysDesc}</small>
             {saved === 'club_days' && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
+        </div>
+
+        <div className="form-group">
+          <label>{t.settingTimezone}</label>
+          <select
+            value={settings.timezone || 'Europe/Amsterdam'}
+            onChange={e => {
+              setSettings({ ...settings, timezone: e.target.value });
+              saveSetting('timezone', e.target.value);
+            }}
+          >
+            {[...new Set([settings.timezone || 'Europe/Amsterdam', ...TIME_ZONES])].sort().map(tz => (
+              <option key={tz} value={tz}>{tz}</option>
+            ))}
+          </select>
+          <small style={{ color: 'var(--text-muted)' }}>{t.settingTimezoneDesc}</small>
+          {saved === 'timezone' && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
         </div>
       </div>
     </div>

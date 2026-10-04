@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../database.js';
+import { isValidTimeZone } from '../expiryTimers.js';
 
 let onExpirySettingsChanged: (() => void) | null = null;
 export function setExpirySettingsChangedCallback(cb: () => void) {
@@ -22,10 +23,13 @@ router.get('/', (_req: Request, res: Response) => {
 router.put('/:key', (req: Request, res: Response) => {
   const { value } = req.body;
   if (value === undefined) { res.status(400).json({ error: 'Value is required' }); return; }
+  if (req.params.key === 'timezone' && !isValidTimeZone(String(value))) {
+    res.status(400).json({ error: 'Invalid time zone' }); return;
+  }
 
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(req.params.key, String(value));
 
-  if (req.params.key === 'invitation_expiry_minutes' && onExpirySettingsChanged) {
+  if ((req.params.key === 'invitation_expiry_minutes' || req.params.key === 'timezone') && onExpirySettingsChanged) {
     onExpirySettingsChanged();
   }
 
