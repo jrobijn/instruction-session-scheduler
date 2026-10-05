@@ -1,6 +1,6 @@
 # Instruction Session Scheduler
 
-A web application for scheduling instruction sessions at a sports club. Features an admin panel for managing students, instructors, groups, timetables, and training sessions — with an automated scheduling algorithm that takes into account student priority, group allocation, preferred days and timeslots, buddy groups, cooldown periods, and discipline access.
+A web application for scheduling instruction sessions at a sports club. Features an admin panel for managing students, instructors, groups, timetables, and training sessions — with an automated scheduling algorithm that takes into account whose turn it is, group allocation, preferred days and timeslots, buddy groups, cooldown periods, and discipline access.
 
 ## Features
 
@@ -10,7 +10,7 @@ A web application for scheduling instruction sessions at a sports club. Features
 - **Disciplines**: Define disciplines (e.g. swimming, tennis) with abbreviations. Control which groups have access to which disciplines.
 - **Timetables**: Create reusable timetable templates with configurable timeslots and group percentage allocations (e.g. Group A: 60%, Group B: 40%). Mark a timetable as default for new sessions.
 - **Buddy Groups**: Link 2+ students so they are always scheduled together at adjacent timeslots
-- **Automatic Schedule Generation**: Priority-based algorithm that considers group allocation, preferred days/timeslots, buddy groups, cooldown periods, and discipline access (see [Scheduling Algorithm](#scheduling-algorithm) below)
+- **Automatic Schedule Generation**: Turn-based algorithm that considers group allocation, preferred days/timeslots, buddy groups, cooldown periods, and discipline access (see [Scheduling Algorithm](#scheduling-algorithm) below)
 - **Email Invitations**: Sends localized invitation emails (English/Dutch) with personal RSVP links
 - **Student RSVP**: Students confirm or decline via a personal token-based link
 - **Invitation Expiry**: Configurable expiry timer (default: 120 minutes) — expired invitations automatically trigger replacement
@@ -81,7 +81,7 @@ Configurable via the Settings page:
 2. **Create Timetable**: Define timeslots and assign groups with percentage allocations (e.g. Group A: 60%, Group B: 40%).
 3. **Create Session**: Create a training session for a specific date; attach a timetable.
 4. **Assign Instructors**: Select which instructors are available for that session. Each instructor creates one slot per timeslot.
-5. **Generate Schedule**: Click "Generate Schedule" — the algorithm selects students based on priority, group quotas, preferred timeslots, buddy constraints, and more (see below).
+5. **Generate Schedule**: Click "Generate Schedule" — the algorithm selects students based on whose turn it is, group quotas, preferred timeslots, buddy constraints, and more (see below).
 6. **Send Invitations**: Click "Send Invitation Emails" to email students with personal RSVP links.
 7. **Students Respond**: Students click their link to confirm or decline. The admin UI updates in real time via SSE.
 8. **Auto-Replacement**: If a student declines or their invitation expires, the next eligible student is automatically invited and emailed.
@@ -106,7 +106,7 @@ A student is eligible for scheduling only if **all** of the following are true:
 5. **Group membership**: the student belongs to a group that is assigned to the session's timetable
 6. **Discipline access**: the student's group has at least one active discipline linked via `discipline_groups`
 
-Within each group, eligible students are sorted by **priority ascending** (lowest first), then alphabetically by last name and first name. Priority is stored **per group** (each student belongs to exactly one group), starts at 1, and is incremented each time a student is invited, ensuring that members who have been invited least often within their group are selected first. Priorities are normalized per group after each operation so the lowest active member of each group always has priority 1. Because priority values are only comparable within a group, the algorithm never compares priorities across groups.
+Within each group, eligible students are ordered by their **invite queue** (see [Invite Queue](#invite-queue)): whoever has waited longest since their last counted invitation goes first; ties are broken randomly. Queues are per group, so the algorithm never compares queue positions across groups.
 
 ### Group Allocation
 
@@ -114,7 +114,7 @@ Each timetable assigns groups with percentage allocations (e.g. Group A: 60%, Gr
 
 1. Computes the number of slots per group: `floor(available_slots × percentage / 100)`
 2. Distributes any remainder slots round-robin across groups (in timetable-defined order)
-3. Fills each group's quota from its eligible members, ordered by that group's priority
+3. Fills each group's quota from its eligible members, in that group's queue order
 
 ### Timeslot Assignment
 
@@ -132,24 +132,26 @@ Students linked in a **buddy group** are scheduled together:
 
 ### Overflow Pass
 
-After each group's quota is filled, a second pass fills any remaining empty slots with eligible students from any timetable group. Because priorities are only comparable within a group, the pass repeatedly picks a group at **random, weighted by each group's timetable percentage**, then takes that group's highest-priority remaining candidate. This ensures no slots go to waste when some groups have fewer eligible students than their allocation, while keeping overflow selection proportional to each group's share.
+After each group's quota is filled, a second pass fills any remaining empty slots with eligible students from any timetable group. Because queues are per group, the pass repeatedly picks a group at **random, weighted by each group's timetable percentage**, then takes the first remaining candidate in that group's queue. This ensures no slots go to waste when some groups have fewer eligible students than their allocation, while keeping overflow selection proportional to each group's share.
 
 ### Auto-Replacement Algorithm
 
 When a student declines or their invitation expires, the replacement algorithm (`findAndInviteReplacement`) finds a substitute:
 
-1. **Same-group preference**: first tries to find a replacement from the same group as the original invitation, ordered by that group's priority
-2. **Cross-group fallback**: if no same-group student is available, buckets eligible candidates by group and picks a group at **random, weighted by each group's timetable percentage**, then takes that group's highest-priority candidate
+1. **Same-group preference**: first tries to find a replacement from the same group as the original invitation, in that group's queue order
+2. **Cross-group fallback**: if no same-group student is available, buckets eligible candidates by group and picks a group at **random, weighted by each group's timetable percentage**, then takes the first candidate in that group's queue
 3. The replacement must pass the same eligibility filters (active, preferred days, no cooldown, not already invited on the same date, preferred timeslot match, discipline access)
 4. The replacement inherits the exact timeslot and instructor slot of the declined/expired invitation
 5. An invitation email is sent immediately and the expiry timer starts
 
-### Priority Management
+### Invite Queue
 
-- Priority is stored per group; each time a student is invited (whether by schedule generation or as a replacement), their priority within their group is incremented by 1
-- When schedule generation removes previous auto-generated invitations, the priority increment for those students is reversed
-- After any priority change, priorities are normalized per group so the lowest active, non-cooldown member of each group has priority 1
-- Administrators can manually adjust member priorities from the **Group detail page** (Members tab)
+There is no stored priority number; the queue is derived from invitation history, so it needs no manual upkeep.
+
+- A student's **last turn** is the date of the latest session they have a `scheduled`, `invited` or `confirmed` invitation for. Declined, expired and (admin-)cancelled invitations do not count, and regenerating a schedule simply deletes the old invitations — so no reversal bookkeeping is needed.
+- Students who waited longest go first; never-invited students go to the front.
+- **New members / reactivated members / after a cooldown** (per-group settings): the moments a student joined a group (`joined_at`), was reactivated (`reactivated_at`) and ended a cooldown (`cooldown_until`) are always stored. For each setting set to *Back of the queue*, that moment counts like a last turn (the student is ordered by the latest of them); with *By invitation history* it is ignored. Settings are applied at query time, so changing one immediately re-orders affected members — existing invitations are never changed. Removing a cooldown early ends it now instead of erasing it, so it still counts.
+- **Invite next** (Group detail page → member actions): moves a member to the front until they receive a counted invitation. If that invitation is declined or cancelled, the override stays active.
 
 ## Tech Stack
 

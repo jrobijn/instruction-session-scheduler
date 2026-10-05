@@ -50,7 +50,6 @@ export const api = {
   setStudentPreferredTimeslots: (studentId: number, timetableId: number, timeslotIds: number[]) => request(`/students/${studentId}/preferred-timeslots/${timetableId}`, { method: 'PUT', body: JSON.stringify({ timeslot_ids: timeslotIds }) }),
   setStudentCooldown: (id: number, days: number) => request(`/students/${id}/cooldown`, { method: 'PUT', body: JSON.stringify({ days }) }),
   clearStudentCooldown: (id: number) => request(`/students/${id}/cooldown`, { method: 'DELETE' }),
-  bulkUpdatePriorities: (updates: Array<{ id: number; priority: number }>) => request('/students/priorities', { method: 'PUT', body: JSON.stringify({ updates }) }),
 
   // Instructors
   getInstructors: () => request('/instructors'),
@@ -122,6 +121,7 @@ export const api = {
   getGroupMembers: (id: number) => request(`/groups/${id}/members`),
   addGroupMember: (groupId: number, studentId: number) => request(`/groups/${groupId}/members`, { method: 'POST', body: JSON.stringify({ student_id: studentId }) }),
   removeGroupMember: (groupId: number, studentId: number) => request(`/groups/${groupId}/members/${studentId}`, { method: 'DELETE' }),
+  setGroupMemberInviteNext: (groupId: number, studentId: number, enabled: boolean) => request(`/groups/${groupId}/members/${studentId}/invite-next`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   searchGroupNonMembers: (groupId: number, query: string) => request(`/groups/${groupId}/non-members?q=${encodeURIComponent(query)}`),
   getGroupDisciplines: (groupId: number) => request(`/groups/${groupId}/disciplines`),
   addGroupDiscipline: (groupId: number, disciplineId: number) => request(`/groups/${groupId}/disciplines/${disciplineId}`, { method: 'POST' }),

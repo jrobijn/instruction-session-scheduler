@@ -1,63 +1,37 @@
 import db from './database.js';
 
-// Normalize priorities per group so that, within each group, the active
-// (non-cooldown, non-deleted) members form a dense 1..n ranking with no gaps.
-// Merely shifting the group minimum to 1 is not enough: when a member is removed,
-// deleted or enters cooldown its priority value disappears from the active set and
-// leaves a hole (e.g. 1, 3, 4). Renumbering with DENSE_RANK closes those holes while
-// preserving both the existing order and any ties. Groups are normalized independently
-// — priority values are only meaningful within a group.
-export function normalizePriorities(): void {
-  // Snapshot the target ranks FIRST, then apply them. A self-referencing UPDATE that
-  // reads the group ordering while writing would evaluate its subquery against the
-  // partially-updated table and corrupt the ranking. Materializing the DENSE_RANK
-  // result into JS up front makes the writes order-independent.
-  //
-  // The population is restricted to active/non-cooldown/non-deleted members — the same
-  // set used everywhere else for queue ordering. Cooled-down members keep their numeric
-  // priority so they remain schedulable for post-cooldown sessions; excluding them here
-  // freezes their value in place instead of letting them "save up" invitations.
-  //
-  // DENSE_RANK (not ROW_NUMBER) keeps existing ties collapsed onto the same number;
-  // runtime tie-breaking is handled downstream by name ordering.
-  const ranks = db.prepare(`
-    SELECT sg.group_id AS group_id, sg.student_id AS student_id,
-           DENSE_RANK() OVER (PARTITION BY sg.group_id ORDER BY sg.priority) AS new_priority
-    FROM student_groups sg
-    JOIN students s ON s.id = sg.student_id
-    WHERE s.active = 1
-      AND s.deleted_at IS NULL
-      AND (s.cooldown_until IS NULL OR s.cooldown_until <= datetime('now'))
-  `).all() as Array<{ group_id: number; student_id: number; new_priority: number }>;
+// Invite queue: within a group, students are invited in order of who has waited longest.
+// The order is derived from invitation history, so declines/cancellations/regeneration need
+// no bookkeeping — only invitations with these statuses count as having had a turn.
+const COUNTED_STATUSES = "('scheduled','invited','confirmed')";
 
-  const update = db.prepare(`
-    UPDATE student_groups SET priority = ?
-    WHERE group_id = ? AND student_id = ? AND priority <> ?
-  `);
-  for (const r of ranks) {
-    update.run(r.new_priority, r.group_id, r.student_id, r.new_priority);
-  }
-}
+// SQL fragments for queries aliasing students as `s` and student_groups as `sg`.
+export const QUEUE_JOIN_SQL = `
+  LEFT JOIN groups qg ON qg.id = sg.group_id
+  LEFT JOIN (
+    SELECT i.student_id, MAX(datetime(ts.date)) AS last_turn_at
+    FROM invitations i JOIN training_sessions ts ON ts.id = i.session_id
+    WHERE i.status IN ${COUNTED_STATUSES}
+    GROUP BY i.student_id
+  ) lt ON lt.student_id = s.id`;
 
-// Compute (and, for 'highest', apply the shift for) the priority a member should receive
-// when joining or re-entering a group, according to the given policy mode. AVG/MAX/COUNT
-// ignore NULLs, so un-ranked (inactive) members are naturally excluded. Returns the
-// priority the joining member should be assigned; the caller performs the INSERT/UPDATE.
-export function assignMemberPriority(groupId: number | string | string[], mode: string): number {
-  if (mode === 'highest') {
-    // New/returning member takes priority 1; push every ranked member back one level.
-    db.prepare('UPDATE student_groups SET priority = priority + 1 WHERE group_id = ? AND priority IS NOT NULL').run(groupId);
-    return 1;
-  }
-  if (mode === 'average') {
-    // Takes the rounded average priority of existing ranked members.
-    const stats = db.prepare('SELECT AVG(priority) AS avg, COUNT(priority) AS cnt FROM student_groups WHERE group_id = ?').get(groupId) as any;
-    return stats && stats.cnt > 0 ? Math.round(stats.avg) : 1;
-  }
-  // 'lowest' (default): goes after all ranked members (MAX priority + 1).
-  const maxPriority = (db.prepare('SELECT MAX(priority) AS m FROM student_groups WHERE group_id = ?').get(groupId) as any)?.m;
-  return (maxPriority ?? 0) + 1;
-}
+// invite_next_since is set while an "invite next" override is pending (no counted invitation since).
+// queue_at is the latest of the last turn and each event time whose group policy is 'back'
+// (join, reactivation, cooldown end). Policies apply at query time. '' = front.
+export const QUEUE_COLUMNS_SQL = `
+  lt.last_turn_at AS last_turn_at,
+  MAX(
+    COALESCE(lt.last_turn_at, ''),
+    CASE WHEN qg.new_member_priority = 'back' THEN COALESCE(sg.joined_at, '') ELSE '' END,
+    CASE WHEN qg.reactivated_member_priority = 'back' THEN COALESCE(sg.reactivated_at, '') ELSE '' END,
+    CASE WHEN qg.cooldown_member_priority = 'back' THEN COALESCE(s.cooldown_until, '') ELSE '' END
+  ) AS queue_at,
+  CASE WHEN sg.invite_next_at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM invitations i2
+    WHERE i2.student_id = s.id AND i2.status IN ${COUNTED_STATUSES} AND i2.invited_at >= sg.invite_next_at
+  ) THEN sg.invite_next_at END AS invite_next_since`;
+
+export const QUEUE_ORDER_SQL = 'invite_next_since IS NULL, invite_next_since ASC, queue_at ASC';
 
 // Pick a group from the given list, weighted by each group's weight (e.g. timetable
 // percentage). Groups with no/zero weight fall back to uniform selection. Weights are

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../database.js';
-import { normalizePriorities, assignMemberPriority } from '../priority.js';
+import { QUEUE_JOIN_SQL, QUEUE_COLUMNS_SQL, QUEUE_ORDER_SQL } from '../priority.js';
 
 const router = Router();
 
@@ -110,7 +110,7 @@ router.post('/', (req: Request, res: Response) => {
   if (!name) { res.status(400).json({ error: 'Name is required' }); return; }
 
   try {
-    const result = db.prepare('INSERT INTO groups (name, color) VALUES (?, ?)').run(name, req.body.color || '#3b82f6');
+    const result = db.prepare("INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority) VALUES (?, ?, 'back', 'back', 'back')").run(name, req.body.color || '#3b82f6');
     const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(group);
   } catch (err: any) {
@@ -124,16 +124,19 @@ router.post('/', (req: Request, res: Response) => {
 
 // Update group
 router.put('/:id', (req: Request, res: Response) => {
-  const { name, active, new_member_priority, reactivated_member_priority } = req.body;
+  const { name, active, new_member_priority, reactivated_member_priority, cooldown_member_priority } = req.body;
   const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id) as any;
   if (!group) { res.status(404).json({ error: 'Group not found' }); return; }
 
-  const validModes = ['highest', 'lowest', 'average'];
+  const validModes = ['front', 'back'];
   if (new_member_priority != null && !validModes.includes(new_member_priority)) {
-    res.status(400).json({ error: "new_member_priority must be 'highest', 'lowest' or 'average'" }); return;
+    res.status(400).json({ error: "new_member_priority must be 'front' or 'back'" }); return;
   }
   if (reactivated_member_priority != null && !validModes.includes(reactivated_member_priority)) {
-    res.status(400).json({ error: "reactivated_member_priority must be 'highest', 'lowest' or 'average'" }); return;
+    res.status(400).json({ error: "reactivated_member_priority must be 'front' or 'back'" }); return;
+  }
+  if (cooldown_member_priority != null && !validModes.includes(cooldown_member_priority)) {
+    res.status(400).json({ error: "cooldown_member_priority must be 'front' or 'back'" }); return;
   }
 
   try {
@@ -143,9 +146,10 @@ router.put('/:id', (req: Request, res: Response) => {
         active = COALESCE(?, active),
         color = COALESCE(?, color),
         new_member_priority = COALESCE(?, new_member_priority),
-        reactivated_member_priority = COALESCE(?, reactivated_member_priority)
+        reactivated_member_priority = COALESCE(?, reactivated_member_priority),
+        cooldown_member_priority = COALESCE(?, cooldown_member_priority)
       WHERE id = ?
-    `).run(name ?? null, active ?? null, req.body.color ?? null, new_member_priority ?? null, reactivated_member_priority ?? null, req.params.id);
+    `).run(name ?? null, active ?? null, req.body.color ?? null, new_member_priority ?? null, reactivated_member_priority ?? null, cooldown_member_priority ?? null, req.params.id);
 
     const updated = db.prepare('SELECT * FROM groups WHERE id = ?').get(req.params.id);
     res.json(updated);
@@ -200,7 +204,11 @@ router.get('/:id/members', (req: Request, res: Response) => {
   if (!group) { res.status(404).json({ error: 'Group not found' }); return; }
 
   const members = db.prepare(`
-    SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, s.preferred_days, sg.priority AS priority,
+    SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, s.preferred_days,
+      ${QUEUE_COLUMNS_SQL},
+      sg.joined_at, sg.reactivated_at,
+      qg.new_member_priority AS new_policy, qg.reactivated_member_priority AS reactivated_policy,
+      qg.cooldown_member_priority AS cooldown_policy,
       bgm.buddy_group_id AS buddy_group_id,
       (SELECT COUNT(*) FROM invitations i
         JOIN training_sessions ts ON ts.id = i.session_id
@@ -208,9 +216,10 @@ router.get('/:id/members', (req: Request, res: Response) => {
           AND ts.status != 'completed') AS active_invitations
     FROM students s
     JOIN student_groups sg ON sg.student_id = s.id
+    ${QUEUE_JOIN_SQL}
     LEFT JOIN buddy_group_members bgm ON bgm.student_id = s.id
     WHERE sg.group_id = ? AND s.deleted_at IS NULL
-    ORDER BY sg.priority IS NULL, sg.priority ASC, s.last_name ASC, s.first_name ASC
+    ORDER BY s.active DESC, ${QUEUE_ORDER_SQL}, s.last_name ASC, s.first_name ASC
   `).all(req.params.id) as any[];
 
   // Build buddy group names from member first names (matches students list behavior)
@@ -225,10 +234,25 @@ router.get('/:id/members', (req: Request, res: Response) => {
     buddyGroupNames.get(m.buddy_group_id)!.push(m.first_name);
   }
 
+  let position = 0;
   const result = members.map(m => {
-    const { buddy_group_id, ...rest } = m;
+    const {
+      buddy_group_id, queue_at, invite_next_since, joined_at, reactivated_at,
+      new_policy, reactivated_policy, cooldown_policy, ...rest
+    } = m;
+    // A 'back' policy only matters when its moment is what places the member (later than their last turn).
+    const overrides: Array<['joined' | 'reactivated' | 'cooldown', string | null, string]> = [
+      ['joined', joined_at, new_policy],
+      ['reactivated', reactivated_at, reactivated_policy],
+      ['cooldown', m.cooldown_until, cooldown_policy],
+    ];
+    const decisive = overrides.find(([, at, policy]) =>
+      policy === 'back' && at && at === queue_at && at > (m.last_turn_at ?? ''));
     return {
       ...rest,
+      queue_position: m.active ? ++position : null,
+      invite_next: invite_next_since != null,
+      queue_override: decisive ? { reason: decisive[0], at: decisive[1] } : null,
       buddy_group: buddy_group_id
         ? { id: buddy_group_id, name: (buddyGroupNames.get(buddy_group_id) || []).join(' & ') }
         : null,
@@ -250,11 +274,21 @@ router.post('/:id/members', (req: Request, res: Response) => {
 
   const setGroup = db.transaction(() => {
     db.prepare('DELETE FROM student_groups WHERE student_id = ?').run(student_id);
-    const target = assignMemberPriority(req.params.id, group.new_member_priority);
-    db.prepare('INSERT INTO student_groups (student_id, group_id, priority) VALUES (?, ?, ?)').run(student_id, req.params.id, target);
-    normalizePriorities();
+    db.prepare("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))").run(student_id, req.params.id);
   });
   setGroup();
+  res.json({ success: true });
+});
+
+// Toggle the "invite next" override: the member jumps the queue until they get a counted invitation
+router.put('/:id/members/:studentId/invite-next', (req: Request, res: Response) => {
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') { res.status(400).json({ error: 'enabled (boolean) is required' }); return; }
+
+  const result = db.prepare(
+    `UPDATE student_groups SET invite_next_at = ${enabled ? "datetime('now')" : 'NULL'} WHERE group_id = ? AND student_id = ?`
+  ).run(req.params.id, req.params.studentId);
+  if (result.changes === 0) { res.status(404).json({ error: 'Member not found' }); return; }
   res.json({ success: true });
 });
 
