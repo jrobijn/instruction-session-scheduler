@@ -44,6 +44,7 @@ interface Invitation {
   group_name: string | null;
   group_color: string | null;
   invited_at: string | null;
+  expires_at: string | null;
   buddy_group_id: number | null;
   buddy_group_name: string | null;
   decision_log: string | null;
@@ -67,7 +68,6 @@ interface SessionDetail {
   timeslots: Timeslot[];
   invitations: Invitation[];
   timetableGroups: TimetableGroup[];
-  invitation_expiry_minutes: number;
 }
 
 function formatDate(dateStr: string) {
@@ -221,7 +221,7 @@ export default function SessionDetailPage() {
     // Count active invitations that will be cancelled for this instructor
     const activeInvs = session?.invitations.filter(
       inv => inv.instructor_id === instructorId &&
-        inv.status !== 'declined' && inv.status !== 'expired' &&
+        inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'invalidated' &&
         inv.status !== 'cancelled' && inv.status !== 'admin_cancelled'
     ) || [];
     const sentInvs = activeInvs.filter(inv => inv.status === 'invited' || inv.status === 'confirmed');
@@ -368,6 +368,7 @@ export default function SessionDetailPage() {
   const cancelled = session.invitations.filter(i => i.status === 'cancelled').length;
   const adminCancelled = session.invitations.filter(i => i.status === 'admin_cancelled').length;
   const expired = session.invitations.filter(i => i.status === 'expired').length;
+  const invalidated = session.invitations.filter(i => i.status === 'invalidated').length;
   const invited = session.invitations.filter(i => i.status === 'invited').length;
   const scheduled = session.invitations.filter(i => i.status === 'scheduled').length;
 
@@ -377,7 +378,7 @@ export default function SessionDetailPage() {
     scheduleGrid[ts.id] = {};
   }
   for (const inv of session.invitations) {
-    if (inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled') {
+    if (inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'invalidated' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled') {
       scheduleGrid[inv.timeslot_id] ??= {};
       scheduleGrid[inv.timeslot_id][inv.instructor_id] = inv;
     }
@@ -403,7 +404,7 @@ export default function SessionDetailPage() {
         entries.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, instructorName: instrName, invitation: inv, empty: false });
       }
       // If no active (non-declined/expired) invitation occupies this slot, add an empty row
-      const hasActive = slotInvitations.some(inv => inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled');
+      const hasActive = slotInvitations.some(inv => inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'invalidated' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled');
       if (!hasActive) {
         entries.push({ timeslotId: ts.id, instructorId: instr.id, startTime: ts.start_time, instructorName: instrName, invitation: null, empty: true });
       }
@@ -432,7 +433,7 @@ export default function SessionDetailPage() {
   const BUDDY_COLORS = ['#e11d48', '#7c3aed', '#0891b2', '#c026d3', '#ea580c', '#4f46e5', '#059669'];
   const buddyGroupStudents = new Map<number, Set<number>>();
   for (const inv of session.invitations) {
-    if (inv.buddy_group_id && inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled') {
+    if (inv.buddy_group_id && inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'invalidated' && inv.status !== 'cancelled') {
       if (!buddyGroupStudents.has(inv.buddy_group_id)) buddyGroupStudents.set(inv.buddy_group_id, new Set());
       buddyGroupStudents.get(inv.buddy_group_id)!.add(inv.student_id);
     }
@@ -820,6 +821,7 @@ export default function SessionDetailPage() {
                                 inv.status === 'cancelled' ? 'badge-declined' :
                                 inv.status === 'admin_cancelled' ? 'badge-declined' :
                                 inv.status === 'expired' ? 'badge-declined' :
+                                inv.status === 'invalidated' ? 'badge-declined' :
                                 inv.status === 'scheduled' ? 'badge-draft' :
                                 'badge-pending'
                               }`} style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
@@ -851,6 +853,7 @@ export default function SessionDetailPage() {
             {cancelled > 0 && <span className="badge badge-declined">{t.summaryCancelled(cancelled)}</span>}
             {adminCancelled > 0 && <span className="badge badge-declined">{t.summaryWithdrawn(adminCancelled)}</span>}
             {expired > 0 && <span className="badge badge-declined">{t.summaryExpired(expired)}</span>}
+            {invalidated > 0 && <span className="badge badge-declined">{t.summaryInvalidated(invalidated)}</span>}
           </div>
           <table style={{ overflow: 'visible' }}>
             <thead>
@@ -898,14 +901,14 @@ export default function SessionDetailPage() {
                         inv.status === 'cancelled' ? 'badge-declined' :
                         inv.status === 'admin_cancelled' ? 'badge-declined' :
                         inv.status === 'expired' ? 'badge-declined' :
+                        inv.status === 'invalidated' ? 'badge-declined' :
                         inv.status === 'scheduled' ? 'badge-draft' :
                         'badge-pending'
                       }`}>
                         {t.statusMap(inv.status)}
                       </span>
-                      {inv.status === 'invited' && session.invitation_expiry_minutes > 0 && inv.invited_at && (() => {
-                        const expiresAt = new Date(inv.invited_at + 'Z');
-                        expiresAt.setMinutes(expiresAt.getMinutes() + session.invitation_expiry_minutes);
+                      {inv.status === 'invited' && inv.expires_at && (() => {
+                        const expiresAt = new Date(inv.expires_at);
                         return (
                           <span className="badge badge-draft" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontVariantNumeric: 'tabular-nums', minWidth: '5.5em', justifyContent: 'center' }}>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3l2 2"/><path d="M19 3l-2 2"/><line x1="12" y1="1" x2="12" y2="3"/></svg>
@@ -933,7 +936,7 @@ export default function SessionDetailPage() {
                     </td>
                     {canEdit && (
                       <td>
-                        {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
+                        {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'invalidated' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
                           <button
                             className="btn btn-outline"
                             style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
@@ -950,7 +953,7 @@ export default function SessionDetailPage() {
                           onClick={() => window.open(`/invitation/${inv.token}`, '_blank')}
                           title={t.viewInvitation}
                         >↗</button>
-                        {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
+                        {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'invalidated' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
                           <button
                             className="btn btn-outline"
                             style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}

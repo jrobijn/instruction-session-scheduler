@@ -116,7 +116,7 @@ export default function StudentsPage() {
 
   const invitationBadgeClass = (status: string) =>
     status === 'confirmed' ? 'badge-confirmed' :
-    status === 'declined' || status === 'cancelled' || status === 'admin_cancelled' || status === 'expired' ? 'badge-declined' :
+    status === 'declined' || status === 'cancelled' || status === 'admin_cancelled' || status === 'expired' || status === 'invalidated' ? 'badge-declined' :
     status === 'scheduled' ? 'badge-draft' :
     'badge-pending';
 

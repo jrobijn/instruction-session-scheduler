@@ -3,8 +3,8 @@ import crypto from 'crypto';
 import db from '../database.js';
 import { sendInvitationEmail, sendAdminCancellationEmail, getEmailStrings } from '../email.js';
 import {
-  scheduleInvitationExpiry, cancelInvitationExpiry, cancelAllSessionTimers,
-  getExpiryMinutes, computeExpiresAt, isInvitationLogicallyExpired,
+  scheduleExpiryForInvitation, cancelInvitationExpiry, cancelAllSessionTimers,
+  getExpiryMinutes, getEffectiveStatus, getExpiresAtIso,
 } from '../expiryTimers.js';
 import { broadcastSession, broadcast, broadcastSessionsList } from '../sseClients.js';
 import { findAndInviteReplacement } from './invitations.js';
@@ -102,14 +102,9 @@ router.get('/:id', (req: Request, res: Response) => {
 
   const expiryMinutes = getExpiryMinutes();
 
-  // Compute effective status for invitations (lazy expiry check)
   const effectiveInvitations = invitationsWithBuddyName.map(inv => {
-    if (inv.status === 'invited' && expiryMinutes > 0 && inv.invited_at) {
-      if (isInvitationLogicallyExpired(inv.invited_at, expiryMinutes)) {
-        return { ...inv, status: 'expired' };
-      }
-    }
-    return inv;
+    const timing = { ...inv, session_date: session.date };
+    return { ...inv, status: getEffectiveStatus(timing, expiryMinutes), expires_at: getExpiresAtIso(timing, expiryMinutes) };
   });
 
   res.json({ ...session, instructors, timeslots, invitations: effectiveInvitations, timetable, timetableGroups, invitation_expiry_minutes: expiryMinutes });
@@ -264,7 +259,7 @@ router.delete('/:id/instructors/:instructorId', async (req: Request, res: Respon
       // Pre-send: just delete
       db.prepare('DELETE FROM invitations WHERE id = ?').run(inv.id);
     }
-    // declined/expired/cancelled/admin_cancelled: leave as-is
+    // declined/expired/invalidated/cancelled/admin_cancelled: leave as-is
   }
 
   // Mark the instructor slot as removed (invitations remain linked for history)
@@ -394,7 +389,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
       AND s.id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
-        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')
+        WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled')
       )
     ORDER BY ${QUEUE_ORDER_SQL}, RANDOM()
   `).all(sessionDow, session.date, session.date) as any[];
@@ -714,15 +709,7 @@ router.post('/:id/send-invitations', async (req: Request, res: Response) => {
         locale: emailLocale,
       });
       db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE id = ?").run(inv.id);
-      // Schedule expiry timer
-      const expiryMinutes = getExpiryMinutes();
-      if (expiryMinutes > 0) {
-        const updated = db.prepare("SELECT invited_at FROM invitations WHERE id = ?").get(inv.id) as any;
-        if (updated) {
-          const expiresAt = computeExpiresAt(updated.invited_at, expiryMinutes);
-          scheduleInvitationExpiry(inv.id, expiresAt.getTime());
-        }
-      }
+      scheduleExpiryForInvitation(inv.id);
       sent++;
     } catch (err: any) {
       errors.push({ student: inv.student_name, error: err.message });
@@ -802,7 +789,7 @@ router.get('/:id/available-students', (req: Request, res: Response) => {
 
   // Exclude students who have an active (non-terminal) invitation for this session
   const activelyInvited = (db.prepare(
-    `SELECT student_id FROM invitations WHERE session_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')`
+    `SELECT student_id FROM invitations WHERE session_id = ? AND status NOT IN ('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled')`
   ).all(req.params.id) as Array<{ student_id: number }>).map(r => r.student_id);
 
   const placeholders = activelyInvited.length > 0
@@ -843,13 +830,13 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
 
   // Check student does not already have an active (non-terminal) invitation for this session
   const existing = db.prepare(
-    "SELECT id FROM invitations WHERE session_id = ? AND student_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')"
+    "SELECT id FROM invitations WHERE session_id = ? AND student_id = ? AND status NOT IN ('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled')"
   ).get(req.params.id, student_id);
   if (existing) { res.status(409).json({ error: 'Student already has an active invitation for this session' }); return; }
 
   // Check slot is not occupied
   const slotTaken = db.prepare(
-    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')"
+    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled')"
   ).get(req.params.id, timeslot_id, slot.id);
   if (slotTaken) { res.status(409).json({ error: 'This slot is already occupied' }); return; }
 
@@ -878,15 +865,8 @@ router.post('/:id/invitations', async (req: Request, res: Response) => {
         locale: emailLocale,
       });
       db.prepare("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE token = ?").run(token);
-      // Schedule expiry timer
-      const expiryMinutes = getExpiryMinutes();
-      if (expiryMinutes > 0) {
-        const newInv = db.prepare("SELECT id, invited_at FROM invitations WHERE token = ?").get(token) as any;
-        if (newInv) {
-          const expiresAt = computeExpiresAt(newInv.invited_at, expiryMinutes);
-          scheduleInvitationExpiry(newInv.id, expiresAt.getTime());
-        }
-      }
+      const newInv = db.prepare("SELECT id FROM invitations WHERE token = ?").get(token) as { id: number } | undefined;
+      if (newInv) scheduleExpiryForInvitation(newInv.id);
     } catch (err) {
       console.error('Failed to send invitation email for manually added student:', err);
     }
@@ -943,7 +923,7 @@ router.post('/:id/invitations/:invitationId/admin-cancel', async (req: Request, 
     WHERE inv.id = ? AND inv.session_id = ?
   `).get(req.params.invitationId, req.params.id) as any;
   if (!invitation) { res.status(404).json({ error: 'Invitation not found' }); return; }
-  if (invitation.status === 'declined' || invitation.status === 'expired' || invitation.status === 'cancelled' || invitation.status === 'admin_cancelled') {
+  if (invitation.status === 'declined' || invitation.status === 'expired' || invitation.status === 'invalidated' || invitation.status === 'cancelled' || invitation.status === 'admin_cancelled') {
     res.status(400).json({ error: `Cannot cancel — invitation is already ${invitation.status}` }); return;
   }
 
@@ -1001,13 +981,13 @@ router.post('/:id/auto-schedule-slot', async (req: Request, res: Response) => {
 
   // Check slot is not already occupied
   const slotTaken = db.prepare(
-    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('declined', 'expired', 'cancelled', 'admin_cancelled')"
+    "SELECT id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled')"
   ).get(req.params.id, timeslot_id, slot.id);
   if (slotTaken) { res.status(409).json({ error: 'This slot is already occupied' }); return; }
 
   // Look up the most recent vacated invitation for this slot to preserve group consistency
   const lastVacated = db.prepare(
-    "SELECT group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN ('declined', 'expired', 'cancelled', 'admin_cancelled') ORDER BY responded_at DESC LIMIT 1"
+    "SELECT group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN ('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled') ORDER BY responded_at DESC LIMIT 1"
   ).get(req.params.id, timeslot_id, slot.id) as { group_id: number | null } | undefined;
 
   const replacement = await findAndInviteReplacement({

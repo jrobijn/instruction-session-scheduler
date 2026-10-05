@@ -84,7 +84,7 @@ export function initializeDatabase(): void {
       timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
       slot_id INTEGER NOT NULL REFERENCES session_slots(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
-      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','cancelled','admin_cancelled')),
+      status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','invalidated','cancelled','admin_cancelled')),
       discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
       group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
       email_sent INTEGER NOT NULL DEFAULT 0,
@@ -173,6 +173,7 @@ export function initializeDatabase(): void {
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_expiry_minutes', '120');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_check_interval_minutes', '15');
     INSERT OR IGNORE INTO settings (key, value) VALUES ('email_locale', 'en');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('timezone', 'Europe/Amsterdam');
   `);
 
   // Migrations for existing databases
@@ -598,6 +599,35 @@ export function initializeDatabase(): void {
         SELECT id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at FROM notifications;
       DROP TABLE notifications;
       ALTER TABLE notifications_new RENAME TO notifications;
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+
+  // Migrate invitations CHECK constraint to include 'invalidated' status
+  const invInvalidatedSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invitations'").get() as { sql: string } | undefined;
+  if (invInvalidatedSchema && !invInvalidatedSchema.sql.includes("'invalidated'")) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE invitations_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
+        slot_id INTEGER NOT NULL REFERENCES session_slots(id) ON DELETE CASCADE,
+        token TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','invited','confirmed','declined','expired','invalidated','cancelled','admin_cancelled')),
+        discipline_id INTEGER REFERENCES disciplines(id) ON DELETE SET NULL,
+        group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+        email_sent INTEGER NOT NULL DEFAULT 0,
+        no_show INTEGER NOT NULL DEFAULT 0,
+        invited_at TEXT NOT NULL DEFAULT (datetime('now')),
+        responded_at TEXT,
+        decision_log TEXT
+      );
+      INSERT INTO invitations_new (id, session_id, student_id, timeslot_id, slot_id, token, status, discipline_id, group_id, email_sent, no_show, invited_at, responded_at, decision_log)
+        SELECT id, session_id, student_id, timeslot_id, slot_id, token, status, discipline_id, group_id, email_sent, no_show, invited_at, responded_at, decision_log FROM invitations;
+      DROP TABLE invitations;
+      ALTER TABLE invitations_new RENAME TO invitations;
     `);
     db.pragma('foreign_keys = ON');
   }
