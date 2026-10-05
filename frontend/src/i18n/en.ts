@@ -76,6 +76,7 @@ const en = {
   cooldownTooltip: (days: number) => `Cooldown active: ${days}d remaining. Click to remove.`,
   cooldownDetail: (days: number, date: string) => `${days} ${days === 1 ? 'day' : 'days'} remaining (until ${date})`,
   confirmDeleteStudent: 'Are you sure you want to delete this student?',
+  confirmRemoveCooldown: (name: string) => `Are you sure you want to remove the cooldown for ${name}?`,
   editStudent: 'Edit Student',
   addStudentTitle: 'Add Student',
   preferredDays: 'Preferred Days',

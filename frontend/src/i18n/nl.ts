@@ -78,6 +78,7 @@ const nl: Translations = {
   cooldownTooltip: (days: number) => `Pauze actief: ${days}d resterend. Klik om te verwijderen.`,
   cooldownDetail: (days: number, date: string) => `${days} ${days === 1 ? 'dag' : 'dagen'} resterend (tot ${date})`,
   confirmDeleteStudent: 'Weet je zeker dat je deze leerling wilt verwijderen?',
+  confirmRemoveCooldown: (name: string) => `Weet je zeker dat je de pauze van ${name} wilt verwijderen?`,
   editStudent: 'Leerling bewerken',
   addStudentTitle: 'Leerling toevoegen',
   preferredDays: 'Voorkeursdagen',
