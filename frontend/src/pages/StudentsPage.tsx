@@ -291,9 +291,10 @@ export default function StudentsPage() {
     }
   };
 
-  const handleClearCooldown = async (id: number) => {
+  const handleClearCooldown = async (s: Student) => {
+    if (!confirm(t.confirmRemoveCooldown(`${s.first_name} ${s.last_name}`))) return;
     try {
-      await api.clearStudentCooldown(id);
+      await api.clearStudentCooldown(s.id);
       load();
     } catch (err: any) {
       alert(err.message);
@@ -513,7 +514,7 @@ export default function StudentsPage() {
                       className="btn btn-sm"
                       style={{ background: '#dc2626', color: 'white', border: 'none', padding: '0.25rem 0.5rem', lineHeight: 1 }}
                       title={t.cooldownTooltip(cooldownInfo.days)}
-                      onClick={(e) => { e.stopPropagation(); handleClearCooldown(s.id); }}
+                      onClick={(e) => { e.stopPropagation(); handleClearCooldown(s); }}
                     >⏱</button>
                   ) : (
                     <button
