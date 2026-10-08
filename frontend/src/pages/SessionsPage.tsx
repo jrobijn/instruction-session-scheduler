@@ -1,9 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import ActionDropdown from '../components/ActionDropdown';
-import DatePicker from 'react-datepicker';
+import { CalendarDays, Mail, Plus } from 'lucide-react';
 import { api, API_BASE } from '../api';
-import { useT } from '../i18n';
+import { useT, getLocale } from '../i18n';
+import {
+  ActionMenu, Alert, Badge, Button, DateInput, Dialog, EmptyState, Field,
+  Page, PageHeader, Row, Select, Stack, Table, Text, useConfirm, useToast,
+} from '../ui';
+import { SessionStatusBadge } from '../components/StatusBadges';
+import styles from './SessionsPage.module.css';
 
 interface Session {
   id: number;
@@ -23,9 +28,8 @@ interface Timetable {
   is_default: number;
 }
 
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+function parseDate(dateStr: string) {
+  return new Date(dateStr + 'T00:00:00');
 }
 
 export default function SessionsPage() {
@@ -39,6 +43,8 @@ export default function SessionsPage() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const load = async () => {
     try {
@@ -99,123 +105,120 @@ export default function SessionsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm(t.confirmDeleteSession)) return;
+    if (!await confirm({ title: t.delete, message: t.confirmDeleteSession, confirmLabel: t.delete, danger: true })) return;
     try {
       await api.deleteSession(id);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
-  if (loading) return <div className="page"><p>{t.loading}</p></div>;
+  if (loading) return <Page><Text tone="muted">{t.loading}</Text></Page>;
+
+  const dateLocale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>{t.sessionsTitle(sessions.length)}</h1>
-        <button className="btn btn-primary" onClick={openCreateModal}>{t.newSession}</button>
-      </div>
+    <Page>
+      <PageHeader
+        title={t.sessionsTitle(sessions.length)}
+        actions={<Button variant="primary" icon={<Plus />} onClick={openCreateModal}>{t.newSession}</Button>}
+      />
 
       {sessions.length === 0 ? (
-        <div className="empty-state">
-          <h3>{t.noSessionsYet}</h3>
-          <p>{t.noSessionsHint}</p>
-        </div>
+        <EmptyState icon={<CalendarDays />} title={t.noSessionsYet} description={t.noSessionsHint} />
       ) : (
-        <table>
+        <Table interactive>
           <thead>
             <tr>
               <th>{t.date}</th>
               <th>{t.status}</th>
               <th>{t.timetable}</th>
-              <th>{t.instructors}</th>
+              <th data-numeric>{t.instructors}</th>
               <th>{t.invitations}</th>
-              <th>{t.actions}</th>
+              <th data-actions>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
-            {sessions.map(s => (
-              <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/sessions/${s.id}`)}>
-                <td>{formatDate(s.date)}</td>
-                <td>
-                  <span className={`badge ${
-                    s.status === 'completed' ? 'badge-confirmed' :
-                    s.status === 'invitations_sent' ? 'badge-pending' :
-                    s.status === 'scheduled' ? 'badge-pending' :
-                    s.status === 'draft' ? 'badge-draft' :
-                    s.status === 'cancelled' ? 'badge-declined' :
-                    'badge-declined'
-                  }`}>
-                    {t.statusMap(s.status)}
-                  </span>
-                </td>
-                <td>{s.timetable_name || t.noData}</td>
-                <td>{s.instructor_count}</td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ display: 'inline-flex', width: '48px', flexShrink: 0, justifyContent: 'center' }}>
-                      {s.invitation_count > 0 && (
-                        <span className="badge badge-draft" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap' }}>
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="12" height="12">
-                            <rect x="2" y="4" width="20" height="16" rx="2" />
-                            <path d="M22 4L12 13 2 4" />
-                          </svg>
-                          {s.invitation_count}
-                        </span>
-                      )}
-                    </span>
-                    {s.total_slots > 0 && (s.status === 'invitations_sent' || s.status === 'completed') ? (
-                      <span className={`badge ${s.status === 'completed' || s.confirmed_count >= s.total_slots ? 'badge-confirmed' : 'badge-pending'}`}>
-                        {s.confirmed_count}/{s.total_slots}
+            {sessions.map(s => {
+              const date = parseDate(s.date);
+              const showFill = s.total_slots > 0 && (s.status === 'invitations_sent' || s.status === 'completed');
+              const isFull = s.status === 'completed' || s.confirmed_count >= s.total_slots;
+              return (
+                <tr key={s.id} onClick={() => navigate(`/sessions/${s.id}`)}>
+                  <td>
+                    <Row gap={3} align="baseline">
+                      <Text mono weight="medium">
+                        {date.toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                      </Text>
+                      <Text tone="muted" size="sm">{date.toLocaleDateString(dateLocale, { weekday: 'long' })}</Text>
+                    </Row>
+                  </td>
+                  <td>
+                    <SessionStatusBadge status={s.status} />
+                  </td>
+                  <td>{s.timetable_name || <Text tone="subtle">{t.noData}</Text>}</td>
+                  <td data-numeric>{s.instructor_count}</td>
+                  <td>
+                    <Row gap={2}>
+                      <span className={styles.countSlot}>
+                        {s.invitation_count > 0 && (
+                          <Badge mono icon={<Mail />}>{s.invitation_count}</Badge>
+                        )}
                       </span>
-                    ) : null}
-                  </div>
-                </td>
-                <td>
-                  <ActionDropdown actions={[
-                    { label: t.view, onClick: () => navigate(`/sessions/${s.id}`) },
-                    ...(s.status === 'draft' ? [{ label: t.delete, onClick: () => handleDelete(s.id), danger: true }] : []),
-                  ]} />
-                </td>
-              </tr>
-            ))}
+                      {showFill && (
+                        <Badge mono tone={isFull ? 'success' : 'warning'} icon={false}>
+                          {s.confirmed_count}/{s.total_slots}
+                        </Badge>
+                      )}
+                    </Row>
+                  </td>
+                  <td data-actions>
+                    <ActionMenu actions={[
+                      { label: t.view, onClick: () => navigate(`/sessions/${s.id}`) },
+                      ...(s.status === 'draft' ? [{ label: t.delete, onClick: () => handleDelete(s.id), danger: true }] : []),
+                    ]} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
-        </table>
+        </Table>
       )}
 
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{t.newSessionTitle}</h2>
-            {error && <div className="alert alert-error">{error}</div>}
-            <div className="form-group">
-              <label>{t.date}</label>
-              <DatePicker
-                selected={selectedDate}
-                onChange={(d: Date | null) => setSelectedDate(d)}
-                filterDate={isClubDay}
-                dateFormat={t.datePickerFormat}
-                placeholderText={t.selectDate}
-                className="datepicker-input"
-              />
-            </div>
-            <div className="form-group">
-              <label>{t.timetable}</label>
-              <select value={selectedTimetable} onChange={e => setSelectedTimetable(e.target.value)}>
-                <option value="">{t.noTimetable}</option>
-                {timetables.map(tt => (
-                  <option key={tt.id} value={tt.id}>{tt.name}{tt.is_default ? ` ${t.defaultSuffix}` : ''}</option>
-                ))}
-              </select>
-            </div>
-            <div className="modal-actions">
-              <button className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
-              <button className="btn btn-primary" onClick={handleCreate} disabled={!selectedDate}>{t.create}</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <Dialog
+        open={showModal}
+        onOpenChange={setShowModal}
+        title={t.newSessionTitle}
+        footer={
+          <>
+            <Button onClick={() => setShowModal(false)}>{t.cancel}</Button>
+            <Button variant="primary" onClick={handleCreate} disabled={!selectedDate}>{t.create}</Button>
+          </>
+        }
+      >
+        <Stack gap={4}>
+          {error && <Alert tone="danger">{error}</Alert>}
+          <Field label={t.date} htmlFor="new-session-date">
+            <DateInput
+              id="new-session-date"
+              selected={selectedDate}
+              onChange={setSelectedDate}
+              filterDate={isClubDay}
+              dateFormat={t.datePickerFormat}
+              placeholderText={t.selectDate}
+            />
+          </Field>
+          <Field label={t.timetable} htmlFor="new-session-timetable">
+            <Select id="new-session-timetable" value={selectedTimetable} onChange={e => setSelectedTimetable(e.target.value)}>
+              <option value="">{t.noTimetable}</option>
+              {timetables.map(tt => (
+                <option key={tt.id} value={tt.id}>{tt.name}{tt.is_default ? ` ${t.defaultSuffix}` : ''}</option>
+              ))}
+            </Select>
+          </Field>
+        </Stack>
+      </Dialog>
+    </Page>
   );
 }

@@ -1,6 +1,11 @@
-import { useState, useEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
+import { Plus, Target } from 'lucide-react';
 import { api } from '../api';
-import ActionDropdown from '../components/ActionDropdown';
+import {
+  ActionMenu, Alert, Badge, Button, Dialog, EmptyState, Field, Input,
+  Page, PageHeader, SortHeader, Stack, Table, Text, useConfirm, useToast,
+} from '../ui';
+import { CsvActions, ImportResultAlert, type ImportResult } from '../components/CsvActions';
 import { useT } from '../i18n';
 
 interface Discipline {
@@ -12,14 +17,15 @@ interface Discipline {
 
 export default function DisciplinesPage() {
   const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Discipline | null>(null);
   const [form, setForm] = useState({ name: '', abbreviation: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [sortCol, setSortCol] = useState<keyof Discipline>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -36,7 +42,7 @@ export default function DisciplinesPage() {
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
-  const sortIcon = (col: keyof Discipline) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const sortProps = (col: keyof Discipline) => ({ active: sortCol === col, direction: sortDir, onSort: () => toggleSort(col) });
 
   const load = async () => {
     try {
@@ -81,12 +87,12 @@ export default function DisciplinesPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm(t.confirmDeleteDiscipline)) return;
+    if (!await confirm({ title: t.delete, message: t.confirmDeleteDiscipline, confirmLabel: t.delete, danger: true })) return;
     try {
       await api.deleteDiscipline(id);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -95,92 +101,53 @@ export default function DisciplinesPage() {
       await api.updateDiscipline(discipline.id, { active: discipline.active ? 0 : 1 });
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
-  const handleExport = async () => {
-    try {
-      const csv = await api.exportDisciplinesCsv();
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'disciplines.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const csv = await file.text();
-      const result = await api.importDisciplinesCsv(csv);
-      setImportResult(result);
-      load();
-    } catch (err: any) {
-      alert(err.message);
-    }
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  if (loading) return <div className="page"><p>{t.loading}</p></div>;
+  if (loading) return <Page><Text tone="muted">{t.loading}</Text></Page>;
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>{t.disciplinesTitle(disciplines.length)}</h1>
-        <div className="btn-group">
-          <button className="btn btn-outline" onClick={handleExport}>{t.exportCsv}</button>
-          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}>{t.importCsv}</button>
-          <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-          <button className="btn btn-primary" onClick={openCreate}>{t.addDiscipline}</button>
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title={t.disciplinesTitle(disciplines.length)}
+        actions={
+          <>
+            <CsvActions
+              filename="disciplines.csv"
+              exportCsv={api.exportDisciplinesCsv}
+              importCsv={api.importDisciplinesCsv}
+              onImported={result => { setImportResult(result); load(); }}
+            />
+            <Button variant="primary" icon={<Plus />} onClick={openCreate}>{t.addDiscipline}</Button>
+          </>
+        }
+      />
 
-      {importResult && (
-        <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-          {t.importResult(importResult.imported, importResult.skipped)}
-          {importResult.errors.length > 0 && (
-            <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.5rem' }}>
-              {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
-            </ul>
-          )}
-          <button className="btn btn-outline btn-sm" style={{ marginLeft: '1rem' }} onClick={() => setImportResult(null)}>{t.dismiss}</button>
-        </div>
-      )}
+      {importResult && <ImportResultAlert result={importResult} onDismiss={() => setImportResult(null)} />}
 
       {disciplines.length === 0 ? (
-        <div className="empty-state">
-          <h3>{t.noDisciplinesYet}</h3>
-          <p>{t.noDisciplinesHint}</p>
-        </div>
+        <EmptyState icon={<Target />} title={t.noDisciplinesYet} description={t.noDisciplinesHint} />
       ) : (
-        <table>
+        <Table>
           <thead>
             <tr>
-              <th className="sortable" onClick={() => toggleSort('name')}>{t.name}{sortIcon('name')}</th>
+              <SortHeader {...sortProps('name')}>{t.name}</SortHeader>
               <th>{t.abbreviation}</th>
-              <th className="sortable" onClick={() => toggleSort('active')}>{t.status}{sortIcon('active')}</th>
-              <th>{t.actions}</th>
+              <SortHeader {...sortProps('active')}>{t.status}</SortHeader>
+              <th data-actions>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
             {sortedDisciplines.map(d => (
               <tr key={d.id}>
-                <td>{d.name}</td>
-                <td>{d.abbreviation}</td>
+                <td><Text weight="medium">{d.name}</Text></td>
+                <td><Text mono tone="muted">{d.abbreviation}</Text></td>
                 <td>
-                  <span className={`badge ${d.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {d.active ? t.active : t.inactive}
-                  </span>
+                  <Badge tone={d.active ? 'success' : 'neutral'}>{d.active ? t.active : t.inactive}</Badge>
                 </td>
-                <td>
-                  <ActionDropdown actions={[
+                <td data-actions>
+                  <ActionMenu actions={[
                     { label: t.edit, onClick: () => openEdit(d) },
                     { label: d.active ? t.deactivate : t.activate, onClick: () => toggleActive(d) },
                     { label: t.delete, onClick: () => handleDelete(d.id), danger: true },
@@ -189,31 +156,32 @@ export default function DisciplinesPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
 
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{editing ? t.editDiscipline : t.addDisciplineTitle}</h2>
-            {error && <div className="alert alert-error">{error}</div>}
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label>{t.name}</label>
-                <input autoFocus={!editing} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
-              </div>
-              <div className="form-group">
-                <label>{t.abbreviation}</label>
-                <input value={form.abbreviation} onChange={e => setForm({ ...form, abbreviation: e.target.value })} />
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
-                <button type="submit" className="btn btn-primary">{editing ? t.save : t.addDisciplineTitle}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      <Dialog
+        open={showModal}
+        onOpenChange={setShowModal}
+        title={editing ? t.editDiscipline : t.addDisciplineTitle}
+        footer={
+          <>
+            <Button onClick={() => setShowModal(false)}>{t.cancel}</Button>
+            <Button variant="primary" type="submit" form="discipline-form">{editing ? t.save : t.addDisciplineTitle}</Button>
+          </>
+        }
+      >
+        <form id="discipline-form" onSubmit={handleSubmit}>
+          <Stack gap={4}>
+            {error && <Alert tone="danger">{error}</Alert>}
+            <Field label={t.name} htmlFor="discipline-name">
+              <Input id="discipline-name" autoFocus={!editing} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+            </Field>
+            <Field label={t.abbreviation} htmlFor="discipline-abbreviation">
+              <Input id="discipline-abbreviation" value={form.abbreviation} onChange={e => setForm({ ...form, abbreviation: e.target.value })} />
+            </Field>
+          </Stack>
+        </form>
+      </Dialog>
+    </Page>
   );
 }

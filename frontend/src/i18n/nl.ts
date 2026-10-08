@@ -28,9 +28,11 @@ const nl: Translations = {
   importCsv: 'Importeer CSV',
   dismiss: 'Sluiten',
   close: 'Sluiten',
+  previousPage: 'Vorige pagina',
+  nextPage: 'Volgende pagina',
   importResult: (imported: number, skipped: number) => `Geïmporteerd: ${imported}, Overgeslagen: ${skipped}`,
   noData: '—',
-  saved: '✓ Opgeslagen',
+  saved: 'Opgeslagen',
 
   // Days
   days: ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'],
@@ -55,7 +57,7 @@ const nl: Translations = {
 
   // Students
   studentsTitle: (count: number) => `Leerlingen (${count})`,
-  addStudent: '+ Leerling toevoegen',
+  addStudent: 'Leerling toevoegen',
   noStudentsYet: 'Nog geen leerlingen',
   noStudentsHint: 'Voeg je eerste leerling toe om te beginnen.',
   buddyGroupLabel: (name: string) => `Buddygroep: ${name}`,
@@ -96,7 +98,7 @@ const nl: Translations = {
 
   // Instructors
   instructorsTitle: (count: number) => `Instructeurs (${count})`,
-  addInstructor: '+ Instructeur toevoegen',
+  addInstructor: 'Instructeur toevoegen',
   noInstructorsYet: 'Nog geen instructeurs',
   noInstructorsHint: 'Voeg je eerste instructeur toe om te beginnen.',
   confirmDeleteInstructor: 'Weet je zeker dat je deze instructeur wilt verwijderen?',
@@ -105,7 +107,7 @@ const nl: Translations = {
 
   // Disciplines
   disciplinesTitle: (count: number) => `Disciplines (${count})`,
-  addDiscipline: '+ Discipline toevoegen',
+  addDiscipline: 'Discipline toevoegen',
   noDisciplinesYet: 'Nog geen disciplines',
   noDisciplinesHint: 'Voeg je eerste discipline toe om te beginnen.',
   groups: 'Groepen',
@@ -117,7 +119,7 @@ const nl: Translations = {
   groupsWithAccess: 'Groepen met toegang',
 
   // Discipline detail
-  backToDisciplines: '← Terug naar Disciplines',
+  backToDisciplines: 'Terug naar Disciplines',
   groupCount: (n: number) => `${n} groep(en)`,
   addGroup: 'Groep toevoegen',
   searchGroups: 'Zoek groepen op naam...',
@@ -131,7 +133,7 @@ const nl: Translations = {
 
   // Groups
   groupsTitle: (count: number) => `Groepen (${count})`,
-  addGroupButton: '+ Groep toevoegen',
+  addGroupButton: 'Groep toevoegen',
   noGroupsYet: 'Nog geen groepen',
   noGroupsHint: 'Voeg je eerste groep toe om te beginnen.',
   color: 'Kleur',
@@ -143,7 +145,7 @@ const nl: Translations = {
 
 
   // Group detail
-  backToGroups: '← Terug naar Groepen',
+  backToGroups: 'Terug naar Groepen',
   groupInfo: (memberCount: number) => `${memberCount} ${memberCount === 1 ? 'lid' : 'leden'}`,
   addMember: 'Lid toevoegen',
   searchStudents: 'Zoek leerlingen op naam of e-mail...',
@@ -168,10 +170,12 @@ const nl: Translations = {
   inviteNext: 'Als volgende uitnodigen',
   cancelInviteNext: 'Niet meer als volgende uitnodigen',
   inviteNextTooltip: 'Staat vooraan in de rij tot de leerling een uitnodiging ontvangt.',
-  queueOverrideTooltip: (reason: 'joined' | 'reactivated' | 'cooldown', date: string) => ({
+  queueOverrideTooltip: (reason: 'joined' | 'reactivated' | 'cooldown', date: string, upcoming: boolean) => ({
     joined: `Achteraan de rij geplaatst na het toetreden tot deze groep op ${date}.`,
     reactivated: `Achteraan de rij geplaatst na heractivering op ${date}.`,
-    cooldown: `Achteraan de rij geplaatst na de pauze (eindigt ${date}).`,
+    cooldown: upcoming
+      ? `Wordt achteraan de rij geplaatst nadat de pauze op ${date} afloopt.`
+      : `Achteraan de rij geplaatst nadat de pauze op ${date} afliep.`,
   })[reason] + ' Dit geldt tot de volgende uitnodiging.',
 
   // Group settings
@@ -200,7 +204,7 @@ const nl: Translations = {
   rename: 'Hernoemen',
 
   // Buddy group detail
-  backToBuddyGroups: '← Terug naar Buddygroepen',
+  backToBuddyGroups: 'Terug naar Buddygroepen',
   buddyGroupMemberCount: (n: number) => `${n} ${n === 1 ? 'lid' : 'leden'}`,
   noBuddyMembers: 'Geen leden',
   noBuddyMembersHint: 'Voeg leerlingen toe aan deze buddygroep via het zoekveld hierboven.',
@@ -210,7 +214,7 @@ const nl: Translations = {
 
   // Sessions
   sessionsTitle: (count: number) => `Trainingssessies (${count})`,
-  newSession: '+ Nieuwe sessie',
+  newSession: 'Nieuwe sessie',
   noSessionsYet: 'Nog geen trainingssessies',
   noSessionsHint: 'Maak je eerste trainingssessie aan om te beginnen.',
   date: 'Datum',
@@ -227,7 +231,7 @@ const nl: Translations = {
   noTimetable: 'Geen rooster',
 
   // Session detail
-  backToSessions: '← Terug naar Sessies',
+  backToSessions: 'Terug naar Sessies',
   instructorsCount: (n: number) => `Instructeurs (${n})`,
   selectInstructor: 'Selecteer instructeur...',
   assign: 'Toewijzen',
@@ -275,10 +279,14 @@ const nl: Translations = {
   discipline: 'Discipline',
   noShow: 'no-show',
   show: 'aanwezig',
-  addStudentToSlot: '+ Leerling toevoegen',
+  addStudentToSlot: 'Leerling toevoegen',
   searchStudent: 'Zoek leerling...',
   sessionNotFound: 'Sessie niet gevonden',
   pdfTitle: (date: string) => `Planning — ${date}`,
+  pdfStudentColumn: 'Leerling',
+  pdfDisciplineColumn: 'Disc.',
+  pdfGenerated: (dateTime: string) => `Gegenereerd op ${dateTime}`,
+  pdfPage: (page: number, total: string) => `Pagina ${page} van ${total}`,
 
   // Status labels
   statusConfirmed: 'bevestigd',
@@ -312,7 +320,7 @@ const nl: Translations = {
 
   // Timetables
   timetablesTitle: (count: number) => `Roosters (${count})`,
-  newTimetable: '+ Nieuw rooster',
+  newTimetable: 'Nieuw rooster',
   noTimetablesYet: 'Nog geen roosters',
   noTimetablesHint: 'Maak je eerste rooster aan om herbruikbare tijdslotconfiguraties te definiëren.',
   timeslots: 'Tijdsloten',
@@ -322,7 +330,7 @@ const nl: Translations = {
   timetableNamePlaceholder: 'bijv. Woensdagavond',
 
   // Timetable detail
-  backToTimetables: '← Terug naar Roosters',
+  backToTimetables: 'Terug naar Roosters',
   updateName: 'Naam bijwerken',
   timeslotsCount: (n: number) => `Tijdsloten (${n})`,
   addTimeslot: 'Tijdslot toevoegen',

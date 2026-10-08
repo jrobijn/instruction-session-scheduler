@@ -1,0 +1,33 @@
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  height: var(--control-h-sm);
+  touch-action: none;
+  user-select: none;
+}
+.root[data-disabled] { opacity: 0.5; }
+
+.track {
+  position: relative;
+  flex-grow: 1;
+  height: var(--space-1);
+  background: var(--color-surface-sunken);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.range { position: absolute; height: 100%; background: var(--color-accent); border-radius: var(--radius-sm); }
+
+.thumb {
+  display: block;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  background: var(--metal-sheen);
+  border: var(--border-width) solid var(--metal-edge);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--metal-highlight), 0 1px 2px color-mix(in srgb, var(--color-text) 25%, transparent);
+  cursor: grab;
+}
+.thumb:active { cursor: grabbing; }

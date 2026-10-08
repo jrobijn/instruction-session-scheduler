@@ -1,0 +1,77 @@
+/* Overlay centers and scrolls the dialog; content has no overflow so popovers (date picker) aren't clipped. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: grid;
+  place-items: center;
+  padding: var(--space-6) var(--space-4);
+  overflow-y: auto;
+  background: var(--color-overlay);
+  animation: fadeIn var(--duration-normal) var(--ease-out);
+}
+
+.content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--dialog-w-md);
+  max-width: 100%;
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-top: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+  animation: popIn var(--duration-normal) var(--ease-out);
+}
+.content:focus { outline: none; }
+
+.sm { width: var(--dialog-w-sm); }
+.md { width: var(--dialog-w-md); }
+.lg { width: var(--dialog-w-lg); }
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+}
+
+.description {
+  padding: var(--space-4) var(--space-5) 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.body { padding: var(--space-5); }
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: var(--border-width) solid var(--color-border);
+  background: var(--color-surface-sunken);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay, .content { animation: none; }
+}

@@ -1,0 +1,182 @@
+/*
+ * Design tokens — "Range Technical".
+ * The ONLY place raw colour / size values may appear. Everything else uses var(--…).
+ */
+
+:root {
+  /* Typography */
+  --font-body: 'Barlow', system-ui, sans-serif;
+  --font-display: 'Barlow Semi Condensed', 'Barlow', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 21px;
+  --text-2xl: 26px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  --tracking-label: 0.08em;
+  --tracking-display: 0.03em;
+
+  /* Spacing (4px grid) */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Shape */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+
+  /* Sizing */
+  --control-h-xs: 20px;
+  --control-h-sm: 28px;
+  --control-h-md: 34px;
+  --icon-xs: 12px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 28px;
+  --nav-h: 52px;
+  --page-max-w: 1180px;
+  --popover-min-w: 168px;
+  --tooltip-max-w: 280px;
+  --dialog-w-sm: 400px;
+  --dialog-w-md: 480px;
+  --dialog-w-lg: 760px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  /* Layers */
+  --z-dropdown: 50;
+  --z-overlay: 100;
+  --z-modal: 110;
+  --z-tooltip: 200;
+
+  /* Text on user-chosen data colours (group colours) */
+  --on-data: #ffffff;
+  --data-shade: inset 0 0 0 100vmax rgba(0, 0, 0, 0.12);
+  --data-text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------- Light: brushed aluminium ---------- */
+:root, [data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #e9ebec;
+  --color-surface: #f6f7f7;
+  --color-surface-sunken: #dfe2e4;
+  --color-surface-raised: #ffffff;
+  --color-border: #c9cdd0;
+  --color-border-strong: #a9afb4;
+  --color-text: #1d2124;
+  --color-text-muted: #5d656b;
+  --color-text-subtle: #80888e;
+
+  /* Blaze orange: use --accent for fills, --accent-text for text/icons on surfaces */
+  --color-accent: #e8590c;
+  --color-accent-hover: #d14d07;
+  --color-accent-text: #b8440a;
+  --color-accent-contrast: #1d2124;
+
+  --color-success: #3f6a2e;
+  --color-warning: #8a6b0f;
+  --color-danger: #a3141c;
+  --color-danger-hover: #8a1018;
+  --color-info: #4a6378;
+  --color-on-danger: #ffffff;
+
+  --color-focus: #e8590c;
+  --color-overlay: rgba(20, 23, 26, 0.55);
+  --shadow-popover: 0 6px 20px rgba(20, 23, 26, 0.18), 0 1px 3px rgba(20, 23, 26, 0.12);
+
+  /* Metallic sheen — only for nav bar and buttons */
+  --metal-sheen: linear-gradient(180deg, #f4f5f6 0%, #e2e5e7 55%, #d8dcdf 100%);
+  --metal-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --metal-edge: #b4babf;
+  --accent-sheen: linear-gradient(180deg, #f2702b 0%, #e8590c 60%, #dc5209 100%);
+  --accent-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+/* ---------- Dark: gunmetal ---------- */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #1b1e21;
+  --color-surface: #262a2e;
+  --color-surface-sunken: #202326;
+  --color-surface-raised: #2e3338;
+  --color-border: #3a4046;
+  --color-border-strong: #4c535a;
+  --color-text: #e6e8ea;
+  --color-text-muted: #9aa2a8;
+  --color-text-subtle: #737b82;
+
+  --color-accent: #f06a1f;
+  --color-accent-hover: #ff7a33;
+  --color-accent-text: #ff8a47;
+  --color-accent-contrast: #16191b;
+
+  --color-success: #8fbf6a;
+  --color-warning: #e0b84a;
+  --color-danger: #ef6b6b;
+  --color-danger-hover: #f58585;
+  --color-info: #8fa9bf;
+  --color-on-danger: #16191b;
+
+  --color-focus: #ff7a33;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+
+  --metal-sheen: linear-gradient(180deg, #353a40 0%, #2a2f34 55%, #24282c 100%);
+  --metal-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --metal-edge: #14171a;
+  --accent-sheen: linear-gradient(180deg, #ff7f3a 0%, #f06a1f 60%, #e25d13 100%);
+  --accent-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* ---------- Base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-display);
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}

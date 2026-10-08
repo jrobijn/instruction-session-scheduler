@@ -1,0 +1,2 @@
+/* Fixed slot so the fill ratio badges line up across rows */
+.countSlot { display: inline-flex; min-width: 4.5em; }

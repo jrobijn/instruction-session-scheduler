@@ -1,11 +1,24 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import {
+  ArrowLeftRight, Ban, Check, CircleCheck, ExternalLink, FileDown, Plus, RefreshCw, RotateCcw, Send,
+  Sparkles, Timer, UserCheck, UserPlus, UserX, Users, Wand2, X,
+} from 'lucide-react';
 import { api, API_BASE } from '../api';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { useT } from '../i18n';
+import { useT, getLocale } from '../i18n';
+import {
+  Alert, Badge, Button, Card, Chip, Input, Page, PageHeader, Row, Select, Stack, Table, Text, Tooltip,
+  useConfirm, useToast,
+} from '../ui';
 import Countdown from '../components/Countdown';
 import DecisionLog from '../components/DecisionLog';
+import { AllocationBar } from '../components/AllocationBar';
+import { InvitationStatusBadge, SessionStatusBadge } from '../components/StatusBadges';
+import { StudentSearchResults } from '../components/StudentSearchResults';
+import styles from './SessionDetailPage.module.css';
+import buddyStyles from '../components/BuddyRows.module.css';
 
 interface Instructor {
   id: number;
@@ -72,16 +85,30 @@ interface SessionDetail {
 
 function formatDate(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  return d.toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
+
+const INACTIVE_STATUSES = ['declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled'];
+
+// jsPDF can't read CSS variables; these mirror the light theme in styles/tokens.css
+const PDF_COLORS = {
+  text: [29, 33, 36] as [number, number, number],
+  muted: [93, 101, 107] as [number, number, number],
+  rule: [169, 175, 180] as [number, number, number],
+  headerFill: [223, 226, 228] as [number, number, number],
+  accent: [232, 89, 12] as [number, number, number],
+};
 
 export default function SessionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [allInstructors, setAllInstructors] = useState<Instructor[]>([]);
   const [allTimetables, setAllTimetables] = useState<TimetableInfo[]>([]);
+  const [clubName, setClubName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
@@ -90,7 +117,7 @@ export default function SessionDetailPage() {
   const [studentResults, setStudentResults] = useState<Array<{ id: number; first_name: string; last_name: string; email: string }>>([]);
   const [showStudentDropdown, setShowStudentDropdown] = useState(false);
   const [dropdownUp, setDropdownUp] = useState(false);
-  const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLImageElement | null>(null);
   const [replacingInstructorId, setReplacingInstructorId] = useState<number | null>(null);
@@ -105,13 +132,15 @@ export default function SessionDetailPage() {
 
   const load = async () => {
     try {
-      const [sess, instr, tts] = await Promise.all([
+      const [sess, instr, tts, settings] = await Promise.all([
         api.getSession(Number(id)),
         api.getInstructors(),
-        api.getTimetables()
+        api.getTimetables(),
+        api.getSettings(),
       ]);
       setSession(sess);
       setAllInstructors(instr);
+      setClubName(settings.club_name || '');
       // Only saved + active timetables for selection
       setAllTimetables(tts.filter((t: any) => t.status === 'saved' && t.active));
     } catch (err: any) {
@@ -190,7 +219,7 @@ export default function SessionDetailPage() {
   const addStudentToSlot = async (studentId: number) => {
     if (!addSlot) return;
     if (session?.status === 'invitations_sent') {
-      if (!confirm(t.confirmAddAndInvite)) return;
+      if (!await confirm({ title: t.addStudentToSlot, message: t.confirmAddAndInvite })) return;
     }
     try {
       await api.addSessionInvitation(Number(id), {
@@ -204,7 +233,7 @@ export default function SessionDetailPage() {
       setShowStudentDropdown(false);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -213,7 +242,7 @@ export default function SessionDetailPage() {
       await api.removeSessionInvitation(Number(id), invitationId);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -226,13 +255,13 @@ export default function SessionDetailPage() {
     ) || [];
     const sentInvs = activeInvs.filter(inv => inv.status === 'invited' || inv.status === 'confirmed');
     if (sentInvs.length > 0) {
-      if (!confirm(t.confirmRemoveInstructor(sentInvs.length))) return;
+      if (!await confirm({ title: t.remove, message: t.confirmRemoveInstructor(sentInvs.length), confirmLabel: t.remove, danger: true })) return;
     }
     try {
       await api.removeInstructor(Number(id), instructorId);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -243,20 +272,30 @@ export default function SessionDetailPage() {
       setReplacementTargetId(null);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
+    }
+  };
+
+  const assignInstructor = async (instructorId: number) => {
+    try {
+      await api.assignInstructor(Number(id), instructorId);
+      setShowAddInstructor(false);
+      load();
+    } catch (err: any) {
+      toast(err.message);
     }
   };
 
   const changeTimetable = async (timetableId: string) => {
     const newTtId = timetableId ? Number(timetableId) : null;
     if (session?.status === 'scheduled') {
-      if (!confirm(t.confirmTimetableChange)) return;
+      if (!await confirm({ title: t.timetableSection, message: t.confirmTimetableChange })) return;
     }
     try {
       await api.updateSession(String(id), { timetable_id: newTtId });
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -266,20 +305,20 @@ export default function SessionDetailPage() {
       await api.generateSchedule(Number(id));
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     } finally {
       setActionLoading('');
     }
   };
 
   const sendInvitations = async () => {
-    if (!confirm(t.confirmSendInvitations)) return;
+    if (!await confirm({ title: t.sendInvitations, message: t.confirmSendInvitations, confirmLabel: t.sendInvitations })) return;
     setActionLoading('sending');
     try {
       await api.sendInvitations(Number(id));
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     } finally {
       setActionLoading('');
     }
@@ -290,41 +329,41 @@ export default function SessionDetailPage() {
       await api.toggleNoShow(Number(id), invitationId);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
   const adminCancelInvitation = async (invitationId: number) => {
-    if (!confirm(t.confirmAdminCancel)) return;
+    if (!await confirm({ title: t.adminCancelInvitation, message: t.confirmAdminCancel, confirmLabel: t.adminCancelInvitation, danger: true })) return;
     try {
       await api.adminCancelInvitation(Number(id), invitationId);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
   const autoScheduleSlot = async (timeslotId: number, instructorId: number) => {
-    if (!confirm(t.confirmAutoInvite)) return;
+    if (!await confirm({ title: t.autoScheduleLabel, message: t.confirmAutoInvite, confirmLabel: t.autoScheduleLabel })) return;
     try {
       const result = await api.autoScheduleSlot(Number(id), timeslotId, instructorId);
       if (!result.replacement) {
-        alert(t.noReplacementFound);
+        toast(t.noReplacementFound, 'info');
       }
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
   const completeSession = async () => {
-    if (!confirm(t.confirmComplete)) return;
+    if (!await confirm({ title: t.markCompleted, message: t.confirmComplete, confirmLabel: t.markCompleted })) return;
     setActionLoading('completing');
     try {
       await api.completeSession(Number(id));
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     } finally {
       setActionLoading('');
     }
@@ -332,33 +371,33 @@ export default function SessionDetailPage() {
 
   const cancelSession = async () => {
     const activeCount = session?.invitations.filter(inv => inv.status === 'invited' || inv.status === 'confirmed').length || 0;
-    if (!confirm(t.confirmCancelSession(activeCount))) return;
+    if (!await confirm({ title: t.cancelSession, message: t.confirmCancelSession(activeCount), confirmLabel: t.cancelSession, danger: true })) return;
     setActionLoading('cancelling');
     try {
       await api.cancelSession(Number(id));
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     } finally {
       setActionLoading('');
     }
   };
 
   const reactivateSession = async () => {
-    if (!confirm(t.confirmReactivateSession)) return;
+    if (!await confirm({ title: t.reactivateSession, message: t.confirmReactivateSession, confirmLabel: t.reactivateSession })) return;
     setActionLoading('reactivating');
     try {
       await api.reactivateSession(Number(id));
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     } finally {
       setActionLoading('');
     }
   };
 
-  if (loading) return <div className="page"><p>{t.loading}</p></div>;
-  if (!session) return <div className="page"><p>{t.sessionNotFound}</p></div>;
+  if (loading) return <Page><Text tone="muted">{t.loading}</Text></Page>;
+  if (!session) return <Page><Text tone="muted">{t.sessionNotFound}</Text></Page>;
 
   const assignedIds = new Set(session.instructors.map(i => i.id));
   const availableInstructors = allInstructors.filter(i => !assignedIds.has(i.id));
@@ -456,7 +495,21 @@ export default function SessionDetailPage() {
     }
 
     doc.setFontSize(16);
+    doc.setTextColor(...PDF_COLORS.text);
     doc.text(t.pdfTitle(dateStr), 34, 22);
+
+    // Header rule with a short accent bar, echoing the page headers in the app
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setDrawColor(...PDF_COLORS.rule);
+    doc.setLineWidth(0.2);
+    doc.line(14, 28, pageWidth - 14, 28);
+    doc.setFillColor(...PDF_COLORS.accent);
+    doc.rect(14, 27.6, 24, 0.9, 'F');
+
+    const locale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
+    const generatedAt = new Date().toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
+    const totalPagesPlaceholder = '{total_pages_count_string}';
 
     const boxSize = 3.5;
     const boxPad = 2;
@@ -468,8 +521,8 @@ export default function SessionDetailPage() {
     }
     const subHeaderRow: any[] = [];
     for (let i = 0; i < session.instructors.length; i++) {
-      subHeaderRow.push({ content: 'Student', styles: { fontSize: 8, fontStyle: 'italic' } });
-      subHeaderRow.push({ content: 'Disc.', styles: { fontSize: 8, fontStyle: 'italic' } });
+      subHeaderRow.push({ content: t.pdfStudentColumn, styles: { fontSize: 8, fontStyle: 'normal', textColor: PDF_COLORS.muted } });
+      subHeaderRow.push({ content: t.pdfDisciplineColumn, styles: { fontSize: 8, fontStyle: 'normal', textColor: PDF_COLORS.muted } });
     }
 
     const subtitles: Record<string, string> = {};
@@ -487,19 +540,36 @@ export default function SessionDetailPage() {
       return row;
     });
 
-    // Build columnStyles: Time col normal padding, discipline cols smaller width
-    const colStyles: Record<number, any> = { 0: { cellPadding: 3, halign: 'left' } };
+    // Build columnStyles: Time col monospace, discipline cols smaller width
+    const colStyles: Record<number, any> = { 0: { cellPadding: 3, halign: 'left', font: 'courier', fontStyle: 'bold' } };
     for (let i = 0; i < session.instructors.length; i++) {
       colStyles[2 + i * 2] = { cellPadding: 3, cellWidth: 18, halign: 'center' };
     }
 
     autoTable(doc, {
-      startY: 28,
+      startY: 32,
+      margin: { bottom: 18 },
       head: [headerRow, subHeaderRow],
       body,
-      styles: { fontSize: 10, cellPadding: { top: 3, right: 3, bottom: 6, left: 8 } },
-      headStyles: { fillColor: [37, 99, 235], cellPadding: { top: 3, right: 3, bottom: 3, left: 8 } },
+      styles: { fontSize: 10, textColor: PDF_COLORS.text, cellPadding: { top: 3, right: 3, bottom: 6, left: 8 } },
+      headStyles: {
+        fillColor: PDF_COLORS.headerFill,
+        textColor: PDF_COLORS.text,
+        fontStyle: 'bold',
+        lineColor: PDF_COLORS.rule,
+        lineWidth: { bottom: 0.3 },
+        cellPadding: { top: 3, right: 3, bottom: 3, left: 8 },
+      },
       columnStyles: colStyles,
+      didDrawPage: (data: any) => {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(...PDF_COLORS.muted);
+        const footerY = pageHeight - 8;
+        doc.text([clubName, t.pdfGenerated(generatedAt)].filter(Boolean).join('  ·  '), 14, footerY);
+        doc.text(t.pdfPage(data.pageNumber, totalPagesPlaceholder), pageWidth - 14, footerY, { align: 'right' });
+        doc.setTextColor(...PDF_COLORS.text);
+      },
       didDrawCell: (data: any) => {
         if (data.section !== 'body' || data.column.index === 0) return;
         // Only draw on student columns (odd indices: 1, 3, 5, ...)
@@ -522,515 +592,394 @@ export default function SessionDetailPage() {
           doc.setTextColor(120, 120, 120);
           doc.text(subtitles[key], data.cell.x + 8, nameBaselineY + 3);
           doc.setFont('helvetica', 'normal');
-          doc.setTextColor(0, 0, 0);
+          doc.setTextColor(...PDF_COLORS.text);
           doc.setFontSize(10);
         }
       },
     });
 
+    doc.putTotalPages(totalPagesPlaceholder);
     doc.save(`schedule-${session.date}.pdf`);
   };
 
+  const isEditableStatus = session.status === 'draft' || session.status === 'scheduled' || session.status === 'invitations_sent';
+  const isClosed = session.status === 'completed' || session.status === 'cancelled';
+  const showActionsCol = canEdit || session.status === 'invitations_sent';
+  const draftReady = session.status === 'draft' && session.instructors.length > 0 && !!session.timetable_id && session.timeslots.length > 0;
+  const busy = (key: string) => actionLoading === key;
+
+  const cancelButton = (
+    <Button variant="ghost" icon={<Ban />} onClick={cancelSession} disabled={busy('cancelling')}>
+      {busy('cancelling') ? t.cancelling : t.cancelSession}
+    </Button>
+  );
+  const headerActions = (() => {
+    switch (session.status) {
+      case 'draft':
+        return draftReady && (
+          <>
+            {cancelButton}
+            <Button variant="primary" icon={<Sparkles />} onClick={generateSchedule} disabled={busy('generating')}>
+              {busy('generating') ? t.generating : t.generateSchedule}
+            </Button>
+          </>
+        );
+      case 'scheduled':
+        return (
+          <>
+            {cancelButton}
+            <Button icon={<RefreshCw />} onClick={generateSchedule} disabled={busy('generating')}>
+              {busy('generating') ? t.regenerating : t.regenerateSchedule}
+            </Button>
+            <Button variant="primary" icon={<Send />} onClick={sendInvitations} disabled={busy('sending')}>
+              {busy('sending') ? t.sending : t.sendInvitations}
+            </Button>
+          </>
+        );
+      case 'invitations_sent':
+        return (
+          <>
+            {cancelButton}
+            <Button variant="primary" icon={<CircleCheck />} onClick={completeSession} disabled={busy('completing')}>
+              {busy('completing') ? t.completing : t.markCompleted}
+            </Button>
+          </>
+        );
+      case 'cancelled':
+        return (
+          <Button variant="primary" icon={<RotateCcw />} onClick={reactivateSession} disabled={busy('reactivating')}>
+            {busy('reactivating') ? t.reactivating : t.reactivateSession}
+          </Button>
+        );
+      default:
+        return null;
+    }
+  })();
+
+  const studentLabel = (inv: Invitation) => (
+    <Row gap={2}>
+      <Tooltip content={inv.group_name || t.noData}>
+        <span className={styles.groupDot} style={{ background: inv.group_color || undefined }} />
+      </Tooltip>
+      <span>{inv.student_name}</span>
+      {inv.buddy_group_id && buddyColorMap.has(inv.buddy_group_id) && (
+        <Tooltip content={inv.buddy_group_name}>
+          <span className={buddyStyles.buddyIcon} style={{ '--buddy': buddyColorMap.get(inv.buddy_group_id) } as CSSProperties}>
+            <Users />
+          </span>
+        </Tooltip>
+      )}
+    </Row>
+  );
+
   return (
-    <div className="page">
-      <button className="btn btn-outline" onClick={() => navigate('/sessions')} style={{ marginBottom: '1rem' }}>
-        {t.backToSessions}
-      </button>
+    <Page>
+      <PageHeader
+        back={{ label: t.backToSessions, onClick: () => navigate('/sessions') }}
+        title={formatDate(session.date)}
+        meta={<SessionStatusBadge status={session.status} />}
+        actions={headerActions}
+      />
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <Alert tone="danger">{error}</Alert>}
+      {draftReady && <Alert tone="info">{t.scheduleHint}</Alert>}
 
-      <div className="page-header">
-        <h1>{formatDate(session.date)}</h1>
-        <span className={`badge ${
-          session.status === 'completed' ? 'badge-confirmed' :
-          session.status === 'invitations_sent' ? 'badge-pending' :
-          session.status === 'scheduled' ? 'badge-pending' :
-          session.status === 'draft' ? 'badge-draft' :
-          'badge-declined'
-        }`}>
-          {t.statusMap(session.status)}
-        </span>
-      </div>
-
-      {/* Instructors Section */}
-      <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>{t.instructorsCount(session.instructors.length)}</h2>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            {session.instructors.map(i => (
-              <span key={i.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                {replacingInstructorId === i.id ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600 }}>
-                    <span>{i.first_name} {i.last_name}</span>
-                    <span style={{ color: 'var(--text-muted)' }}>→</span>
-                    <select
-                      autoFocus
-                      value={replacementTargetId ?? ''}
-                      onChange={e => setReplacementTargetId(e.target.value ? Number(e.target.value) : null)}
-                      style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
-                    >
-                      <option value="">{t.replaceWith}</option>
-                      {allInstructors.filter(inst => !assignedIds.has(inst.id)).map(inst => (
-                        <option key={inst.id} value={inst.id}>{inst.first_name} {inst.last_name}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => { if (replacementTargetId) replaceInstructor(i.id, replacementTargetId); }}
-                      disabled={!replacementTargetId}
-                      title={t.confirm}
-                      style={{ background: 'none', border: 'none', cursor: replacementTargetId ? 'pointer' : 'default', fontSize: '1.1rem', color: replacementTargetId ? '#4ade80' : '#64748b', padding: '0 0.2rem' }}
-                    >✓</button>
-                    <button
-                      onClick={() => { setReplacingInstructorId(null); setReplacementTargetId(null); }}
-                      title={t.cancel}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem', color: '#f87171', padding: '0 0.2rem' }}
-                    >✗</button>
-                  </span>
-                ) : (
-                  <span className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)' }}>
-                    {i.first_name} {i.last_name}
-                    {session.status !== 'completed' && session.status !== 'cancelled' && (
-                      <>
-                        <button onClick={() => { setReplacingInstructorId(i.id); setReplacementTargetId(null); }} title={t.replaceInstructor} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1.05rem' }}>⇄</button>
-                        <button onClick={() => removeInstructor(i.id)} style={{ marginLeft: '0.4rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1.05rem' }}>×</button>
-                      </>
-                    )}
-                  </span>
-                )}
-              </span>
-            ))}
-            {(session.status === 'draft' || session.status === 'scheduled' || session.status === 'invitations_sent') && availableInstructors.length > 0 && (
-              showAddInstructor ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'var(--hover-row)', color: 'var(--text)', borderRadius: '12px', padding: '0.4rem 0.8rem', fontSize: '0.95rem', fontWeight: 600, border: '1px solid var(--border)' }}>
-                  <select
+      <div className={styles.setup}>
+        <Card title={t.instructorsCount(session.instructors.length)}>
+          {session.instructors.length === 0 && !isEditableStatus ? (
+            <Text tone="muted">{t.noInstructorsAssigned}</Text>
+          ) : (
+            <Row gap={2} wrap>
+              {session.instructors.map(i => replacingInstructorId === i.id ? (
+                <div key={i.id} className={styles.inlineEdit}>
+                  <Text weight="medium">{i.first_name} {i.last_name}</Text>
+                  <ArrowLeftRight className={styles.inlineIcon} aria-hidden />
+                  <Select
                     autoFocus
+                    aria-label={t.replaceWith}
+                    value={replacementTargetId ?? ''}
+                    onChange={e => setReplacementTargetId(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">{t.replaceWith}</option>
+                    {availableInstructors.map(inst => (
+                      <option key={inst.id} value={inst.id}>{inst.first_name} {inst.last_name}</option>
+                    ))}
+                  </Select>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={<Check />}
+                    aria-label={t.confirm}
+                    disabled={!replacementTargetId}
+                    onClick={() => { if (replacementTargetId) replaceInstructor(i.id, replacementTargetId); }}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<X />}
+                    aria-label={t.cancel}
+                    onClick={() => { setReplacingInstructorId(null); setReplacementTargetId(null); }}
+                  />
+                </div>
+              ) : (
+                <Chip
+                  key={i.id}
+                  actions={isClosed ? undefined : [{
+                    icon: <ArrowLeftRight />,
+                    label: t.replaceInstructor,
+                    onClick: () => { setReplacingInstructorId(i.id); setReplacementTargetId(null); },
+                  }]}
+                  onRemove={isClosed ? undefined : () => removeInstructor(i.id)}
+                  removeLabel={t.remove}
+                >
+                  {i.first_name} {i.last_name}
+                </Chip>
+              ))}
+              {isEditableStatus && availableInstructors.length > 0 && (showAddInstructor ? (
+                <div className={styles.inlineEdit}>
+                  <Select
+                    autoFocus
+                    aria-label={t.selectInstructor}
                     value=""
-                    onChange={async e => {
-                      const val = e.target.value;
-                      if (!val) return;
-                      try {
-                        await api.assignInstructor(Number(id), Number(val));
-                        setShowAddInstructor(false);
-                        load();
-                      } catch (err: any) {
-                        alert(err.message);
-                      }
-                    }}
+                    onChange={e => { if (e.target.value) assignInstructor(Number(e.target.value)); }}
                     onBlur={() => setShowAddInstructor(false)}
-                    style={{ fontSize: '0.85rem', padding: '0.2rem 0.4rem', borderRadius: '0.25rem', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                   >
                     <option value="">{t.selectInstructor}</option>
                     {availableInstructors.map(inst => (
                       <option key={inst.id} value={inst.id}>{inst.first_name} {inst.last_name}</option>
                     ))}
-                  </select>
-                  <button
-                    onClick={() => setShowAddInstructor(false)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem', color: 'var(--text-muted)', padding: '0 0.2rem' }}
-                  >✗</button>
-                </span>
-              ) : (
-                <span
-                  style={{ fontSize: '0.95rem', padding: '0.4rem 0.9rem', background: 'var(--hover-row)', color: 'var(--text)', border: '1px solid var(--border)', cursor: 'pointer', borderRadius: '12px', display: 'inline-flex', alignItems: 'center', fontWeight: 600 }}
-                  onClick={() => setShowAddInstructor(true)}
-                >
-                  +
-                </span>
-              )
-            )}
-        </div>
-        {session.instructors.length === 0 && !(session.status === 'draft' || session.status === 'scheduled' || session.status === 'invitations_sent') && (
-          <p style={{ color: '#6b7280' }}>{t.noInstructorsAssigned}</p>
-        )}
-      </div>
-
-      {/* Timetable Section */}
-      <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>{t.timetableSection}</h2>
-        {(session.status === 'draft' || session.status === 'scheduled') ? (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', alignItems: 'center' }}>
-            <select
-              value={session.timetable_id ?? ''}
-              onChange={e => changeTimetable(e.target.value)}
-            >
-              <option value="">{t.noTimetable}</option>
-              {allTimetables.map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-              {/* Show current timetable even if not in the active list */}
-              {session.timetable && !allTimetables.some(t => t.id === session.timetable!.id) && (
-                <option value={session.timetable.id}>{session.timetable.name} {t.inactiveSuffix}</option>
-              )}
-            </select>
-          </div>
-        ) : (
-          <p style={{ marginBottom: '0.5rem' }}>
-            {session.timetable ? session.timetable.name : t.noTimetableAttached}
-          </p>
-        )}
-        {session.timeslots.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)' }}>{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</p>
-        ) : (
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {session.timeslots.map(ts => (
-              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)' }}>
-                {ts.start_time}
-              </span>
-            ))}
-          </div>
-        )}
-        <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-          {t.slotsInfo(session.timeslots.length * session.instructors.length)}
-        </p>
-        {session.timetableGroups.length > 0 && (
-          <div style={{ marginTop: '1rem' }}>
-            <div style={{
-              display: 'flex', height: '32px', borderRadius: '6px', overflow: 'hidden',
-              border: '1px solid var(--border)', background: 'var(--bg)',
-            }}>
-              {session.timetableGroups.map((seg, i) => (
-                seg.percentage > 0 ? (
-                  <div key={i} style={{
-                    width: `${seg.percentage}%`,
-                    background: seg.group_color || '#3b82f6',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: 'white', fontSize: '0.8rem', fontWeight: 600,
-                    minWidth: '24px',
-                    borderRight: i < session.timetableGroups.length - 1 ? '2px solid var(--surface)' : 'none',
-                  }}>
-                    {seg.percentage}%
-                  </div>
-                ) : null
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-              {session.timetableGroups.map((seg, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem' }}>
-                  <span style={{
-                    width: '12px', height: '12px', borderRadius: '3px',
-                    background: seg.group_color || '#3b82f6', display: 'inline-block', flexShrink: 0,
-                  }} />
-                  {seg.group_name} ({seg.percentage}%)
+                  </Select>
+                  <Button size="sm" variant="ghost" icon={<X />} aria-label={t.cancel} onClick={() => setShowAddInstructor(false)} />
                 </div>
+              ) : (
+                <Button size="sm" icon={<Plus />} onClick={() => setShowAddInstructor(true)}>{t.addInstructor}</Button>
               ))}
-            </div>
-          </div>
-        )}
+            </Row>
+          )}
+        </Card>
+
+        <Card title={t.timetableSection}>
+          <Stack gap={4}>
+            {session.status === 'draft' || session.status === 'scheduled' ? (
+              <Select aria-label={t.timetableSection} value={session.timetable_id ?? ''} onChange={e => changeTimetable(e.target.value)}>
+                <option value="">{t.noTimetable}</option>
+                {allTimetables.map(tt => (
+                  <option key={tt.id} value={tt.id}>{tt.name}</option>
+                ))}
+                {session.timetable && !allTimetables.some(tt => tt.id === session.timetable!.id) && (
+                  <option value={session.timetable.id}>{session.timetable.name} {t.inactiveSuffix}</option>
+                )}
+              </Select>
+            ) : (
+              <Text weight="medium">{session.timetable ? session.timetable.name : t.noTimetableAttached}</Text>
+            )}
+            {session.timeslots.length === 0 ? (
+              <Text tone="muted">{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</Text>
+            ) : (
+              <Row gap={2} wrap>
+                {session.timeslots.map(ts => <Chip key={ts.id} mono>{ts.start_time}</Chip>)}
+              </Row>
+            )}
+            <Text tone="muted" size="sm">{t.slotsInfo(session.timeslots.length * session.instructors.length)}</Text>
+            <AllocationBar
+              segments={session.timetableGroups.map(g => ({
+                name: g.group_name,
+                percentage: g.percentage,
+                color: g.group_color || 'var(--color-text-subtle)',
+              }))}
+            />
+          </Stack>
+        </Card>
       </div>
 
-      {/* Actions */}
-      {session.status === 'draft' && session.instructors.length > 0 && session.timetable_id && session.timeslots.length > 0 && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>{t.actions}</h2>
-          <div className="btn-group">
-            <button className="btn btn-primary" onClick={generateSchedule} disabled={actionLoading === 'generating'}>
-              {actionLoading === 'generating' ? t.generating : t.generateSchedule}
-            </button>
-            <button className="btn btn-danger" onClick={cancelSession} disabled={actionLoading === 'cancelling'}>
-              {actionLoading === 'cancelling' ? t.cancelling : t.cancelSession}
-            </button>
-          </div>
-          <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-            {t.scheduleHint}
-          </p>
-        </div>
-      )}
-
-      {session.status === 'scheduled' && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>{t.actions}</h2>
-          <div className="btn-group">
-            <button className="btn btn-primary" onClick={sendInvitations} disabled={actionLoading === 'sending'}>
-              {actionLoading === 'sending' ? t.sending : t.sendInvitations}
-            </button>
-            <button className="btn btn-outline" onClick={generateSchedule} disabled={actionLoading === 'generating'}>
-              {actionLoading === 'generating' ? t.regenerating : t.regenerateSchedule}
-            </button>
-            <button className="btn btn-danger" onClick={cancelSession} disabled={actionLoading === 'cancelling'}>
-              {actionLoading === 'cancelling' ? t.cancelling : t.cancelSession}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {session.status === 'invitations_sent' && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>{t.actions}</h2>
-          <div className="btn-group">
-            <button className="btn btn-primary" onClick={completeSession} disabled={actionLoading === 'completing'}>
-              {actionLoading === 'completing' ? t.completing : t.markCompleted}
-            </button>
-            <button className="btn btn-danger" onClick={cancelSession} disabled={actionLoading === 'cancelling'}>
-              {actionLoading === 'cancelling' ? t.cancelling : t.cancelSession}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {session.status === 'cancelled' && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>{t.actions}</h2>
-          <div className="btn-group">
-            <button className="btn btn-primary" onClick={reactivateSession} disabled={actionLoading === 'reactivating'}>
-              {actionLoading === 'reactivating' ? t.reactivating : t.reactivateSession}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Schedule Grid: Instructors × Timeslots */}
       {session.invitations.length > 0 && session.instructors.length > 0 && session.timeslots.length > 0 && (
-        <div style={{ marginBottom: '2rem' }}>
-          <div className="page-header">
-            <h2>{t.scheduleOverview}</h2>
-            <button className="btn btn-outline" onClick={exportPdf}>{t.exportPdf}</button>
-          </div>
-          <table>
+        <Card
+          title={t.scheduleOverview}
+          actions={<Button size="sm" icon={<FileDown />} onClick={exportPdf}>{t.exportPdf}</Button>}
+          flush
+        >
+          <Table embedded>
             <thead>
               <tr>
                 <th>{t.time}</th>
-                {session.instructors.map(i => (
-                  <th key={i.id}>{i.first_name} {i.last_name}</th>
-                ))}
+                {session.instructors.map(i => <th key={i.id}>{i.first_name} {i.last_name}</th>)}
               </tr>
             </thead>
             <tbody>
               {session.timeslots.map(ts => (
                 <tr key={ts.id}>
-                  <td><strong>{ts.start_time}</strong></td>
+                  <td><Text mono weight="medium">{ts.start_time}</Text></td>
                   {session.instructors.map(instr => {
                     const inv = scheduleGrid[ts.id]?.[instr.id];
                     return (
                       <td key={instr.id}>
                         {inv ? (
-                          <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-                              <span title={inv.group_name || ''} style={{
-                                width: '10px', height: '10px', borderRadius: '50%',
-                                background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
-                              }} />
-                              <span>{inv.student_name}</span>
-                              {inv.buddy_group_id && buddyColorMap.has(inv.buddy_group_id) && (
-                                <svg style={{ width: '14px', height: '14px', flexShrink: 0 }} viewBox="0 0 24 24" fill={buddyColorMap.get(inv.buddy_group_id)} xmlns="http://www.w3.org/2000/svg">
-                                  <title>{inv.buddy_group_name}</title>
-                                  <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
-                                </svg>
-                              )}
-                              <span className={`badge ${
-                                inv.status === 'confirmed' ? 'badge-confirmed' :
-                                inv.status === 'declined' ? 'badge-declined' :
-                                inv.status === 'cancelled' ? 'badge-declined' :
-                                inv.status === 'admin_cancelled' ? 'badge-declined' :
-                                inv.status === 'expired' ? 'badge-declined' :
-                                inv.status === 'invalidated' ? 'badge-declined' :
-                                inv.status === 'scheduled' ? 'badge-draft' :
-                                'badge-pending'
-                              }`} style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
-                                {t.statusMap(inv.status)}
-                              </span>
-                            </span>
-                            <span style={{ fontSize: '0.75rem', fontStyle: 'italic', opacity: inv.discipline_name ? 0.7 : 0, whiteSpace: 'pre', paddingLeft: 'calc(10px + 0.5rem)' }}>{inv.discipline_name || '\u00A0'}</span>
-                          </span>
-                        ) : t.noData}
+                          <Stack gap={1}>
+                            <Row gap={2} wrap>
+                              {studentLabel(inv)}
+                              <InvitationStatusBadge status={inv.status} />
+                            </Row>
+                            {inv.discipline_name && <Text tone="muted" size="xs">{inv.discipline_name}</Text>}
+                          </Stack>
+                        ) : (
+                          <Text tone="subtle">{t.noData}</Text>
+                        )}
                       </td>
                     );
                   })}
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </Card>
       )}
 
-      {/* Invitations */}
       {(session.invitations.length > 0 || (canEdit && session.timeslots.length > 0 && session.instructors.length > 0)) && (
-        <div>
-          <h2>{t.invitationsCount(session.invitations.length)}</h2>
-          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-            <span className="badge badge-confirmed">{t.summaryConfirmed(confirmed)}</span>
-            <span className="badge badge-pending">{t.summaryInvited(invited)}</span>
-            {scheduled > 0 && <span className="badge badge-draft">{t.summaryScheduled(scheduled)}</span>}
-            <span className="badge badge-declined">{t.summaryDeclined(declined)}</span>
-            {cancelled > 0 && <span className="badge badge-declined">{t.summaryCancelled(cancelled)}</span>}
-            {adminCancelled > 0 && <span className="badge badge-declined">{t.summaryWithdrawn(adminCancelled)}</span>}
-            {expired > 0 && <span className="badge badge-declined">{t.summaryExpired(expired)}</span>}
-            {invalidated > 0 && <span className="badge badge-declined">{t.summaryInvalidated(invalidated)}</span>}
+        <Card title={t.invitationsCount(session.invitations.length)} flush>
+          <div className={styles.summary}>
+            <Row gap={2} wrap>
+              <Badge tone="success" icon={false}>{t.summaryConfirmed(confirmed)}</Badge>
+              <Badge tone="warning" icon={false}>{t.summaryInvited(invited)}</Badge>
+              {scheduled > 0 && <Badge icon={false}>{t.summaryScheduled(scheduled)}</Badge>}
+              <Badge tone="danger" icon={false}>{t.summaryDeclined(declined)}</Badge>
+              {cancelled > 0 && <Badge tone="danger" icon={false}>{t.summaryCancelled(cancelled)}</Badge>}
+              {adminCancelled > 0 && <Badge tone="danger" icon={false}>{t.summaryWithdrawn(adminCancelled)}</Badge>}
+              {expired > 0 && <Badge tone="danger" icon={false}>{t.summaryExpired(expired)}</Badge>}
+              {invalidated > 0 && <Badge tone="danger" icon={false}>{t.summaryInvalidated(invalidated)}</Badge>}
+            </Row>
           </div>
-          <table style={{ overflow: 'visible' }}>
+          <Table embedded>
             <thead>
               <tr>
                 <th>{t.timeslot}</th>
                 <th>{t.student}</th>
                 <th>{t.discipline}</th>
                 <th>{t.status}</th>
-                {(canEdit || session.status === 'invitations_sent') && <th></th>}
+                {showActionsCol && <th data-actions />}
               </tr>
             </thead>
             <tbody>
-              {slotGroups.map((group, groupIdx) => (
-                group.entries.map((slot, idx) => {
+              {slotGroups.map((group, groupIdx) => group.entries.map((slot, idx) => {
                 const isFirstInGroup = idx === 0;
-                const groupBorderStyle = isFirstInGroup && groupIdx > 0 ? '2px solid var(--border)' : undefined;
+                const rowClass = isFirstInGroup && groupIdx > 0 ? styles.slotStart : undefined;
+                const timeCell = <td>{isFirstInGroup && <Text mono weight="medium">{slot.startTime}</Text>}</td>;
                 const inv = slot.invitation;
-                if (inv) return (
-                  <tr key={inv.id} style={groupBorderStyle ? { borderTop: groupBorderStyle } : undefined}>
-                    <td style={isFirstInGroup ? { fontWeight: 500 } : { color: 'transparent', userSelect: 'none' }}>
-                      {inv.timeslot_start_time}
-                    </td>
-                    <td>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <span title={inv.group_name || ''} style={{
-                          width: '10px', height: '10px', borderRadius: '50%',
-                          background: inv.group_color || 'transparent', display: 'inline-block', flexShrink: 0,
-                        }} />
-                        {inv.student_name}
-                        {inv.buddy_group_id && buddyColorMap.has(inv.buddy_group_id) && (
-                          <svg style={{ width: '14px', height: '14px', flexShrink: 0 }} viewBox="0 0 24 24" fill={buddyColorMap.get(inv.buddy_group_id)} xmlns="http://www.w3.org/2000/svg">
-                            <title>{inv.buddy_group_name}</title>
-                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
-                          </svg>
-                        )}
-                        <DecisionLog decisionLog={inv.decision_log} />
-                      </span>
-                    </td>
-                    <td>{inv.discipline_name || t.noData}</td>
-                    <td style={{ verticalAlign: 'middle' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <span className={`badge ${
-                        inv.status === 'confirmed' ? 'badge-confirmed' :
-                        inv.status === 'declined' ? 'badge-declined' :
-                        inv.status === 'cancelled' ? 'badge-declined' :
-                        inv.status === 'admin_cancelled' ? 'badge-declined' :
-                        inv.status === 'expired' ? 'badge-declined' :
-                        inv.status === 'invalidated' ? 'badge-declined' :
-                        inv.status === 'scheduled' ? 'badge-draft' :
-                        'badge-pending'
-                      }`}>
-                        {t.statusMap(inv.status)}
-                      </span>
-                      {inv.status === 'invited' && inv.expires_at && (() => {
-                        const expiresAt = new Date(inv.expires_at);
-                        return (
-                          <span className="badge badge-draft" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontVariantNumeric: 'tabular-nums', minWidth: '5.5em', justifyContent: 'center' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3l2 2"/><path d="M19 3l-2 2"/><line x1="12" y1="1" x2="12" y2="3"/></svg>
-                            <Countdown expiresAt={expiresAt} />
-                          </span>
-                        );
-                      })()}
-                      {inv.status === 'confirmed' && session.status !== 'completed' && (
-                        <span
-                          className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
-                          style={{ cursor: 'pointer' }}
-                          onClick={() => toggleNoShow(inv.id)}
-                        >
-                          {inv.no_show ? t.noShow : t.show}
-                        </span>
-                      )}
-                      {inv.status === 'confirmed' && session.status === 'completed' && (
-                        <span
-                          className={`badge ${inv.no_show ? 'badge-no-show' : 'badge-show'}`}
-                        >
-                          {inv.no_show ? t.noShow : t.show}
-                        </span>
-                      )}
-                      </span>
-                    </td>
-                    {canEdit && (
+
+                if (inv) {
+                  const isActive = !INACTIVE_STATUSES.includes(inv.status);
+                  return (
+                    <tr key={inv.id} className={rowClass}>
+                      {timeCell}
                       <td>
-                        {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'invalidated' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
-                          <button
-                            className="btn btn-outline"
-                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
-                            onClick={() => removeInvitation(inv.id)}
-                          >×</button>
-                        )}
+                        <Row gap={2}>
+                          {studentLabel(inv)}
+                          <DecisionLog decisionLog={inv.decision_log} />
+                        </Row>
                       </td>
-                    )}
-                    {!canEdit && session.status === 'invitations_sent' && (
-                      <td style={{ display: 'flex', gap: '0.3rem' }}>
-                        <button
-                          className="btn btn-outline"
-                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
-                          onClick={() => window.open(`/invitation/${inv.token}`, '_blank')}
-                          title={t.viewInvitation}
-                        >↗</button>
-                        {inv.status !== 'declined' && inv.status !== 'expired' && inv.status !== 'invalidated' && inv.status !== 'cancelled' && inv.status !== 'admin_cancelled' && (
-                          <button
-                            className="btn btn-outline"
-                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
-                            onClick={() => adminCancelInvitation(inv.id)}
-                          >×</button>
-                        )}
+                      <td>{inv.discipline_name || <Text tone="subtle">{t.noData}</Text>}</td>
+                      <td>
+                        <Row gap={2} wrap>
+                          <InvitationStatusBadge status={inv.status} />
+                          {inv.status === 'invited' && inv.expires_at && (
+                            <Badge mono icon={<Timer />}><Countdown expiresAt={new Date(inv.expires_at)} /></Badge>
+                          )}
+                          {inv.status === 'confirmed' && (session.status !== 'completed' ? (
+                            <Button
+                              size="sm"
+                              variant={inv.no_show ? 'danger' : 'secondary'}
+                              icon={inv.no_show ? <UserX /> : <UserCheck />}
+                              onClick={() => toggleNoShow(inv.id)}
+                            >
+                              {inv.no_show ? t.noShow : t.show}
+                            </Button>
+                          ) : (
+                            <Badge tone={inv.no_show ? 'danger' : 'neutral'} icon={inv.no_show ? <UserX /> : <UserCheck />}>
+                              {inv.no_show ? t.noShow : t.show}
+                            </Badge>
+                          ))}
+                        </Row>
                       </td>
-                    )}
-                  </tr>
-                );
-                if (!slot.empty || !(canEdit || session.status === 'invitations_sent')) return null;
+                      {showActionsCol && (
+                        <td data-actions>
+                          <Row gap={1} justify="end">
+                            {!canEdit && (
+                              <Tooltip content={t.viewInvitation}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  icon={<ExternalLink />}
+                                  aria-label={t.viewInvitation}
+                                  onClick={() => window.open(`/invitation/${inv.token}`, '_blank', 'noopener')}
+                                />
+                              </Tooltip>
+                            )}
+                            {isActive && (canEdit ? (
+                              <Tooltip content={t.remove}>
+                                <Button variant="ghost" size="sm" icon={<X />} aria-label={t.remove} onClick={() => removeInvitation(inv.id)} />
+                              </Tooltip>
+                            ) : (
+                              <Tooltip content={t.adminCancelInvitation}>
+                                <Button variant="ghost" size="sm" icon={<Ban />} aria-label={t.adminCancelInvitation} onClick={() => adminCancelInvitation(inv.id)} />
+                              </Tooltip>
+                            ))}
+                          </Row>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                }
+
+                if (!slot.empty || !showActionsCol) return null;
+                const isAdding = addSlot?.timeslotId === slot.timeslotId && addSlot?.instructorId === slot.instructorId;
                 return (
-                  <tr key={`empty-${slot.timeslotId}-${slot.instructorId}-${idx}`} style={groupBorderStyle ? { borderTop: groupBorderStyle } : undefined}>
-                    <td style={isFirstInGroup ? { fontWeight: 500 } : { color: 'transparent', userSelect: 'none' }}>
-                      {slot.startTime}
-                    </td>
+                  <tr key={`empty-${slot.timeslotId}-${slot.instructorId}-${idx}`} className={`${styles.emptySlot} ${rowClass ?? ''}`}>
+                    {timeCell}
                     <td colSpan={2}>
-                      {addSlot?.timeslotId === slot.timeslotId && addSlot?.instructorId === slot.instructorId ? (
-                        <div ref={dropdownRef} style={{ position: 'relative' }}>
-                          <input
-                            type="text"
+                      {isAdding ? (
+                        <div ref={dropdownRef} className={styles.slotSearch}>
+                          <Input
+                            type="search"
+                            autoComplete="off"
+                            autoFocus
+                            aria-label={t.searchStudent}
                             placeholder={t.searchStudent}
                             value={studentSearch}
                             onChange={e => searchStudents(e.target.value)}
-                            autoFocus
-                            style={{ width: '100%', padding: '0.3rem 0.5rem', fontSize: '0.85rem' }}
                           />
                           {showStudentDropdown && (
-                            <div style={{
-                              position: 'absolute', left: 0, right: 0, zIndex: 10,
-                              ...(dropdownUp ? { bottom: '100%' } : { top: '100%' }),
-                              background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.375rem',
-                              maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px var(--shadow)',
-                            }}>
-                              {studentResults.map(s => (
-                                <div
-                                  key={s.id}
-                                  onClick={() => addStudentToSlot(s.id)}
-                                  style={{ padding: '0.5rem', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
-                                  onMouseOver={e => (e.currentTarget.style.background = 'var(--bg)')}
-                                  onMouseOut={e => (e.currentTarget.style.background = 'var(--surface)')}
-                                >
-                                  {s.first_name} {s.last_name} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>({s.email})</span>
-                                </div>
-                              ))}
-                            </div>
+                            <StudentSearchResults results={studentResults} onSelect={s => addStudentToSlot(s.id)} up={dropdownUp} />
                           )}
                         </div>
                       ) : (
-                        <div style={{ display: 'flex', gap: '0.3rem' }}>
-                          <button
-                            className="btn btn-outline"
-                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem' }}
+                        <Row gap={2}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<UserPlus />}
                             onClick={() => { setAddSlot({ timeslotId: slot.timeslotId, instructorId: slot.instructorId }); setStudentSearch(''); setStudentResults([]); }}
-                          >{t.addStudentToSlot}</button>
+                          >
+                            {t.addStudentToSlot}
+                          </Button>
                           {session.status === 'invitations_sent' && (
-                            <button
-                              className="btn btn-outline"
-                              style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem', borderStyle: 'dashed' }}
-                              onClick={() => autoScheduleSlot(slot.timeslotId, slot.instructorId)}
-                              title={t.autoScheduleStudent}
-                            >{t.autoScheduleLabel}</button>
+                            <Tooltip content={t.autoScheduleStudent}>
+                              <Button size="sm" variant="ghost" icon={<Wand2 />} onClick={() => autoScheduleSlot(slot.timeslotId, slot.instructorId)}>
+                                {t.autoScheduleLabel}
+                              </Button>
+                            </Tooltip>
                           )}
-                        </div>
+                        </Row>
                       )}
                     </td>
-                    <td></td>
-                    {(canEdit || session.status === 'invitations_sent') && <td></td>}
+                    <td />
+                    {showActionsCol && <td />}
                   </tr>
                 );
-                })
-              ))}
+              }))}
             </tbody>
-          </table>
-        </div>
+          </Table>
+        </Card>
       )}
-
-    </div>
+    </Page>
   );
 }
+

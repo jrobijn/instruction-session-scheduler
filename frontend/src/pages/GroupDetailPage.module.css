@@ -1,0 +1,14 @@
+.search { position: relative; width: 100%; max-width: 26rem; }
+
+.flag { display: inline-flex; cursor: help; }
+.flag svg { width: var(--icon-sm); height: var(--icon-sm); }
+.warning { color: var(--color-warning); }
+.success { color: var(--color-success); }
+
+.disciplineGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: var(--space-2);
+}
+
+.settings { max-width: 40rem; }

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { api } from '../api';
 import { useT, getAvailableLocales } from '../i18n';
+import { Badge, Card, Checkbox, Field, Input, Page, PageHeader, Row, Select, Stack, Text, useToast } from '../ui';
 
 interface Settings {
   [key: string]: string;
@@ -15,12 +16,13 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState('');
   const t = useT();
+  const toast = useToast();
 
   const load = async () => {
     try {
       setSettings(await api.getSettings());
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     } finally {
       setLoading(false);
     }
@@ -34,100 +36,98 @@ export default function SettingsPage() {
       setSaved(key);
       setTimeout(() => setSaved(''), 2000);
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
-  if (loading) return <div className="page"><p>{t.loading}</p></div>;
+  if (loading) return <Page><Text tone="muted">{t.loading}</Text></Page>;
 
   const settingsConfig = [
     { key: 'club_name', label: t.settingClubName, type: 'text', description: t.settingClubNameDesc },
     { key: 'invitation_expiry_minutes', label: t.settingExpiryMinutes, type: 'number', description: t.settingExpiryMinutesDesc },
   ];
 
+  const hint = (key: string, description: ReactNode) => (
+    <Row gap={2}>
+      <span>{description}</span>
+      {saved === key && <Badge tone="success">{t.saved}</Badge>}
+    </Row>
+  );
+
+  const clubDays = (settings.club_days || '0|1|2|3|4|5|6').split('|').filter(Boolean);
+
   return (
-    <div className="page">
-      <h1>{t.settingsTitle}</h1>
-      <div className="card">
-        <div className="form-group">
-          <label>{t.settingEmailLocale}</label>
-          <select
-            value={settings.email_locale || 'en'}
-            onChange={e => {
-              setSettings({ ...settings, email_locale: e.target.value });
-              saveSetting('email_locale', e.target.value);
-            }}
-          >
-            {getAvailableLocales().map(code => (
-              <option key={code} value={code}>{t.languageNames[code] || code}</option>
-            ))}
-          </select>
-          <small style={{ color: 'var(--text-muted)' }}>{t.settingEmailLocaleDesc}</small>
-          {saved === 'email_locale' && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
-        </div>
+    <Page>
+      <PageHeader title={t.settingsTitle} />
+      <Card>
+        <Stack gap={5}>
+          <Field label={t.settingEmailLocale} htmlFor="setting-email-locale" hint={hint('email_locale', t.settingEmailLocaleDesc)}>
+            <Select
+              id="setting-email-locale"
+              value={settings.email_locale || 'en'}
+              onChange={e => {
+                setSettings({ ...settings, email_locale: e.target.value });
+                saveSetting('email_locale', e.target.value);
+              }}
+            >
+              {getAvailableLocales().map(code => (
+                <option key={code} value={code}>{t.languageNames[code] || code}</option>
+              ))}
+            </Select>
+          </Field>
 
-        {settingsConfig.map(({ key, label, type, description }) => (
-          <div key={key} className="form-group">
-            <label>{label}</label>
-            <input
-              type={type}
-              value={settings[key] || ''}
-              onChange={e => setSettings({ ...settings, [key]: e.target.value })}
-              onBlur={e => saveSetting(key, e.target.value)}
-            />
-            <small style={{ color: 'var(--text-muted)' }}>{description}</small>
-            {saved === key && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
-          </div>
-        ))}
+          {settingsConfig.map(({ key, label, type, description }) => (
+            <Field key={key} label={label} htmlFor={`setting-${key}`} hint={hint(key, description)}>
+              <Input
+                id={`setting-${key}`}
+                type={type}
+                value={settings[key] || ''}
+                onChange={e => setSettings({ ...settings, [key]: e.target.value })}
+                onBlur={e => saveSetting(key, e.target.value)}
+              />
+            </Field>
+          ))}
 
-        <div className="form-group">
-          <label>{t.settingClubDays}</label>
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            {[0, 1, 2, 3, 4, 5, 6].map(idx => {
-              const days = (settings.club_days || '0|1|2|3|4|5|6').split('|').filter(Boolean);
-              const checked = days.includes(String(idx));
-              const isLastChecked = checked && days.length <= 1;
-              return (
-                <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: isLastChecked ? 'not-allowed' : 'pointer', opacity: isLastChecked ? 0.5 : 1 }}>
-                  <input
-                    type="checkbox"
+          <Field label={t.settingClubDays} hint={hint('club_days', t.settingClubDaysDesc)}>
+            <Row gap={4} wrap>
+              {[0, 1, 2, 3, 4, 5, 6].map(idx => {
+                const checked = clubDays.includes(String(idx));
+                return (
+                  <Checkbox
+                    key={idx}
+                    label={t.days[idx]}
                     checked={checked}
-                    disabled={isLastChecked}
-                    onChange={() => {
+                    disabled={checked && clubDays.length <= 1}
+                    onCheckedChange={() => {
                       const newDays = checked
-                        ? days.filter(d => d !== String(idx))
-                        : [...days, String(idx)].sort();
+                        ? clubDays.filter(d => d !== String(idx))
+                        : [...clubDays, String(idx)].sort();
                       const newValue = newDays.join('|');
                       setSettings({ ...settings, club_days: newValue });
                       saveSetting('club_days', newValue);
                     }}
                   />
-                  {t.days[idx]}
-                </label>
-              );
-            })}
-          </div>
-            <small style={{ color: 'var(--text-muted)' }}>{t.settingClubDaysDesc}</small>
-            {saved === 'club_days' && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
-        </div>
+                );
+              })}
+            </Row>
+          </Field>
 
-        <div className="form-group">
-          <label>{t.settingTimezone}</label>
-          <select
-            value={settings.timezone || 'Europe/Amsterdam'}
-            onChange={e => {
-              setSettings({ ...settings, timezone: e.target.value });
-              saveSetting('timezone', e.target.value);
-            }}
-          >
-            {[...new Set([settings.timezone || 'Europe/Amsterdam', ...TIME_ZONES])].sort().map(tz => (
-              <option key={tz} value={tz}>{tz}</option>
-            ))}
-          </select>
-          <small style={{ color: 'var(--text-muted)' }}>{t.settingTimezoneDesc}</small>
-          {saved === 'timezone' && <small style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>{t.saved}</small>}
-        </div>
-      </div>
-    </div>
+          <Field label={t.settingTimezone} htmlFor="setting-timezone" hint={hint('timezone', t.settingTimezoneDesc)}>
+            <Select
+              id="setting-timezone"
+              value={settings.timezone || 'Europe/Amsterdam'}
+              onChange={e => {
+                setSettings({ ...settings, timezone: e.target.value });
+                saveSetting('timezone', e.target.value);
+              }}
+            >
+              {[...new Set([settings.timezone || 'Europe/Amsterdam', ...TIME_ZONES])].sort().map(tz => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </Select>
+          </Field>
+        </Stack>
+      </Card>
+    </Page>
   );
 }

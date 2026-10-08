@@ -1,0 +1,21 @@
+.card { width: 40rem; max-width: 100%; border-top: 3px solid var(--color-accent); }
+.narrow { width: 36rem; max-width: 100%; }
+
+/* Logo left, content right; wraps to a single column on narrow screens */
+.layout {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--space-6);
+}
+.logo { width: 8rem; height: 8rem; object-fit: contain; flex-shrink: 0; }
+.content { flex: 1 1 18rem; min-width: 0; }
+.title { font-size: var(--text-xl); text-transform: uppercase; }
+
+.choice { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.promptActions { margin-top: var(--space-3); }
+
+@media (max-width: 30rem) {
+  .choice { grid-template-columns: 1fr; }
+}
