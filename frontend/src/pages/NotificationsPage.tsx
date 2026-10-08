@@ -1,19 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BellOff, CheckCheck, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../api';
-import { useT, getLocale } from '../i18n';
-
-interface Notification {
-  id: number;
-  type: 'invitation_confirmed' | 'invitation_declined' | 'invitation_expired' | 'invitation_cancelled' | 'session_full' | 'session_no_longer_full';
-  invitation_id: number;
-  session_id: number;
-  student_name: string;
-  session_date: string;
-  timeslot_start_time: string | null;
-  read: number;
-  created_at: string;
-}
+import { useT } from '../i18n';
+import { Button, Card, EmptyState, Page, PageHeader, Row, Text } from '../ui';
+import { NotificationItem, type Notification } from '../components/NotificationItem';
 
 const PAGE_SIZE = 20;
 
@@ -55,103 +46,43 @@ export default function NotificationsPage() {
     } catch { /* ignore */ }
   };
 
-  const formatMessage = (n: Notification) => {
-    const d = new Date(n.session_date + 'T00:00:00');
-    const locale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
-    const date = d.toLocaleDateString(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    switch (n.type) {
-      case 'invitation_confirmed': return t.notificationConfirmed(n.student_name, date);
-      case 'invitation_declined': return t.notificationDeclined(n.student_name, date);
-      case 'invitation_expired': return t.notificationExpired(n.student_name, date);
-      case 'invitation_cancelled': return t.notificationCancelled(n.student_name, date);
-      case 'session_full': return t.notificationSessionFull(date);
-      case 'session_no_longer_full': return t.notificationSessionNoLongerFull(date);
-    }
-  };
-
-  const getTimeAgo = (createdAt: string) => {
-    const diff = Date.now() - new Date(createdAt + 'Z').getTime();
-    const minutes = Math.floor(diff / 60000);
-    return t.notificationTimeAgo(minutes);
-  };
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'invitation_confirmed': return '✓';
-      case 'invitation_declined': return '✗';
-      case 'invitation_expired': return '⏱';
-      case 'invitation_cancelled': return '↩';
-      case 'session_full': return '★';
-      case 'session_no_longer_full': return '☆';
-      default: return '•';
-    }
-  };
-
   const unreadOnPage = notifications.filter(n => !n.read).length;
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>{t.notificationsTitle(total)}</h1>
-        {unreadOnPage > 0 && (
-          <button className="btn btn-outline btn-sm" onClick={handleMarkAllRead}>
-            {t.markAllRead}
-          </button>
+    <Page>
+      <PageHeader
+        title={t.notificationsTitle(total)}
+        actions={unreadOnPage > 0 && (
+          <Button icon={<CheckCheck />} onClick={handleMarkAllRead}>{t.markAllRead}</Button>
         )}
-      </div>
+      />
 
       {loading ? (
-        <p>{t.loading}</p>
+        <Text tone="muted">{t.loading}</Text>
       ) : notifications.length === 0 ? (
-        <div className="empty-state">
-          <h3>{t.noNotifications}</h3>
-          <p>{t.noNotificationsHint}</p>
-        </div>
+        <EmptyState icon={<BellOff />} title={t.noNotifications} description={t.noNotificationsHint} />
       ) : (
         <>
-          <div className="notifications-list">
-            {notifications.map(n => {
-              const isSpecial = n.type === 'session_full' || n.type === 'session_no_longer_full';
-              return (
-              <div
+          <Card flush>
+            {notifications.map(n => (
+              <NotificationItem
                 key={n.id}
-                className={`notifications-list-item notification-clickable ${!n.read ? 'notification-unread' : ''} ${isSpecial ? 'notification-special notification-type-item-' + n.type : ''}`}
-                onMouseEnter={() => { if (!n.read) handleMarkRead(n.id); }}
+                notification={n}
+                onHover={() => handleMarkRead(n.id)}
                 onClick={() => navigate(`/sessions/${n.session_id}`)}
-              >
-                <span className={`notification-type-icon notification-type-${n.type.replace('invitation_', '')}`}>
-                  {getTypeIcon(n.type)}
-                </span>
-                <div className="notification-content">
-                  <span className="notification-message">{formatMessage(n)}</span>
-                  <span className="notification-time">{getTimeAgo(n.created_at)}</span>
-                </div>
-              </div>
-            );
-            })}
-          </div>
+              />
+            ))}
+          </Card>
 
           {totalPages > 1 && (
-            <div className="notifications-pagination">
-              <button
-                className="btn btn-outline btn-sm"
-                disabled={page <= 1}
-                onClick={() => setPage(p => p - 1)}
-              >
-                ←
-              </button>
-              <span className="notifications-page-info">{page} / {totalPages}</span>
-              <button
-                className="btn btn-outline btn-sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage(p => p + 1)}
-              >
-                →
-              </button>
-            </div>
+            <Row gap={3} justify="center">
+              <Button size="sm" icon={<ChevronLeft />} aria-label={t.previousPage} disabled={page <= 1} onClick={() => setPage(p => p - 1)} />
+              <Text mono tone="muted" size="sm">{page} / {totalPages}</Text>
+              <Button size="sm" icon={<ChevronRight />} aria-label={t.nextPage} disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} />
+            </Row>
           )}
         </>
       )}
-    </div>
+    </Page>
   );
 }

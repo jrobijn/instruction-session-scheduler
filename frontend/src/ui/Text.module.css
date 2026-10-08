@@ -1,0 +1,29 @@
+.default { color: inherit; }
+.muted { color: var(--color-text-muted); }
+.subtle { color: var(--color-text-subtle); }
+.accent { color: var(--color-accent-text); }
+.success { color: var(--color-success); }
+.warning { color: var(--color-warning); }
+.danger { color: var(--color-danger); }
+
+.xs { font-size: var(--text-xs); }
+.sm { font-size: var(--text-sm); }
+.md { font-size: var(--text-md); }
+
+.regular { font-weight: var(--weight-regular); }
+.medium { font-weight: var(--weight-medium); }
+.semibold { font-weight: var(--weight-semibold); }
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.label {
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}

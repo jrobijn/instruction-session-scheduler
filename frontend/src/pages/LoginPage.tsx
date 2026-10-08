@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { api } from '../api';
 import { useT } from '../i18n';
+import { LogIn } from 'lucide-react';
+import { Alert, Button, Card, CenteredPage, Field, Input, Stack, Text } from '../ui';
+import Logo from '../components/Logo';
+import styles from './LoginPage.module.css';
 
 export default function LoginPage() {
   const [password, setPassword] = useState('');
@@ -37,23 +41,27 @@ export default function LoginPage() {
   if (checking) return null;
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <h1>{t.appTitle}</h1>
-        <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: 24 }}>
-          {t.adminLogin}
-        </p>
-        {error && <div className="alert alert-error">{error}</div>}
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>{t.password}</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus />
-          </div>
-          <button className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
-            {loading ? t.loggingIn : t.login}
-          </button>
-        </form>
-      </div>
-    </div>
+    <CenteredPage>
+      <Card className={styles.card}>
+        <Stack gap={6}>
+          <Stack gap={3} align="center">
+            <Logo className={styles.logo} />
+            <h1 className={styles.title}>{t.appTitle}</h1>
+            <Text tone="muted" label>{t.adminLogin}</Text>
+          </Stack>
+          <form onSubmit={handleSubmit}>
+            <Stack gap={4}>
+              {error && <Alert tone="danger">{error}</Alert>}
+              <Field label={t.password} htmlFor="login-password">
+                <Input id="login-password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus />
+              </Field>
+              <Button variant="primary" type="submit" icon={<LogIn />} fullWidth disabled={loading}>
+                {loading ? t.loggingIn : t.login}
+              </Button>
+            </Stack>
+          </form>
+        </Stack>
+      </Card>
+    </CenteredPage>
   );
 }

@@ -1,0 +1,96 @@
+.wrap {
+  overflow-x: auto;
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.embedded { border: none; border-radius: 0; background: transparent; }
+
+.table {
+  width: 100%;
+  border: none;
+  /* separate (not collapse) avoids sub-pixel seams between cell backgrounds */
+  border-collapse: separate;
+  border-spacing: 0;
+  background: transparent;
+  font-size: var(--text-sm);
+}
+
+.table th,
+.table td {
+  padding: var(--space-2) var(--space-4);
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.table thead tr { background: var(--color-surface-sunken); }
+
+.table th {
+  height: var(--control-h-md);
+  background: transparent;
+  border-bottom-color: var(--color-border-strong);
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.table td { height: calc(var(--control-h-md) + var(--space-3)); }
+
+.table tbody tr:last-child td { border-bottom: none; }
+
+.table [data-numeric] {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.table th[data-numeric] { font-family: var(--font-display); }
+
+.table [data-actions] { width: 1%; text-align: right; white-space: nowrap; }
+.table [data-shrink] { width: 1%; white-space: nowrap; }
+
+.expandIcon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex-shrink: 0;
+  color: var(--color-text-subtle);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.expanded { transform: rotate(90deg); color: var(--color-accent-text); }
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.sortButton:hover, .sortActive { color: var(--color-text); }
+.sortButton svg { width: var(--icon-xs); height: var(--icon-xs); opacity: 0.5; }
+.sortActive svg { opacity: 1; color: var(--color-accent-text); }
+
+/* Row backgrounds go on <tr>, not <td>: avoids sub-pixel seams between cells */
+.interactive tbody tr { cursor: pointer; }
+.interactive tbody tr:hover { background: var(--color-surface-sunken); }
+.interactive tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--color-accent); }
+
+/* Expanded detail row: <tr data-detail><td colSpan={n}>…</td></tr> */
+.table tbody tr[data-detail] { cursor: default; }
+.table tbody tr[data-detail] td,
+.table tbody tr[data-detail]:hover td {
+  height: auto;
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface-sunken);
+  box-shadow: inset 3px 0 0 var(--color-border-strong);
+}
+.table tbody tr[data-expanded] { background: var(--color-surface-sunken); }

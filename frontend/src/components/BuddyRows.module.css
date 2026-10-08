@@ -1,0 +1,8 @@
+/* Buddy group rows in member tables. --buddy is the buddy group's data colour, set per row. */
+.buddyRow { background: color-mix(in srgb, var(--buddy) 6%, transparent); }
+.buddyRow td:first-child { box-shadow: inset 3px 0 0 var(--buddy); }
+.buddyRow[data-first] td { border-top: var(--border-width) solid color-mix(in srgb, var(--buddy) 55%, transparent); }
+.buddyRow[data-last] td { border-bottom: var(--border-width) solid color-mix(in srgb, var(--buddy) 55%, transparent); }
+
+.buddyIcon { display: inline-flex; color: var(--buddy); }
+.buddyIcon svg { width: var(--icon-sm); height: var(--icon-sm); }

@@ -1,19 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Bell } from 'lucide-react';
 import { api, API_BASE } from '../api';
-import { useT, getLocale } from '../i18n';
-
-interface Notification {
-  id: number;
-  type: 'invitation_confirmed' | 'invitation_declined' | 'invitation_expired' | 'invitation_cancelled' | 'session_full' | 'session_no_longer_full';
-  invitation_id: number;
-  session_id: number;
-  student_name: string;
-  session_date: string;
-  timeslot_start_time: string | null;
-  read: number;
-  created_at: string;
-}
+import { useT } from '../i18n';
+import { Button, Popover } from '../ui';
+import { NotificationItem, type Notification } from './NotificationItem';
+import styles from './NotificationBell.module.css';
 
 export default function NotificationBell() {
   const t = useT();
@@ -21,7 +13,6 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const fetchUnreadCount = useCallback(async () => {
     try {
@@ -61,20 +52,9 @@ export default function NotificationBell() {
     return () => evtSource.close();
   }, []);
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    if (open) document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  const handleOpen = () => {
-    if (!open) fetchRecent();
-    setOpen(prev => !prev);
+  const handleOpenChange = (next: boolean) => {
+    if (next) fetchRecent();
+    setOpen(next);
   };
 
   const handleMarkRead = async (id: number) => {
@@ -93,97 +73,48 @@ export default function NotificationBell() {
     } catch { /* ignore */ }
   };
 
-  const formatMessage = (n: Notification) => {
-    const d = new Date(n.session_date + 'T00:00:00');
-    const locale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
-    const date = d.toLocaleDateString(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    switch (n.type) {
-      case 'invitation_confirmed': return t.notificationConfirmed(n.student_name, date);
-      case 'invitation_declined': return t.notificationDeclined(n.student_name, date);
-      case 'invitation_expired': return t.notificationExpired(n.student_name, date);
-      case 'invitation_cancelled': return t.notificationCancelled(n.student_name, date);
-      case 'session_full': return t.notificationSessionFull(date);
-      case 'session_no_longer_full': return t.notificationSessionNoLongerFull(date);
-    }
-  };
-
-  const getTimeAgo = (createdAt: string) => {
-    const diff = Date.now() - new Date(createdAt + 'Z').getTime();
-    const minutes = Math.floor(diff / 60000);
-    return t.notificationTimeAgo(minutes);
-  };
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'invitation_confirmed': return '✓';
-      case 'invitation_declined': return '✗';
-      case 'invitation_expired': return '⏱';
-      case 'invitation_cancelled': return '↩';
-      case 'session_full': return '★';
-      case 'session_no_longer_full': return '☆';
-      default: return '•';
-    }
+  const goTo = (path: string) => {
+    setOpen(false);
+    navigate(path);
   };
 
   return (
-    <div className="notification-bell" ref={dropdownRef}>
-      <button className="notification-bell-btn" onClick={handleOpen} aria-label={t.notifications}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-        </svg>
+    <Popover
+      open={open}
+      onOpenChange={handleOpenChange}
+      align="end"
+      flush
+      className={styles.panel}
+      trigger={
+        <button type="button" className={styles.bell} aria-label={t.notifications}>
+          <Bell />
+          {unreadCount > 0 && <span className={styles.count}>{unreadCount > 99 ? '99+' : unreadCount}</span>}
+        </button>
+      }
+    >
+      <header className={styles.header}>
+        <span className={styles.title}>{t.notifications}</span>
         {unreadCount > 0 && (
-          <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+          <Button variant="ghost" size="sm" onClick={handleMarkAllRead}>{t.markAllRead}</Button>
         )}
-      </button>
-
-      {open && (
-        <div className="notification-dropdown">
-          <div className="notification-dropdown-header">
-            <span className="notification-dropdown-title">{t.notifications}</span>
-            {unreadCount > 0 && (
-              <button className="notification-mark-all-btn" onClick={handleMarkAllRead}>
-                {t.markAllRead}
-              </button>
-            )}
-          </div>
-
-          <div className="notification-dropdown-list">
-            {notifications.length === 0 ? (
-              <div className="notification-empty">{t.noNotifications}</div>
-            ) : (
-              notifications.map(n => {
-                const isSpecial = n.type === 'session_full' || n.type === 'session_no_longer_full';
-                return (
-                <div
-                  key={n.id}
-                  className={`notification-item notification-clickable ${!n.read ? 'notification-unread' : ''} ${isSpecial ? 'notification-special notification-type-item-' + n.type : ''}`}
-                  onMouseEnter={() => { if (!n.read) handleMarkRead(n.id); }}
-                  onClick={() => { setOpen(false); navigate(`/sessions/${n.session_id}`); }}
-                >
-                  <span className={`notification-type-icon notification-type-${n.type.replace('invitation_', '')}`}>
-                    {getTypeIcon(n.type)}
-                  </span>
-                  <div className="notification-content">
-                    <span className="notification-message">{formatMessage(n)}</span>
-                    <span className="notification-time">{getTimeAgo(n.created_at)}</span>
-                  </div>
-                </div>
-              );
-              })
-            )}
-          </div>
-
-          <div className="notification-dropdown-footer">
-            <button
-              className="notification-view-all-btn"
-              onClick={() => { setOpen(false); navigate('/notifications'); }}
-            >
-              {t.viewAllNotifications}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+      </header>
+      <div className={styles.list}>
+        {notifications.length === 0 ? (
+          <p className={styles.empty}>{t.noNotifications}</p>
+        ) : (
+          notifications.map(n => (
+            <NotificationItem
+              key={n.id}
+              notification={n}
+              onHover={() => handleMarkRead(n.id)}
+              onClick={() => goTo(`/sessions/${n.session_id}`)}
+            />
+          ))
+        )}
+      </div>
+      <footer className={styles.footer}>
+        <Button variant="ghost" size="sm" onClick={() => goTo('/notifications')}>{t.viewAllNotifications}</Button>
+      </footer>
+    </Popover>
   );
 }

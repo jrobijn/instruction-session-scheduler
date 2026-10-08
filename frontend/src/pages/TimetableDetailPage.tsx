@@ -1,7 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowUpDown, Check, Plus, Save, Star, Trash2, X } from 'lucide-react';
 import { api } from '../api';
 import { useT } from '../i18n';
+import {
+  Alert, Badge, Button, Card, Chip, Input, Page, PageHeader, Row, Select, Slider, Stack, Text,
+  useConfirm, useToast,
+} from '../ui';
+import { AllocationBar } from '../components/AllocationBar';
+import styles from './TimetableDetailPage.module.css';
 
 interface Timeslot {
   id: number;
@@ -39,6 +46,8 @@ export default function TimetableDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [timetable, setTimetable] = useState<TimetableDetail | null>(null);
   const [editName, setEditName] = useState('');
   const [newTimeslotTime, setNewTimeslotTime] = useState('');
@@ -47,8 +56,6 @@ export default function TimetableDetailPage() {
   const [allGroups, setAllGroups] = useState<AvailableGroup[]>([]);
   const [groupAssignments, setGroupAssignments] = useState<Array<{ group_id: number; percentage: number }>>([]);
   const [groupError, setGroupError] = useState('');
-  const dragIdx = useRef<number | null>(null);
-  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [reorderMode, setReorderMode] = useState(false);
 
   const load = async () => {
@@ -76,7 +83,7 @@ export default function TimetableDetailPage() {
       await api.updateTimetable(Number(id), { name: editName });
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -87,7 +94,7 @@ export default function TimetableDetailPage() {
       setNewTimeslotTime('');
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -96,17 +103,17 @@ export default function TimetableDetailPage() {
       await api.deleteTimetableTimeslot(Number(id), timeslotId);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
   const handleSave = async () => {
-    if (!confirm(t.confirmSaveTimetable)) return;
+    if (!await confirm({ title: t.saveTimetable, message: t.confirmSaveTimetable, confirmLabel: t.saveTimetable })) return;
     try {
       await api.saveTimetable(Number(id));
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -115,7 +122,7 @@ export default function TimetableDetailPage() {
       await api.setDefaultTimetable(Number(id));
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
@@ -124,28 +131,100 @@ export default function TimetableDetailPage() {
       await api.toggleTimetableActive(Number(id));
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(t.confirmDeleteTimetable)) return;
+    if (!await confirm({ title: t.delete, message: t.confirmDeleteTimetable, confirmLabel: t.delete, danger: true })) return;
     try {
       await api.deleteTimetable(Number(id));
       navigate('/timetables');
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
-  if (loading) return <div className="page"><p>{t.loading}</p></div>;
-  if (!timetable) return <div className="page"><p>{t.timetableNotFound}</p></div>;
+  const setAssignmentPercentage = (idx: number, newVal: number) => {
+    const diff = newVal - groupAssignments[idx].percentage;
+    if (diff === 0) return;
+    const others = groupAssignments.filter((_, i) => i !== idx);
+    const othersTotal = others.reduce((s, g) => s + g.percentage, 0);
+    const next = groupAssignments.map((g, i) => {
+      if (i === idx) return { ...g, percentage: newVal };
+      if (othersTotal === 0) return { ...g, percentage: Math.floor((100 - newVal) / others.length) };
+      // Distribute the diff proportionally among the others
+      return { ...g, percentage: Math.max(0, Math.round(g.percentage - diff * (g.percentage / othersTotal))) };
+    });
+    // Fix rounding so the total is exactly 100
+    const total = next.reduce((s, g) => s + g.percentage, 0);
+    if (total !== 100 && next.length > 1) {
+      const fixIdx = next.findIndex((_, i) => i !== idx);
+      if (fixIdx >= 0) next[fixIdx] = { ...next[fixIdx], percentage: next[fixIdx].percentage + (100 - total) };
+    }
+    setGroupAssignments(next);
+  };
+
+  const removeAssignment = (idx: number) => {
+    const freed = groupAssignments[idx].percentage;
+    const remaining = groupAssignments.filter((_, i) => i !== idx);
+    if (remaining.length === 0) { setGroupAssignments([]); return; }
+    const remainingTotal = remaining.reduce((s, g) => s + g.percentage, 0);
+    const next = remaining.map((g, i) => {
+      if (remainingTotal === 0) {
+        const share = Math.floor(100 / remaining.length);
+        return { ...g, percentage: i === 0 ? share + (100 - share * remaining.length) : share };
+      }
+      return { ...g, percentage: Math.round(g.percentage + freed * (g.percentage / remainingTotal)) };
+    });
+    const total = next.reduce((s, g) => s + g.percentage, 0);
+    if (total !== 100 && next.length > 0) next[0] = { ...next[0], percentage: next[0].percentage + (100 - total) };
+    setGroupAssignments(next);
+  };
+
+  const addAssignment = (gid: number) => {
+    const newShare = Math.floor(100 / (groupAssignments.length + 1));
+    const oldTotal = 100 - newShare;
+    const currentTotal = groupAssignments.reduce((s, g) => s + g.percentage, 0);
+    const next = groupAssignments.map(g => ({
+      ...g,
+      percentage: currentTotal > 0
+        ? Math.round(g.percentage * oldTotal / currentTotal)
+        : Math.floor(oldTotal / groupAssignments.length),
+    }));
+    next.push({ group_id: gid, percentage: 100 - next.reduce((s, g) => s + g.percentage, 0) });
+    setGroupAssignments(next);
+  };
+
+  const saveAssignments = async () => {
+    setGroupError('');
+    if (groupAssignments.length === 0) { setGroupError(t.atLeastOneGroup); return; }
+    try {
+      await api.setTimetableGroups(Number(id), groupAssignments);
+      load();
+    } catch (err: any) {
+      setGroupError(err.message);
+    }
+  };
+
+  const saveGroupOrder = async () => {
+    if (!timetable) return;
+    try {
+      await api.reorderTimetableGroups(Number(id), timetable.groups.map(g => g.group_id));
+      load();
+    } catch (err: any) {
+      toast(err.message);
+    }
+  };
+
+  if (loading) return <Page><Text tone="muted">{t.loading}</Text></Page>;
+  if (!timetable) return <Page><Text tone="muted">{t.timetableNotFound}</Text></Page>;
 
   const isDraft = timetable.status === 'draft';
 
+  // Fallback palette for groups without a colour (data colours, not theme colours)
   const GROUP_COLORS_FALLBACK = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'];
 
-  // Build bar segments from either draft assignments or saved groups
   const barSegments = isDraft
     ? groupAssignments.map((ga, idx) => {
         const group = allGroups.find(g => g.id === ga.group_id);
@@ -157,313 +236,147 @@ export default function TimetableDetailPage() {
         color: g.group_color || GROUP_COLORS_FALLBACK[idx % GROUP_COLORS_FALLBACK.length],
       }));
 
-  const AllocationBar = ({ onReorder, alwaysDraggable, onToggleDone }: {
-    onReorder?: (fromIdx: number, toIdx: number) => void;
-    alwaysDraggable?: boolean;
-    onToggleDone?: () => void;
-  }) => {
-    const total = barSegments.reduce((s, seg) => s + seg.percentage, 0);
-    if (barSegments.length === 0) return null;
-    const canReorder = !!onReorder && barSegments.length > 1;
-    const dragging = canReorder && (alwaysDraggable || reorderMode);
-    const showToggle = canReorder && !alwaysDraggable;
-    return (
-      <div style={{ marginBottom: '1rem' }}>
-        <div style={{
-          display: 'flex', height: '32px', borderRadius: '6px', overflow: 'hidden',
-          border: '1px solid var(--border)', background: 'var(--bg)',
-        }}>
-          {barSegments.map((seg, i) => (
-            seg.percentage > 0 ? (
-              <div key={i} style={{
-                width: `${(seg.percentage / Math.max(total, 100)) * 100}%`,
-                background: seg.color,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'white', fontSize: '0.8rem', fontWeight: 600,
-                transition: 'width 0.3s ease',
-                minWidth: seg.percentage > 0 ? '24px' : 0,
-                borderRight: i < barSegments.length - 1 ? '2px solid var(--surface)' : 'none',
-              }}>
-                {seg.percentage}%
-              </div>
-            ) : null
-          ))}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-          {barSegments.map((seg, i) => (
-            <div
-              key={i}
-              draggable={dragging}
-              title={dragging ? t.dragToReorderTooltip : undefined}
-              onDragStart={e => { if (!dragging) return; dragIdx.current = i; e.dataTransfer.effectAllowed = 'move'; }}
-              onDragOver={e => { if (!dragging) return; e.preventDefault(); setDragOverIdx(i); }}
-              onDragEnd={() => { dragIdx.current = null; setDragOverIdx(null); }}
-              onDrop={() => {
-                if (!dragging || !onReorder || dragIdx.current === null || dragIdx.current === i) return;
-                onReorder(dragIdx.current, i);
-                dragIdx.current = null;
-                setDragOverIdx(null);
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.85rem',
-                cursor: dragging ? 'grab' : 'default',
-                padding: '0.25rem 0.5rem', borderRadius: '4px',
-                background: dragging && dragOverIdx === i ? 'var(--primary-bg, rgba(59,130,246,0.08))' : 'transparent',
-                border: dragging && dragOverIdx === i ? '1px dashed var(--primary, #3b82f6)' : '1px solid transparent',
-                transition: 'background 0.15s, border 0.15s',
-                userSelect: dragging ? 'none' : 'auto',
-              }}
-            >
-              {dragging && <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1 }}>⠿</span>}
-              <span style={{
-                width: '12px', height: '12px', borderRadius: '3px',
-                background: seg.color, display: 'inline-block', flexShrink: 0,
-              }} />
-              {seg.name} ({seg.percentage}%)
-            </div>
-          ))}
-          {showToggle && (
-            <button
-              className={`btn btn-sm ${reorderMode ? 'btn-primary' : 'btn-outline'}`}
-              onClick={() => {
-                if (reorderMode && onToggleDone) onToggleDone();
-                setReorderMode(!reorderMode);
-              }}
-              title={t.reorderGroups}
-              style={{ marginLeft: 'auto', fontSize: '0.78rem', padding: '0.2rem 0.5rem' }}
-            >
-              {reorderMode ? t.doneReordering : t.reorderGroups}
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  };
+  const assignedIds = new Set(groupAssignments.map(ga => ga.group_id));
+  const availableGroups = allGroups.filter(g => !assignedIds.has(g.id));
 
   return (
-    <div className="page">
-      <button className="btn btn-outline" onClick={() => navigate('/timetables')} style={{ marginBottom: '1rem' }}>
-        {t.backToTimetables}
-      </button>
-
-      {error && <div className="alert alert-error">{error}</div>}
-
-      <div className="page-header">
-        <h1>{timetable.name}</h1>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span className={`badge ${timetable.status === 'saved' ? 'badge-confirmed' : 'badge-draft'}`}>
-            {t.statusMap(timetable.status)}
-          </span>
-          <span className={`badge ${timetable.active ? 'badge-confirmed' : 'badge-declined'}`}>
-            {timetable.active ? t.active : t.inactive}
-          </span>
-          {timetable.is_default ? <span className="badge badge-confirmed">{t.default}</span> : null}
-        </div>
-      </div>
-
-      {/* Name editing (draft only) */}
-      {isDraft && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
-          <h2>{t.name}</h2>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <input value={editName} onChange={e => setEditName(e.target.value)} style={{ flex: 1 }} />
-            <button className="btn btn-outline" onClick={updateName} disabled={editName === timetable.name || !editName}>{t.updateName}</button>
-          </div>
-        </div>
-      )}
-
-      {/* Timeslots Section */}
-      <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>{t.timeslotsCount(timetable.timeslots.length)}</h2>
-        {isDraft && (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-            <input type="time" value={newTimeslotTime} onChange={e => setNewTimeslotTime(e.target.value)} />
-            <button className="btn btn-primary" onClick={addTimeslot} disabled={!newTimeslotTime}>{t.addTimeslot}</button>
-          </div>
-        )}
-        {timetable.timeslots.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)' }}>{t.noTimeslotsDefined}</p>
-        ) : (
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {timetable.timeslots.map(ts => (
-              <span key={ts.id} className="badge" style={{ fontSize: '0.95rem', padding: '0.4rem 0.8rem', background: 'var(--neutral-badge-bg)', color: 'var(--neutral-badge-text)' }}>
-                {ts.start_time}
-                {isDraft && (
-                  <button onClick={() => deleteTimeslot(ts.id)} style={{ marginLeft: '0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}>×</button>
-                )}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Groups Section */}
-      <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>{t.groupAllocations}</h2>
-        {isDraft ? (
+    <Page>
+      <PageHeader
+        back={{ label: t.backToTimetables, onClick: () => navigate('/timetables') }}
+        title={timetable.name}
+        meta={
           <>
-            <div style={{ marginBottom: '1rem' }}>
-              {groupAssignments.map((ga, idx) => {
-                const group = allGroups.find(g => g.id === ga.group_id);
-                return (
-                  <div
-                    key={ga.group_id}
-                    style={{
-                      display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem',
-                      padding: '0.4rem 0.5rem', borderRadius: '6px',
-                    }}
-                  >
-                    <span style={{ minWidth: '120px' }}>{group?.name || `Group ${ga.group_id}`}</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={ga.percentage}
-                      onChange={e => {
-                        const newVal = Number(e.target.value);
-                        const oldVal = ga.percentage;
-                        const diff = newVal - oldVal;
-                        if (diff === 0) return;
-                        const others = groupAssignments.filter((_, i) => i !== idx);
-                        const othersTotal = others.reduce((s, g) => s + g.percentage, 0);
-                        const next = groupAssignments.map((g, i) => {
-                          if (i === idx) return { ...g, percentage: newVal };
-                          if (othersTotal === 0) {
-                            // Distribute equally among others
-                            const share = Math.floor((100 - newVal) / others.length);
-                            return { ...g, percentage: share };
-                          }
-                          // Distribute the diff proportionally among others
-                          const ratio = g.percentage / othersTotal;
-                          return { ...g, percentage: Math.max(0, Math.round(g.percentage - diff * ratio)) };
-                        });
-                        // Fix rounding: adjust to ensure total is exactly 100
-                        const total = next.reduce((s, g) => s + g.percentage, 0);
-                        if (total !== 100 && next.length > 1) {
-                          const fixIdx = next.findIndex((_, i) => i !== idx);
-                          if (fixIdx >= 0) next[fixIdx] = { ...next[fixIdx], percentage: next[fixIdx].percentage + (100 - total) };
-                        }
-                        setGroupAssignments(next);
-                      }}
-                      style={{ flex: 1 }}
-                    />
-                    <span style={{ minWidth: '40px', textAlign: 'right', fontWeight: 500 }}>{ga.percentage}%</span>
-                    <button className="btn btn-outline btn-sm" onClick={() => {
-                      const removed = groupAssignments[idx];
-                      const remaining = groupAssignments.filter((_, i) => i !== idx);
-                      if (remaining.length === 0) { setGroupAssignments([]); return; }
-                      const remainingTotal = remaining.reduce((s, g) => s + g.percentage, 0);
-                      const freed = removed.percentage;
-                      const next = remaining.map((g, i) => {
-                        if (remainingTotal === 0) {
-                          const share = Math.floor(100 / remaining.length);
-                          return { ...g, percentage: i === 0 ? share + (100 - share * remaining.length) : share };
-                        }
-                        return { ...g, percentage: Math.round(g.percentage + freed * (g.percentage / remainingTotal)) };
-                      });
-                      const total = next.reduce((s, g) => s + g.percentage, 0);
-                      if (total !== 100 && next.length > 0) next[0] = { ...next[0], percentage: next[0].percentage + (100 - total) };
-                      setGroupAssignments(next);
-                    }}>{t.remove}</button>
-                  </div>
-                );
-              })}
-            </div>
-            {(() => {
-              const assignedIds = new Set(groupAssignments.map(ga => ga.group_id));
-              const available = allGroups.filter(g => !assignedIds.has(g.id));
-              if (available.length === 0) return null;
-              return (
-                <div style={{ marginBottom: '1rem' }}>
-                  <select
-                    onChange={e => {
-                      const gid = Number(e.target.value);
-                      if (!gid) return;
-                      const count = groupAssignments.length + 1;
-                      const newShare = Math.floor(100 / count);
-                      const oldTotal = 100 - newShare;
-                      const currentTotal = groupAssignments.reduce((s, g) => s + g.percentage, 0);
-                      const next = groupAssignments.map(g => ({
-                        ...g,
-                        percentage: currentTotal > 0
-                          ? Math.round(g.percentage * oldTotal / currentTotal)
-                          : Math.floor(oldTotal / groupAssignments.length),
-                      }));
-                      // Fix rounding
-                      const nextTotal = next.reduce((s, g) => s + g.percentage, 0);
-                      const adjustedShare = 100 - nextTotal;
-                      next.push({ group_id: gid, percentage: adjustedShare });
-                      setGroupAssignments(next);
-                      e.target.value = '';
-                    }}
-                    defaultValue=""
-                  >
-                    <option value="">{t.addGroupSelect}</option>
-                    {available.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                </div>
-              );
-            })()}
-            {groupError && <div className="alert alert-error" style={{ marginBottom: '0.5rem' }}>{groupError}</div>}
-            <AllocationBar alwaysDraggable onReorder={(from, to) => {
-              const next = [...groupAssignments];
-              const [moved] = next.splice(from, 1);
-              next.splice(to, 0, moved);
-              setGroupAssignments(next);
-            }} />
-            <button className="btn btn-outline" onClick={async () => {
-              setGroupError('');
-              if (groupAssignments.length === 0) { setGroupError(t.atLeastOneGroup); return; }
-              try {
-                await api.setTimetableGroups(Number(id), groupAssignments);
-                load();
-              } catch (err: any) {
-                setGroupError(err.message);
-              }
-            }}>{t.saveGroupAllocations}</button>
+            <Badge tone={timetable.status === 'saved' ? 'success' : 'neutral'}>{t.statusMap(timetable.status)}</Badge>
+            <Badge tone={timetable.active ? 'success' : 'neutral'}>{timetable.active ? t.active : t.inactive}</Badge>
+            {timetable.is_default ? <Badge tone="accent" icon={<Star />}>{t.default}</Badge> : null}
           </>
-        ) : (
+        }
+        actions={
           <>
-            {timetable.groups.length === 0 ? (
-              <p style={{ color: '#6b7280' }}>{t.noGroupsAssignedTimetable}</p>
-            ) : (
-              <AllocationBar onReorder={(from, to) => {
-                const next = [...timetable.groups];
-                const [moved] = next.splice(from, 1);
-                next.splice(to, 0, moved);
-                setTimetable({ ...timetable, groups: next });
-              }} onToggleDone={async () => {
-                try {
-                  await api.reorderTimetableGroups(Number(id), timetable.groups.map(g => g.group_id));
-                  load();
-                } catch (err: any) { alert(err.message); }
-              }} />
+            {timetable.status === 'saved' && timetable.active && !timetable.is_default && (
+              <Button icon={<Star />} onClick={handleSetDefault}>{t.setAsDefault}</Button>
+            )}
+            <Button onClick={handleToggleActive}>{timetable.active ? t.deactivate : t.activate}</Button>
+            <Button variant="ghost" icon={<Trash2 />} onClick={handleDelete}>{t.delete}</Button>
+            {isDraft && timetable.timeslots.length > 0 && (
+              <Button variant="primary" icon={<Save />} onClick={handleSave}>{t.saveTimetable}</Button>
             )}
           </>
-        )}
-      </div>
+        }
+      />
 
-      {/* Actions */}
-      <div className="card" style={{ marginBottom: '2rem' }}>
-        <h2>{t.actions}</h2>
-        <div className="btn-group">
-          {isDraft && timetable.timeslots.length > 0 && (
-            <button className="btn btn-primary" onClick={handleSave}>{t.saveTimetable}</button>
-          )}
-          {timetable.status === 'saved' && timetable.active && !timetable.is_default && (
-            <button className="btn btn-outline" onClick={handleSetDefault}>{t.setAsDefault}</button>
-          )}
-          <button className="btn btn-outline" onClick={handleToggleActive}>
-            {timetable.active ? t.deactivate : t.activate}
-          </button>
-          <button className="btn btn-danger" onClick={handleDelete}>{t.delete}</button>
-        </div>
-        {isDraft && (
-          <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.5rem' }}>
-            {t.saveTimetableHint}
-          </p>
+      {error && <Alert tone="danger">{error}</Alert>}
+      {isDraft && <Alert tone="info">{t.saveTimetableHint}</Alert>}
+
+      {isDraft && (
+        <Card title={t.name}>
+          <Row gap={2}>
+            <Input aria-label={t.name} value={editName} onChange={e => setEditName(e.target.value)} />
+            <Button onClick={updateName} disabled={editName === timetable.name || !editName}>{t.updateName}</Button>
+          </Row>
+        </Card>
+      )}
+
+      <Card
+        title={t.timeslotsCount(timetable.timeslots.length)}
+        actions={isDraft && (
+          <form className={styles.addTimeslot} onSubmit={e => { e.preventDefault(); addTimeslot(); }}>
+            <Input type="time" aria-label={t.addTimeslot} value={newTimeslotTime} onChange={e => setNewTimeslotTime(e.target.value)} />
+            <Button type="submit" size="sm" icon={<Plus />} disabled={!newTimeslotTime}>{t.addTimeslot}</Button>
+          </form>
         )}
-      </div>
-    </div>
+      >
+        {timetable.timeslots.length === 0 ? (
+          <Text tone="muted">{t.noTimeslotsDefined}</Text>
+        ) : (
+          <Row gap={2} wrap>
+            {timetable.timeslots.map(ts => (
+              <Chip key={ts.id} mono onRemove={isDraft ? () => deleteTimeslot(ts.id) : undefined} removeLabel={t.remove}>
+                {ts.start_time}
+              </Chip>
+            ))}
+          </Row>
+        )}
+      </Card>
+
+      <Card
+        title={t.groupAllocations}
+        actions={isDraft
+          ? <Button size="sm" icon={<Save />} onClick={saveAssignments}>{t.saveGroupAllocations}</Button>
+          : timetable.groups.length > 1 && (
+            <Button
+              size="sm"
+              variant={reorderMode ? 'primary' : 'secondary'}
+              icon={reorderMode ? <Check /> : <ArrowUpDown />}
+              onClick={() => {
+                if (reorderMode) saveGroupOrder();
+                setReorderMode(!reorderMode);
+              }}
+            >
+              {reorderMode ? t.doneReordering : t.reorderGroups}
+            </Button>
+          )}
+      >
+        {isDraft ? (
+          <Stack gap={4}>
+            {groupAssignments.length > 0 && (
+              <Stack gap={1}>
+                {groupAssignments.map((ga, idx) => {
+                  const group = allGroups.find(g => g.id === ga.group_id);
+                  const name = group?.name || `Group ${ga.group_id}`;
+                  return (
+                    <div key={ga.group_id} className={styles.allocationRow}>
+                      <Row gap={2}>
+                        <span className={styles.swatch} style={{ background: barSegments[idx]?.color }} />
+                        <Text weight="medium">{name}</Text>
+                      </Row>
+                      <Slider aria-label={name} value={ga.percentage} onValueChange={v => setAssignmentPercentage(idx, v)} />
+                      <Text mono weight="medium">{ga.percentage}%</Text>
+                      <Button variant="ghost" size="sm" icon={<X />} aria-label={t.remove} onClick={() => removeAssignment(idx)} />
+                    </div>
+                  );
+                })}
+              </Stack>
+            )}
+            {availableGroups.length > 0 && (
+              <div className={styles.addGroup}>
+                <Select
+                  aria-label={t.addGroupSelect}
+                  value=""
+                  onChange={e => { if (Number(e.target.value)) addAssignment(Number(e.target.value)); }}
+                >
+                  <option value="">{t.addGroupSelect}</option>
+                  {availableGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </Select>
+              </div>
+            )}
+            {groupError && <Alert tone="danger">{groupError}</Alert>}
+            <AllocationBar
+              segments={barSegments}
+              draggable
+              onReorder={(from, to) => {
+                const next = [...groupAssignments];
+                const [moved] = next.splice(from, 1);
+                next.splice(to, 0, moved);
+                setGroupAssignments(next);
+              }}
+            />
+          </Stack>
+        ) : timetable.groups.length === 0 ? (
+          <Text tone="muted">{t.noGroupsAssignedTimetable}</Text>
+        ) : (
+          <AllocationBar
+            segments={barSegments}
+            draggable={reorderMode}
+            onReorder={(from, to) => {
+              const next = [...timetable.groups];
+              const [moved] = next.splice(from, 1);
+              next.splice(to, 0, moved);
+              setTimetable({ ...timetable, groups: next });
+            }}
+          />
+        )}
+      </Card>
+    </Page>
   );
 }

@@ -26,9 +26,11 @@ const en = {
   importCsv: 'Import CSV',
   dismiss: 'Dismiss',
   close: 'Close',
+  previousPage: 'Previous page',
+  nextPage: 'Next page',
   importResult: (imported: number, skipped: number) => `Imported: ${imported}, Skipped: ${skipped}`,
   noData: '—',
-  saved: '✓ Saved',
+  saved: 'Saved',
 
   // Days
   days: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
@@ -53,7 +55,7 @@ const en = {
 
   // Students
   studentsTitle: (count: number) => `Students (${count})`,
-  addStudent: '+ Add Student',
+  addStudent: 'Add Student',
   noStudentsYet: 'No students yet',
   noStudentsHint: 'Add your first student to get started.',
   buddyGroupLabel: (name: string) => `Buddy group: ${name}`,
@@ -94,7 +96,7 @@ const en = {
 
   // Instructors
   instructorsTitle: (count: number) => `Instructors (${count})`,
-  addInstructor: '+ Add Instructor',
+  addInstructor: 'Add Instructor',
   noInstructorsYet: 'No instructors yet',
   noInstructorsHint: 'Add your first instructor to get started.',
   confirmDeleteInstructor: 'Are you sure you want to delete this instructor?',
@@ -103,7 +105,7 @@ const en = {
 
   // Disciplines
   disciplinesTitle: (count: number) => `Disciplines (${count})`,
-  addDiscipline: '+ Add Discipline',
+  addDiscipline: 'Add Discipline',
   noDisciplinesYet: 'No disciplines yet',
   noDisciplinesHint: 'Add your first discipline to get started.',
   groups: 'Groups',
@@ -115,7 +117,7 @@ const en = {
   groupsWithAccess: 'Groups with access',
 
   // Discipline detail
-  backToDisciplines: '← Back to Disciplines',
+  backToDisciplines: 'Back to Disciplines',
   groupCount: (n: number) => `${n} group(s)`,
   addGroup: 'Add Group',
   searchGroups: 'Search groups by name...',
@@ -129,7 +131,7 @@ const en = {
 
   // Groups
   groupsTitle: (count: number) => `Groups (${count})`,
-  addGroupButton: '+ Add Group',
+  addGroupButton: 'Add Group',
   noGroupsYet: 'No groups yet',
   noGroupsHint: 'Add your first group to get started.',
   color: 'Color',
@@ -141,7 +143,7 @@ const en = {
 
 
   // Group detail
-  backToGroups: '← Back to Groups',
+  backToGroups: 'Back to Groups',
   groupInfo: (memberCount: number) => `${memberCount} ${memberCount === 1 ? 'member' : 'members'}`,
   addMember: 'Add Member',
   searchStudents: 'Search students by name or email...',
@@ -166,10 +168,12 @@ const en = {
   inviteNext: 'Invite next',
   cancelInviteNext: 'Cancel invite next',
   inviteNextTooltip: 'Moved to the front of the queue until they receive an invitation.',
-  queueOverrideTooltip: (reason: 'joined' | 'reactivated' | 'cooldown', date: string) => ({
+  queueOverrideTooltip: (reason: 'joined' | 'reactivated' | 'cooldown', date: string, upcoming: boolean) => ({
     joined: `Placed at the back of the queue after joining this group on ${date}.`,
     reactivated: `Placed at the back of the queue after being reactivated on ${date}.`,
-    cooldown: `Placed at the back of the queue after their cooldown (ending ${date}).`,
+    cooldown: upcoming
+      ? `Placed at the back of the queue after their cooldown ends on ${date}.`
+      : `Placed at the back of the queue after their cooldown ended on ${date}.`,
   })[reason] + ' This applies until their next invitation.',
 
   // Group settings
@@ -198,7 +202,7 @@ const en = {
   rename: 'Rename',
 
   // Buddy group detail
-  backToBuddyGroups: '← Back to Buddy Groups',
+  backToBuddyGroups: 'Back to Buddy Groups',
   buddyGroupMemberCount: (n: number) => `${n} ${n === 1 ? 'member' : 'members'}`,
   noBuddyMembers: 'No members',
   noBuddyMembersHint: 'Add students to this buddy group using the search above.',
@@ -208,7 +212,7 @@ const en = {
 
   // Sessions
   sessionsTitle: (count: number) => `Training Sessions (${count})`,
-  newSession: '+ New Session',
+  newSession: 'New Session',
   noSessionsYet: 'No training sessions yet',
   noSessionsHint: 'Create your first training session to get started.',
   date: 'Date',
@@ -225,7 +229,7 @@ const en = {
   noTimetable: 'No timetable',
 
   // Session detail
-  backToSessions: '← Back to Sessions',
+  backToSessions: 'Back to Sessions',
   instructorsCount: (n: number) => `Instructors (${n})`,
   selectInstructor: 'Select instructor...',
   assign: 'Assign',
@@ -273,10 +277,14 @@ const en = {
   discipline: 'Discipline',
   noShow: 'no-show',
   show: 'show',
-  addStudentToSlot: '+ Add student',
+  addStudentToSlot: 'Add student',
   searchStudent: 'Search student...',
   sessionNotFound: 'Session not found',
   pdfTitle: (date: string) => `Schedule — ${date}`,
+  pdfStudentColumn: 'Student',
+  pdfDisciplineColumn: 'Disc.',
+  pdfGenerated: (dateTime: string) => `Generated ${dateTime}`,
+  pdfPage: (page: number, total: string) => `Page ${page} of ${total}`,
 
   // Status labels
   statusConfirmed: 'confirmed',
@@ -310,7 +318,7 @@ const en = {
 
   // Timetables
   timetablesTitle: (count: number) => `Timetables (${count})`,
-  newTimetable: '+ New Timetable',
+  newTimetable: 'New Timetable',
   noTimetablesYet: 'No timetables yet',
   noTimetablesHint: 'Create your first timetable to define reusable timeslot configurations.',
   timeslots: 'Timeslots',
@@ -320,7 +328,7 @@ const en = {
   timetableNamePlaceholder: 'e.g. Wednesday Evening',
 
   // Timetable detail
-  backToTimetables: '← Back to Timetables',
+  backToTimetables: 'Back to Timetables',
   updateName: 'Update Name',
   timeslotsCount: (n: number) => `Timeslots (${n})`,
   addTimeslot: 'Add Timeslot',

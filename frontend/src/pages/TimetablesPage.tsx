@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CalendarClock, Plus, Star } from 'lucide-react';
 import { api } from '../api';
-import ActionDropdown from '../components/ActionDropdown';
+import {
+  ActionMenu, Alert, Badge, Button, Dialog, EmptyState, Field, Input,
+  Page, PageHeader, Row, Stack, Table, Text, useConfirm, useToast,
+} from '../ui';
 import { useT } from '../i18n';
 
 interface Timetable {
@@ -21,6 +25,8 @@ export default function TimetablesPage() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const load = async () => {
     try {
@@ -47,82 +53,78 @@ export default function TimetablesPage() {
     }
   };
 
-  const handleDelete = async (id: number, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (!confirm(t.confirmDeleteTimetable)) return;
+  const handleDelete = async (id: number) => {
+    if (!await confirm({ title: t.delete, message: t.confirmDeleteTimetable, confirmLabel: t.delete, danger: true })) return;
     try {
       await api.deleteTimetable(id);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
-  const handleToggleActive = async (id: number, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const handleToggleActive = async (id: number) => {
     try {
       await api.toggleTimetableActive(id);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
-  const handleSetDefault = async (id: number, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const handleSetDefault = async (id: number) => {
     try {
       await api.setDefaultTimetable(id);
       load();
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     }
   };
 
-  if (loading) return <div className="page"><p>{t.loading}</p></div>;
+  if (loading) return <Page><Text tone="muted">{t.loading}</Text></Page>;
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>{t.timetablesTitle(timetables.length)}</h1>
-        <button className="btn btn-primary" onClick={() => { setError(''); setName(''); setShowModal(true); }}>{t.newTimetable}</button>
-      </div>
+    <Page>
+      <PageHeader
+        title={t.timetablesTitle(timetables.length)}
+        actions={
+          <Button variant="primary" icon={<Plus />} onClick={() => { setError(''); setName(''); setShowModal(true); }}>
+            {t.newTimetable}
+          </Button>
+        }
+      />
 
       {timetables.length === 0 ? (
-        <div className="empty-state">
-          <h3>{t.noTimetablesYet}</h3>
-          <p>{t.noTimetablesHint}</p>
-        </div>
+        <EmptyState icon={<CalendarClock />} title={t.noTimetablesYet} description={t.noTimetablesHint} />
       ) : (
-        <table>
+        <Table interactive>
           <thead>
             <tr>
               <th>{t.name}</th>
               <th>{t.status}</th>
-              <th>{t.timeslots}</th>
+              <th data-numeric>{t.timeslots}</th>
               <th>{t.active}</th>
-              <th>{t.actions}</th>
+              <th data-actions>{t.actions}</th>
             </tr>
           </thead>
           <tbody>
             {timetables.map(tt => (
-              <tr key={tt.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/timetables/${tt.id}`)}>
+              <tr key={tt.id} onClick={() => navigate(`/timetables/${tt.id}`)}>
                 <td>
-                  {tt.name}
-                  {tt.is_default ? <span className="badge badge-confirmed" style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>{t.default}</span> : null}
+                  <Row gap={2}>
+                    <Text weight="medium">{tt.name}</Text>
+                    {tt.is_default ? <Badge tone="accent" icon={<Star />}>{t.default}</Badge> : null}
+                  </Row>
                 </td>
                 <td>
-                  <span className={`badge ${tt.status === 'saved' ? 'badge-confirmed' : 'badge-draft'}`}>
-                    {t.statusMap(tt.status)}
-                  </span>
+                  <Badge tone={tt.status === 'saved' ? 'success' : 'neutral'}>{t.statusMap(tt.status)}</Badge>
                 </td>
-                <td>{tt.timeslot_count}</td>
+                <td data-numeric>{tt.timeslot_count}</td>
                 <td>
-                  <span className={`badge ${tt.active ? 'badge-confirmed' : 'badge-declined'}`}>
-                    {tt.active ? t.active : t.inactive}
-                  </span>
+                  <Badge tone={tt.active ? 'success' : 'neutral'}>{tt.active ? t.active : t.inactive}</Badge>
                 </td>
-                <td>
-                  <ActionDropdown actions={[
+                <td data-actions>
+                  <ActionMenu actions={[
                     { label: t.view, onClick: () => navigate(`/timetables/${tt.id}`) },
                     ...(tt.status === 'saved' && tt.active && !tt.is_default ? [{ label: t.setDefault, onClick: () => handleSetDefault(tt.id) }] : []),
                     { label: tt.active ? t.deactivate : t.activate, onClick: () => handleToggleActive(tt.id) },
@@ -132,25 +134,29 @@ export default function TimetablesPage() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
 
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>{t.newTimetableTitle}</h2>
-            {error && <div className="alert alert-error">{error}</div>}
-            <div className="form-group">
-              <label>{t.name}</label>
-              <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={t.timetableNamePlaceholder} required />
-            </div>
-            <div className="modal-actions">
-              <button className="btn btn-outline" onClick={() => setShowModal(false)}>{t.cancel}</button>
-              <button className="btn btn-primary" onClick={handleCreate}>{t.create}</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <Dialog
+        open={showModal}
+        onOpenChange={setShowModal}
+        title={t.newTimetableTitle}
+        footer={
+          <>
+            <Button onClick={() => setShowModal(false)}>{t.cancel}</Button>
+            <Button variant="primary" type="submit" form="new-timetable-form">{t.create}</Button>
+          </>
+        }
+      >
+        <form id="new-timetable-form" onSubmit={e => { e.preventDefault(); handleCreate(); }}>
+          <Stack gap={4}>
+            {error && <Alert tone="danger">{error}</Alert>}
+            <Field label={t.name} htmlFor="timetable-name">
+              <Input id="timetable-name" autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={t.timetableNamePlaceholder} required />
+            </Field>
+          </Stack>
+        </form>
+      </Dialog>
+    </Page>
   );
 }

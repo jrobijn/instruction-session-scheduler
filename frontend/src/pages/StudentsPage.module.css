@@ -1,0 +1,7 @@
+.segmented { display: inline-flex; }
+.segmented > :first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.segmented > :last-child { margin-left: calc(-1 * var(--border-width)); border-top-left-radius: 0; border-bottom-left-radius: 0; }
+
+.selectCol { width: var(--space-8); }
+
+.formRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }

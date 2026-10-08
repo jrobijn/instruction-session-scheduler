@@ -17,6 +17,13 @@ import GroupDetailPage from './pages/GroupDetailPage';
 import InvitationPage from './pages/InvitationPage';
 import NotificationsPage from './pages/NotificationsPage';
 import NotificationBell from './components/NotificationBell';
+import Logo from './components/Logo';
+import { Globe, LogOut, Sun } from 'lucide-react';
+import { Button } from './ui';
+import { cx } from './ui/cx';
+import styles from './App.module.css';
+
+const navLinkClass = ({ isActive }: { isActive: boolean }) => cx(styles.link, isActive && styles.active);
 
 function AdminLayout() {
   const navigate = useNavigate();
@@ -34,50 +41,52 @@ function AdminLayout() {
   if (!authenticated) return <Navigate to="/login" />;
 
   return (
-    <div className="app">
-      <nav>
-        <NavLink to="/sessions" className="logo" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <img src={mode === 'dark' || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? '/logo-white.png' : '/logo.png'} alt="Logo" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
-          {t.appTitle}
+    <div className={styles.shell}>
+      <nav className={styles.nav}>
+        <NavLink to="/sessions" className={styles.brand}>
+          <Logo className={styles.brandLogo} />
+          <span className={styles.brandTitle}>{t.appTitle}</span>
         </NavLink>
-        <NavLink to="/sessions">{t.navSchedule}</NavLink>
-        <NavLink to="/timetables">{t.navTimetables}</NavLink>
-        <NavLink to="/students">{t.navStudents}</NavLink>
-        <NavLink to="/instructors">{t.navInstructors}</NavLink>
-        <NavLink to="/disciplines">{t.navDisciplines}</NavLink>
-        <NavLink to="/groups">{t.navGroups}</NavLink>
-        <NavLink to="/settings">{t.navSettings}</NavLink>
-        <div className="spacer" />
-        <NotificationBell />
-        <div className="theme-wrapper">
-          <svg className="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-          </svg>
-          <select
-            className="theme-select"
-            value={mode}
-            onChange={e => setMode(e.target.value as 'light' | 'dark' | 'auto')}
-          >
-            <option value="light">{t.themeLight}</option>
-            <option value="dark">{t.themeDark}</option>
-            <option value="auto">{t.themeAuto}</option>
-          </select>
+        <div className={styles.links}>
+          <NavLink to="/sessions" className={navLinkClass}>{t.navSchedule}</NavLink>
+          <NavLink to="/timetables" className={navLinkClass}>{t.navTimetables}</NavLink>
+          <NavLink to="/students" className={navLinkClass}>{t.navStudents}</NavLink>
+          <NavLink to="/instructors" className={navLinkClass}>{t.navInstructors}</NavLink>
+          <NavLink to="/disciplines" className={navLinkClass}>{t.navDisciplines}</NavLink>
+          <NavLink to="/groups" className={navLinkClass}>{t.navGroups}</NavLink>
+          <NavLink to="/settings" className={navLinkClass}>{t.navSettings}</NavLink>
         </div>
-        <div className="locale-wrapper">
-          <svg className="locale-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-          </svg>
-          <select
-            className="locale-select"
-            value={getLocale()}
-            onChange={e => setLocale(e.target.value)}
-          >
-            {getAvailableLocales().map(code => (
-              <option key={code} value={code}>{t.languageNames[code] || code}</option>
-            ))}
-          </select>
+        <div className={styles.spacer} />
+        <div className={styles.tools}>
+          <NotificationBell />
+          <span className={styles.selectWrap}>
+            <Sun className={styles.selectIcon} aria-hidden />
+            <select
+              className={styles.select}
+              value={mode}
+              onChange={e => setMode(e.target.value as 'light' | 'dark' | 'auto')}
+            >
+              <option value="light">{t.themeLight}</option>
+              <option value="dark">{t.themeDark}</option>
+              <option value="auto">{t.themeAuto}</option>
+            </select>
+          </span>
+          <span className={styles.selectWrap}>
+            <Globe className={styles.selectIcon} aria-hidden />
+            <select
+              className={styles.select}
+              value={getLocale()}
+              onChange={e => setLocale(e.target.value)}
+            >
+              {getAvailableLocales().map(code => (
+                <option key={code} value={code}>{t.languageNames[code] || code}</option>
+              ))}
+            </select>
+          </span>
+          <Button variant="ghost" size="sm" icon={<LogOut />} onClick={handleLogout} aria-label={t.logout}>
+            <span className={styles.hideNarrow}>{t.logout}</span>
+          </Button>
         </div>
-        <button className="logout-btn" onClick={handleLogout}>{t.logout}</button>
       </nav>
       <Routes>
         <Route path="/students" element={<StudentsPage />} />

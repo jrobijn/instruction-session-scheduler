@@ -1,8 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
+import { Check, Timer, X } from 'lucide-react';
 import { api, API_BASE } from '../api';
-import { useT, setLocale } from '../i18n';
+import { useT, setLocale, getLocale } from '../i18n';
+import { Alert, Badge, Button, Card, CenteredPage, DescriptionList, Field, Row, Select, Stack, Text } from '../ui';
 import Countdown from '../components/Countdown';
+import Logo from '../components/Logo';
+import { InvitationStatusBadge } from '../components/StatusBadges';
+import styles from './InvitationPage.module.css';
 
 interface Invitation {
   id: number;
@@ -106,156 +111,107 @@ export default function InvitationPage() {
     }
   };
 
-  if (loading) return <div className="invitation-page"><p>{t.loading}</p></div>;
-  if (error) return <div className="invitation-page"><div className="alert alert-error">{error}</div></div>;
-  if (!invitation) return <div className="invitation-page"><p>{t.invitationNotFound}</p></div>;
+  if (loading) return <CenteredPage><Text tone="muted">{t.loading}</Text></CenteredPage>;
+  if (error) return <CenteredPage><div className={styles.narrow}><Alert tone="danger">{error}</Alert></div></CenteredPage>;
+  if (!invitation) return <CenteredPage><Text tone="muted">{t.invitationNotFound}</Text></CenteredPage>;
 
   const dateStr = new Date(invitation.date + 'T00:00:00')
-    .toLocaleDateString('nl-NL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    .toLocaleDateString(getLocale() === 'nl' ? 'nl-NL' : 'en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  const closedMessages: Record<string, string> = {
+    expired: t.invitationExpiredMsg,
+    invalidated: t.invitationInvalidatedMsg,
+    admin_cancelled: t.invitationWithdrawnMsg,
+  };
+  const closedMessage = !actionDone ? closedMessages[invitation.status] : undefined;
+  const needsDiscipline = disciplines.length > 1 && !selectedDiscipline;
+  const disciplineName = invitation.status === 'confirmed'
+    ? invitation.discipline_name
+    : invitation.status === 'invited' && disciplines.length === 1 ? disciplines[0].name : null;
+
+  const prompt = (tone: 'success' | 'danger', message: string, confirmButton: ReactNode) => (
+    <Alert tone={tone} title={message}>
+      <div className={`${styles.choice} ${styles.promptActions}`}>
+        {confirmButton}
+        <Button fullWidth onClick={() => setConfirmingAction(null)}>{t.goBack}</Button>
+      </div>
+    </Alert>
+  );
 
   return (
-    <div className="invitation-page">
-      <div className="card" style={{ width: '100%', maxWidth: 560, margin: '2rem auto', padding: '2rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-start', justifyContent: 'center' }}>
-        <img src={document.documentElement.getAttribute('data-theme') === 'dark' ? '/logo-white.png' : '/logo.png'} alt="Logo" style={{ width: 128, height: 128, objectFit: 'contain', flexShrink: 0 }} />
-        <div style={{ flex: '1 1 280px' }}>
-        <h1 style={{ margin: '0 0 1.5rem 0' }}>{t.trainingInvitation}</h1>
+    <CenteredPage>
+      <Card className={styles.card}>
+        <div className={styles.layout}>
+          <Logo className={styles.logo} />
+          <Stack gap={5} className={styles.content}>
+            <h1 className={styles.title}>{t.trainingInvitation}</h1>
 
-        <div style={{ marginBottom: '1.5rem' }}>
-          <p><strong>{t.studentLabel}</strong> {invitation.student_name}</p>
-          <p><strong>{t.dateLabel}</strong> {dateStr}</p>
-          <p><strong>{t.timeLabel}</strong> {invitation.start_time}</p>
-          <p><strong>{t.statusLabel}</strong>{' '}
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span className={`badge ${
-              invitation.status === 'confirmed' ? 'badge-confirmed' :
-              invitation.status === 'declined' ? 'badge-declined' :
-              invitation.status === 'cancelled' ? 'badge-declined' :
-              invitation.status === 'admin_cancelled' ? 'badge-declined' :
-              invitation.status === 'expired' ? 'badge-declined' :
-              invitation.status === 'invalidated' ? 'badge-declined' :
-              'badge-pending'
-            }`}>
-              {t.statusMap(invitation.status)}
-            </span>
-            {invitation.status === 'invited' && invitation.expires_at && (() => {
-              const expiresAt = new Date(invitation.expires_at);
-              return (
-                <span className="badge badge-draft" style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontVariantNumeric: 'tabular-nums', minWidth: '5.5em', justifyContent: 'center' }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3l2 2"/><path d="M19 3l-2 2"/><line x1="12" y1="1" x2="12" y2="3"/></svg>
-                  <Countdown expiresAt={expiresAt} />
-                </span>
-              );
-            })()}
-            </span>
-          </p>
+            <DescriptionList inline items={[
+              { label: t.student, value: invitation.student_name },
+              { label: t.date, value: dateStr },
+              { label: t.time, value: <Text mono>{invitation.start_time}</Text> },
+              {
+                label: t.status,
+                value: (
+                  <Row gap={2} wrap>
+                    <InvitationStatusBadge status={invitation.status} />
+                    {invitation.status === 'invited' && invitation.expires_at && (
+                      <Badge mono icon={<Timer />}><Countdown expiresAt={new Date(invitation.expires_at)} /></Badge>
+                    )}
+                  </Row>
+                ),
+              },
+              ...(disciplineName ? [{ label: t.discipline, value: disciplineName }] : []),
+            ]} />
+
+            {actionDone === 'confirmed' && <Alert tone="success">{t.invitationConfirmedMsg}</Alert>}
+            {actionDone === 'declined' && <Alert tone="info">{t.invitationDeclinedMsg}</Alert>}
+            {actionDone === 'cancelled' && <Alert tone="info">{t.invitationCancelledMsg}</Alert>}
+            {closedMessage && <Alert tone="danger">{closedMessage}</Alert>}
+
+            {invitation.status === 'confirmed' && !actionDone && (
+              <Stack gap={4}>
+                <Alert tone="success">{t.invitationConfirmedMsg}</Alert>
+                {confirmingAction === 'cancel'
+                  ? prompt('danger', t.confirmPromptCancel, <Button variant="danger" fullWidth onClick={handleCancel}>{t.yesCancel}</Button>)
+                  : <Button fullWidth icon={<X />} onClick={() => setConfirmingAction('cancel')}>{t.cancelParticipation}</Button>}
+              </Stack>
+            )}
+
+            {invitation.status === 'invited' && !actionDone && (
+              <Stack gap={4}>
+                {disciplines.length > 1 && !confirmingAction && (
+                  <Field label={t.chooseDiscipline} htmlFor="invitation-discipline">
+                    <Select id="invitation-discipline" value={selectedDiscipline} onChange={e => setSelectedDiscipline(e.target.value)}>
+                      <option value="" disabled>{t.selectDiscipline}</option>
+                      {disciplines.map(d => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
+                {confirmingAction === 'confirm' ? (
+                  prompt('success', t.confirmPromptConfirm, (
+                    <Button variant="primary" fullWidth icon={<Check />} onClick={handleConfirm} disabled={needsDiscipline}>{t.yesConfirm}</Button>
+                  ))
+                ) : confirmingAction === 'decline' ? (
+                  prompt('danger', t.confirmPromptDecline, (
+                    <Button variant="danger" fullWidth onClick={handleDecline}>{t.yesDecline}</Button>
+                  ))
+                ) : (
+                  <div className={styles.choice}>
+                    <Button variant="primary" fullWidth icon={<Check />} onClick={() => setConfirmingAction('confirm')} disabled={needsDiscipline}>
+                      {t.confirmAttendance}
+                    </Button>
+                    <Button fullWidth icon={<X />} onClick={() => setConfirmingAction('decline')}>{t.decline}</Button>
+                  </div>
+                )}
+              </Stack>
+            )}
+          </Stack>
         </div>
-
-        {actionDone === 'confirmed' && (
-          <div className="alert alert-success">
-            {t.invitationConfirmedMsg}
-          </div>
-        )}
-
-        {actionDone === 'declined' && (
-          <div className="alert alert-error">
-            {t.invitationDeclinedMsg}
-          </div>
-        )}
-
-        {actionDone === 'cancelled' && (
-          <div className="alert alert-error">
-            {t.invitationCancelledMsg}
-          </div>
-        )}
-
-        {invitation.status === 'expired' && !actionDone && (
-          <div className="alert alert-error">
-            {t.invitationExpiredMsg}
-          </div>
-        )}
-
-        {invitation.status === 'invalidated' && !actionDone && (
-          <div className="alert alert-error">
-            {t.invitationInvalidatedMsg}
-          </div>
-        )}
-
-        {invitation.status === 'admin_cancelled' && !actionDone && (
-          <div className="alert alert-error">
-            {t.invitationWithdrawnMsg}
-          </div>
-        )}
-
-        {invitation.status === 'confirmed' && !actionDone && (
-          <>
-            <div className="alert alert-success" style={{ marginBottom: '1.5rem' }}>
-              {t.invitationConfirmedMsg}
-            </div>
-            {invitation.discipline_name && !confirmingAction && (
-              <p style={{ marginBottom: '1rem' }}><strong>{t.discipline}:</strong> {invitation.discipline_name}</p>
-            )}
-            {confirmingAction === 'cancel' ? (
-              <div style={{ padding: '1rem', background: 'var(--decline-prompt-bg)', border: '1px solid var(--decline-prompt-border)', borderRadius: 8 }}>
-                <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptCancel}</p>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleCancel}>{t.yesCancel}</button>
-                  <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmingAction(null)}>{t.goBack}</button>
-                </div>
-              </div>
-            ) : (
-              <button className="btn btn-danger" style={{ width: '100%' }} onClick={() => setConfirmingAction('cancel')}>
-                {t.cancelParticipation}
-              </button>
-            )}
-          </>
-        )}
-
-        {invitation.status === 'invited' && !actionDone && (
-          <>
-            {disciplines.length === 1 && !confirmingAction && (
-              <p style={{ marginBottom: '1.5rem' }}><strong>{t.discipline}:</strong> {disciplines[0].name}</p>
-            )}
-            {disciplines.length > 1 && !confirmingAction && (
-              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                <label>{t.chooseDiscipline}</label>
-                <select value={selectedDiscipline} onChange={e => setSelectedDiscipline(e.target.value)}>
-                  <option value="" disabled>{t.selectDiscipline}</option>
-                  {disciplines.map(d => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {confirmingAction === 'confirm' ? (
-              <div style={{ padding: '1rem', background: 'var(--confirm-prompt-bg)', border: '1px solid var(--confirm-prompt-border)', borderRadius: 8 }}>
-                <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptConfirm}</p>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleConfirm} disabled={disciplines.length > 1 && !selectedDiscipline}>{t.yesConfirm}</button>
-                  <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmingAction(null)}>{t.goBack}</button>
-                </div>
-              </div>
-            ) : confirmingAction === 'decline' ? (
-              <div style={{ padding: '1rem', background: 'var(--decline-prompt-bg)', border: '1px solid var(--decline-prompt-border)', borderRadius: 8 }}>
-                <p style={{ margin: '0 0 0.75rem 0' }}>{t.confirmPromptDecline}</p>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="btn btn-danger" style={{ flex: 1 }} onClick={handleDecline}>{t.yesDecline}</button>
-                  <button className="btn" style={{ flex: 1 }} onClick={() => setConfirmingAction(null)}>{t.goBack}</button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setConfirmingAction('confirm')} disabled={disciplines.length > 1 && !selectedDiscipline}>
-                  {t.confirmAttendance}
-                </button>
-                <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => setConfirmingAction('decline')}>
-                  {t.decline}
-                </button>
-              </div>
-            )}
-          </>
-        )}
-        </div>
-      </div>
-    </div>
+      </Card>
+    </CenteredPage>
   );
 }
+

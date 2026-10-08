@@ -1,0 +1,41 @@
+.setup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(26rem, 1fr));
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.inlineEdit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  background: var(--color-surface-sunken);
+  border: var(--border-width) dashed var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+.inlineEdit select { height: var(--control-h-sm); font-size: var(--text-sm); }
+.inlineIcon { width: var(--icon-sm); height: var(--icon-sm); color: var(--color-text-muted); }
+
+.groupDot {
+  display: inline-block;
+  width: var(--space-2);
+  height: var(--space-2);
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 20%, transparent);
+}
+
+.summary {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+/* First row of each timeslot × instructor slot */
+.slotStart td { border-top: 2px solid var(--color-border-strong); }
+
+.emptySlot { background: color-mix(in srgb, var(--color-surface-sunken) 45%, transparent); }
+
+.slotSearch { position: relative; max-width: 24rem; }
+.slotSearch input { height: var(--control-h-sm); font-size: var(--text-sm); }
