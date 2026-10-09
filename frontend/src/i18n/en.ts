@@ -258,7 +258,7 @@ const en = {
   timeslotsBadge: (n: number) => n === 1 ? '1 timeslot' : `${n} timeslots`,
   generateSchedule: 'Generate Schedule',
   generating: 'Generating...',
-  scheduleHint: 'This will select students with the fewest attended sessions and create invitations.',
+  scheduleHint: 'This will select students who have waited the longest since their last attended session and create invitations.',
   sendInvitations: 'Send Invitations',
   confirmSendInvitations: 'Send invitation emails to all scheduled students?',
   sending: 'Sending...',
