@@ -36,6 +36,7 @@ const nl: Translations = {
 
   // Days
   days: ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'],
+  daysFull: ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'],
 
   // App nav
   appTitle: 'Sessie Planner',
@@ -64,7 +65,15 @@ const nl: Translations = {
   manageBuddies: 'Buddies beheren',
   groupBuddiesOn: "Buddies worden gegroepeerd — klik om normaal te sorteren",
   groupBuddiesOff: "Buddies worden normaal gesorteerd — klik om te groeperen",
-  buddyScheduledTogether: (name: string) => `Buddygroep: ${name} — worden samen ingepland indien mogelijk`,
+  buddyInvitedTogether: (names: string) => `Indien mogelijk samen uitgenodigd met ${names}: wie als eerste in de rij staat neemt de ander mee naar dezelfde sessie, als die op die dag kan, een vrij voorkeurstijdslot heeft en de groep nog plek heeft.`,
+  buddyNotTogether: (name: string, reason: 'otherGroup' | 'noGroup' | 'inactive' | 'cooldown' | 'otherDay', detail: string) => ({
+    otherGroup: `${name} zit in groep ${detail} en wordt daarom niet samen uitgenodigd vanuit deze rij.`,
+    noGroup: `${name} zit niet in een groep en wordt daarom niet samen uitgenodigd.`,
+    inactive: `Niet samen uitgenodigd met ${name} zolang ${detail} inactief is.`,
+    cooldown: `Niet samen uitgenodigd met ${name} zolang ${detail} pauze heeft.`,
+    otherDay: `${name} kan niet op ${detail} en wordt die dag daarom niet samen uitgenodigd.`,
+  })[reason],
+  buddyFollowerTooltip: (name: string, position: number) => `Kan eerder dan de eigen beurt worden uitgenodigd, samen met buddy ${name} (#${position}).`,
   finishBuddyMode: 'Klaar',
   buddyModeHint: 'Selecteer 2+ ongegroepeerde leerlingen om een buddygroep te maken, of gebruik × om te verwijderen / "Ontgroeperen" om op te heffen.',
   groupSelected: (n: number) => `${n} Leerlingen groeperen`,
@@ -166,7 +175,11 @@ const nl: Translations = {
   queuePosition: 'Wachtrij',
   lastInvited: 'Laatst uitgenodigd',
   neverInvited: 'Nooit',
-  queueHint: 'Leden worden om de beurt uitgenodigd: wie het langst wacht sinds de laatste uitnodiging is als eerste aan de beurt. Afgewezen, verlopen en geannuleerde uitnodigingen tellen niet als beurt.',
+  queueHint: 'Leden worden om de beurt uitgenodigd: wie het langst wacht sinds de laatste uitnodiging is als eerste aan de beurt. Afgewezen, verlopen en geannuleerde uitnodigingen tellen niet als beurt. Buddies in deze groep worden indien mogelijk samen uitgenodigd.',
+  queueDay: 'Rij voor',
+  allDaysOption: 'Alle dagen',
+  queueDayHint: (day: string) => `Toont actieve leden die op ${day} kunnen, genummerd in de volgorde waarin ze voor een sessie op die dag worden uitgenodigd.`,
+  noMembersOnDay: (day: string) => `Geen actieve leden beschikbaar op ${day}`,
   inviteNext: 'Als volgende uitnodigen',
   cancelInviteNext: 'Niet meer als volgende uitnodigen',
   inviteNextTooltip: 'Staat vooraan in de rij tot de leerling een uitnodiging ontvangt.',

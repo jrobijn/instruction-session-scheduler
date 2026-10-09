@@ -34,6 +34,7 @@ const en = {
 
   // Days
   days: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+  daysFull: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
 
   // App nav
   appTitle: 'Session Scheduler',
@@ -62,7 +63,15 @@ const en = {
   manageBuddies: 'Manage Buddies',
   groupBuddiesOn: 'Buddies are grouped together — click to sort normally',
   groupBuddiesOff: 'Buddies are sorted normally — click to group together',
-  buddyScheduledTogether: (name: string) => `Buddy group: ${name} — will be scheduled together when possible`,
+  buddyInvitedTogether: (names: string) => `Invited together with ${names} when possible: whoever is first in the queue takes the other along to the same session, if they can come that day, have a free preferred timeslot and the group has room left.`,
+  buddyNotTogether: (name: string, reason: 'otherGroup' | 'noGroup' | 'inactive' | 'cooldown' | 'otherDay', detail: string) => ({
+    otherGroup: `${name} is in group ${detail}, so is not invited together from this queue.`,
+    noGroup: `${name} is not in a group, so is not invited together.`,
+    inactive: `Not invited together with ${name} while ${detail} is inactive.`,
+    cooldown: `Not invited together with ${name} while ${detail} is on a timeout.`,
+    otherDay: `${name} is not available on ${detail}, so is not invited together on that day.`,
+  })[reason],
+  buddyFollowerTooltip: (name: string, position: number) => `May be invited before their own turn, together with buddy ${name} (#${position}).`,
   finishBuddyMode: 'Done',
   buddyModeHint: 'Select 2+ ungrouped students to create a buddy group, or use × to remove / "Ungroup" to dissolve.',
   groupSelected: (n: number) => `Group ${n} Students`,
@@ -164,7 +173,11 @@ const en = {
   queuePosition: 'Queue',
   lastInvited: 'Last invited',
   neverInvited: 'Never',
-  queueHint: 'Members are invited in turn: whoever has waited longest since their last invitation goes first. Declined, expired and cancelled invitations do not count as a turn.',
+  queueHint: 'Members are invited in turn: whoever has waited longest since their last invitation goes first. Declined, expired and cancelled invitations do not count as a turn. Buddies in this group are invited together when possible.',
+  queueDay: 'Queue for',
+  allDaysOption: 'All days',
+  queueDayHint: (day: string) => `Showing active members who can come on ${day}, numbered in the order they are invited for a session on that day.`,
+  noMembersOnDay: (day: string) => `No active members are available on ${day}`,
   inviteNext: 'Invite next',
   cancelInviteNext: 'Cancel invite next',
   inviteNextTooltip: 'Moved to the front of the queue until they receive an invitation.',

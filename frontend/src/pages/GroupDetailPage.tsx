@@ -1,10 +1,10 @@
 import { Fragment, useState, useEffect, useRef, type CSSProperties } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronsDown, ChevronsUp, Layers, Star, Target, Timer, Users } from 'lucide-react';
+import { CalendarX, ChevronsDown, ChevronsUp, Layers, Link2, Star, Target, Timer, Users } from 'lucide-react';
 import { api } from '../api';
 import {
   ActionMenu, Alert, Badge, Button, Card, Checkbox, DescriptionList, EmptyState, ExpandIcon, Field, Input,
-  Page, PageHeader, RadioCards, Row, SortHeader, Stack, Tab, TabList, TabPanel, Table, Tabs, Text, Tooltip,
+  Page, PageHeader, RadioCards, Row, SegmentedControl, SortHeader, Stack, Tab, TabList, TabPanel, Table, Tabs, Text, Tooltip,
   useConfirm, useToast,
 } from '../ui';
 import { cx } from '../ui/cx';
@@ -39,8 +39,14 @@ interface Member {
   cooldown_until: string | null;
   preferred_days: string;
   active_invitations: number;
-  buddy_group?: { id: number; name: string } | null;
+  buddy_group?: {
+    id: number;
+    name: string;
+    buddies: Array<{ id: number; first_name: string; last_name: string; group_id: number | null; group_name: string | null }>;
+  } | null;
 }
+
+type ApartReason = 'otherGroup' | 'noGroup' | 'inactive' | 'cooldown' | 'otherDay';
 
 interface Timetable {
   id: number;
@@ -113,8 +119,55 @@ export default function GroupDetailPage() {
     });
   };
 
+  // Mirrors generate-schedule: only active buddies within this group are invited together
+  const unavailableReason = (m: Member): ApartReason | null =>
+    !m.active ? 'inactive' : m.cooldown_until && new Date(m.cooldown_until + 'Z') > new Date() ? 'cooldown' : null;
+
+  const [clubDays, setClubDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
+  const [queueDayPref, setQueueDayPref] = useState<number | null>(() => {
+    const stored = localStorage.getItem('groupQueueDay');
+    return stored ? Number(stored) : null;
+  });
+  const queueDay = queueDayPref != null && clubDays.includes(queueDayPref) ? queueDayPref : null;
+  const changeQueueDay = (value: string) => {
+    const day = value === 'all' ? null : Number(value);
+    setQueueDayPref(day);
+    if (day == null) localStorage.removeItem('groupQueueDay');
+    else localStorage.setItem('groupQueueDay', String(day));
+  };
+  const availableOn = (m: Member, day: number) => `|${m.preferred_days ?? ''}|`.includes(`|${day}|`);
+
+  // With a day selected: only members the scheduler considers for that weekday, renumbered in queue order
+  const queueMembers = queueDay == null ? members : members
+    .filter(m => m.active && availableOn(m, queueDay))
+    .sort((a, b) => a.queue_position! - b.queue_position!)
+    .map((m, i) => ({ ...m, queue_position: i + 1 }));
+
+  const buddyLinks = new Map<number, { together: Member[]; apart: Array<{ name: string; reason: ApartReason; detail: string }> }>();
+  for (const m of queueMembers) {
+    if (!m.buddy_group) continue;
+    const selfReason = unavailableReason(m);
+    const together: Member[] = [];
+    const apart: Array<{ name: string; reason: ApartReason; detail: string }> = [];
+    for (const b of m.buddy_group.buddies) {
+      const name = `${b.first_name} ${b.last_name}`;
+      const bm = members.find(x => x.id === b.id);
+      if (!bm) {
+        apart.push(b.group_name ? { name, reason: 'otherGroup', detail: b.group_name } : { name, reason: 'noGroup', detail: '' });
+        continue;
+      }
+      const buddyReason = unavailableReason(bm);
+      if (buddyReason) apart.push({ name, reason: buddyReason, detail: bm.first_name });
+      else if (selfReason) apart.push({ name, reason: selfReason, detail: m.first_name });
+      else if (queueDay != null && !availableOn(bm, queueDay)) apart.push({ name, reason: 'otherDay', detail: t.daysFull[queueDay] });
+      else together.push(queueMembers.find(x => x.id === b.id)!);
+    }
+    buddyLinks.set(m.id, { together, apart });
+  }
+  const linkedBuddyId = (m: Member) => buddyLinks.get(m.id)?.together.length ? m.buddy_group!.id : undefined;
+
   const sortedMembers = (() => {
-    const base = [...members].sort((a, b) => {
+    const base = [...queueMembers].sort((a, b) => {
       const av = a[sortCol], bv = b[sortCol];
       // Empty values (e.g. inactive members' queue position, never invited) always sort last
       if (av == null || bv == null) return av == null ? (bv == null ? 0 : 1) : -1;
@@ -131,8 +184,9 @@ export default function GroupDetailPage() {
       if (placed.has(m.id)) continue;
       result.push(m);
       placed.add(m.id);
-      if (m.buddy_group) {
-        const buddies = base.filter(b => b.id !== m.id && !placed.has(b.id) && b.buddy_group?.id === m.buddy_group!.id);
+      const linkedId = linkedBuddyId(m);
+      if (linkedId) {
+        const buddies = base.filter(b => b.id !== m.id && !placed.has(b.id) && linkedBuddyId(b) === linkedId);
         for (const b of buddies) {
           result.push(b);
           placed.add(b.id);
@@ -145,12 +199,11 @@ export default function GroupDetailPage() {
   // Distinct data colours per buddy group
   const BUDDY_COLORS = ['#e11d48', '#7c3aed', '#0891b2', '#c026d3', '#ea580c', '#4f46e5', '#059669'];
   const buddyColorMap = new Map<number, string>();
-  const seenBuddyIds = [...new Set(sortedMembers.map(m => m.buddy_group?.id).filter(Boolean))] as number[];
+  const seenBuddyIds = [...new Set(sortedMembers.map(linkedBuddyId).filter(Boolean))] as number[];
   seenBuddyIds.forEach((bgId, i) => buddyColorMap.set(bgId, BUDDY_COLORS[i % BUDDY_COLORS.length]));
 
   // Expandable member details
   const [expandedMember, setExpandedMember] = useState<number | null>(null);
-  const [clubDays, setClubDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
   const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
   const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
   const [detailInvitations, setDetailInvitations] = useState<StudentInvitation[]>([]);
@@ -293,6 +346,7 @@ export default function GroupDetailPage() {
     setGroup({ ...group, [field]: value });
     try {
       await api.updateGroup(group.id, { [field]: value });
+      setMembers(await api.getGroupMembers(group.id));
     } catch (err: any) {
       toast(err.message);
       load();
@@ -354,18 +408,38 @@ export default function GroupDetailPage() {
                   <StudentSearchResults results={searchResults} onSelect={handleAddMember} emptyText={t.noStudentsFound} />
                 )}
               </div>
-              {members.some(m => m.buddy_group) && (
-                <Tooltip content={groupBuddiesLabel}>
-                  <Button icon={<Layers />} aria-label={groupBuddiesLabel} pressed={groupBuddies} onClick={toggleGroupBuddies} />
-                </Tooltip>
-              )}
+              <Row align="end" gap={2}>
+                {members.length > 0 && clubDays.length > 1 && (
+                  <Field label={t.queueDay}>
+                    <SegmentedControl
+                      aria-label={t.queueDay}
+                      value={queueDay == null ? 'all' : String(queueDay)}
+                      onValueChange={changeQueueDay}
+                      options={[
+                        { value: 'all', label: t.allDaysOption },
+                        ...[...clubDays].sort().map(d => ({ value: String(d), label: t.days[d] })),
+                      ]}
+                    />
+                  </Field>
+                )}
+                {queueMembers.some(m => linkedBuddyId(m)) && (
+                  <Tooltip content={groupBuddiesLabel}>
+                    <Button icon={<Layers />} aria-label={groupBuddiesLabel} pressed={groupBuddies} onClick={toggleGroupBuddies} />
+                  </Tooltip>
+                )}
+              </Row>
             </Row>
 
             {members.length === 0 ? (
               <EmptyState icon={<Users />} title={t.noMembers} description={t.noMembersHint} />
+            ) : queueMembers.length === 0 ? (
+              <EmptyState icon={<CalendarX />} title={t.noMembersOnDay(t.daysFull[queueDay!])} />
             ) : (
               <>
-                <Text as="p" tone="muted" size="sm">{t.queueHint}</Text>
+                <Text as="p" tone="muted" size="sm">
+                  {t.queueHint}
+                  {queueDay != null && <> {t.queueDayHint(t.daysFull[queueDay])}</>}
+                </Text>
                 <Table interactive>
                   <thead>
                     <tr>
@@ -380,9 +454,13 @@ export default function GroupDetailPage() {
                   <tbody>
                     {sortedMembers.map((m, idx) => {
                       const isExpanded = expandedMember === m.id;
-                      const buddyId = m.buddy_group?.id;
-                      const isFirstInBuddy = !!buddyId && (idx === 0 || sortedMembers[idx - 1].buddy_group?.id !== buddyId);
-                      const isLastInBuddy = !!buddyId && (idx === sortedMembers.length - 1 || sortedMembers[idx + 1].buddy_group?.id !== buddyId);
+                      const buddyId = linkedBuddyId(m);
+                      const isFirstInBuddy = !!buddyId && (idx === 0 || linkedBuddyId(sortedMembers[idx - 1]) !== buddyId);
+                      const isLastInBuddy = !!buddyId && (idx === sortedMembers.length - 1 || linkedBuddyId(sortedMembers[idx + 1]) !== buddyId);
+                      const buddyLink = buddyLinks.get(m.id);
+                      // The buddy first in the queue takes the others along
+                      const buddyLeader = buddyLink?.together.reduce<Member | null>(
+                        (best, b) => b.queue_position! < (best ?? m).queue_position! ? b : best, null);
                       const cooldownInfo = getCooldownInfo(m);
                       const preferredDays = m.preferred_days
                         ? m.preferred_days.split('|').filter(d => clubDays.includes(Number(d))).map(d => t.days[Number(d)]).join(', ') || t.noData
@@ -413,6 +491,11 @@ export default function GroupDetailPage() {
                                     <span className={cx(styles.flag, styles.success)}><ChevronsUp /></span>
                                   </Tooltip>
                                 )}
+                                {buddyLeader && (
+                                  <Tooltip content={t.buddyFollowerTooltip(`${buddyLeader.first_name} ${buddyLeader.last_name}`, buddyLeader.queue_position!)}>
+                                    <span className={cx(styles.flag, buddyStyles.buddyIcon)}><Link2 /></span>
+                                  </Tooltip>
+                                )}
                                 <span>{m.queue_position ?? '—'}</span>
                               </Row>
                             </td>
@@ -420,9 +503,18 @@ export default function GroupDetailPage() {
                               <Row gap={2}>
                                 <ExpandIcon expanded={isExpanded} />
                                 <Text weight="medium">{m.first_name} {m.last_name}</Text>
-                                {m.buddy_group && (
-                                  <Tooltip content={t.buddyScheduledTogether(m.buddy_group.name)}>
-                                    <span className={buddyStyles.buddyIcon}><Users /></span>
+                                {buddyLink && (
+                                  <Tooltip content={
+                                    <Stack gap={1}>
+                                      {buddyLink.together.length > 0 && (
+                                        <span>{t.buddyInvitedTogether(buddyLink.together.map(b => `${b.first_name} ${b.last_name}`).join(' & '))}</span>
+                                      )}
+                                      {buddyLink.apart.map(a => <span key={a.name}>{t.buddyNotTogether(a.name, a.reason, a.detail)}</span>)}
+                                    </Stack>
+                                  }>
+                                    <span className={cx(styles.flag, buddyStyles.buddyIcon)} data-muted={buddyLink.together.length === 0 || undefined}>
+                                      <Users />
+                                    </span>
                                   </Tooltip>
                                 )}
                               </Row>

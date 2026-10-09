@@ -5,4 +5,5 @@
 .buddyRow[data-last] td { border-bottom: var(--border-width) solid color-mix(in srgb, var(--buddy) 55%, transparent); }
 
 .buddyIcon { display: inline-flex; color: var(--buddy); }
+.buddyIcon[data-muted] { color: var(--color-text-subtle); }
 .buddyIcon svg { width: var(--icon-sm); height: var(--icon-sm); }
