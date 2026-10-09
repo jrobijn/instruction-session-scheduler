@@ -525,23 +525,20 @@ export default function GroupDetailPage() {
         </TabPanel>
 
         <TabPanel value="settings">
-          <div className={styles.settings}>
-            <Stack gap={5}>
+          <Card>
+            <Stack gap={4}>
               {queuePolicies.map(policy => (
-                <Card key={policy.field} title={policy.title}>
-                  <Stack gap={3}>
-                    <Text as="p" tone="muted" size="sm">{policy.hint}</Text>
-                    <RadioCards
-                      aria-label={policy.title}
-                      value={group[policy.field]}
-                      onValueChange={v => handleChangeQueuePolicy(policy.field, v)}
-                      options={queueOptions}
-                    />
-                  </Stack>
-                </Card>
+                <Field split="wide" key={policy.field} label={policy.title} hint={policy.hint}>
+                  <RadioCards
+                    aria-label={policy.title}
+                    value={group[policy.field]}
+                    onValueChange={v => handleChangeQueuePolicy(policy.field, v)}
+                    options={queueOptions}
+                  />
+                </Field>
               ))}
             </Stack>
-          </div>
+          </Card>
         </TabPanel>
       </Tabs>
     </Page>

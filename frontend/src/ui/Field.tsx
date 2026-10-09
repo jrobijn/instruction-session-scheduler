@@ -10,10 +10,28 @@ export interface FieldProps {
   htmlFor?: string;
   hint?: ReactNode;
   error?: ReactNode;
+  /** Label and hint beside the control when there is room (settings rows); `wide` gives the control the larger share. */
+  split?: boolean | 'wide';
   children: ReactNode;
 }
 
-export function Field({ label, htmlFor, hint, error, children }: FieldProps) {
+export function Field({ label, htmlFor, hint, error, split, children }: FieldProps) {
+  if (split) {
+    return (
+      <div className={styles.splitContainer}>
+        <div className={cx(styles.split, split === 'wide' && styles.splitWide)}>
+          <div className={styles.splitText}>
+            <label className={styles.label} htmlFor={htmlFor}>{label}</label>
+            {hint && !error && <div className={styles.hint}>{hint}</div>}
+          </div>
+          <div className={styles.splitControl}>
+            {children}
+            {error && <p className={styles.error}>{error}</p>}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={styles.field}>
       <label className={styles.label} htmlFor={htmlFor}>{label}</label>
