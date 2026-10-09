@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, type CSSProperties } from 'react';
+import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeftRight, Ban, Check, CircleCheck, ExternalLink, FileDown, Plus, RefreshCw, RotateCcw, Send,
+  ArrowLeftRight, Ban, CircleCheck, ExternalLink, FileDown, Plus, RefreshCw, RotateCcw, Send,
   Sparkles, Timer, UserCheck, UserPlus, UserX, Users, Wand2, X,
 } from 'lucide-react';
 import { api, API_BASE } from '../api';
@@ -9,7 +9,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useT, getLocale } from '../i18n';
 import {
-  Alert, Badge, Button, Card, Chip, Input, Page, PageHeader, Row, Select, Stack, Table, Text, Tooltip,
+  Alert, Badge, Button, Card, Checkbox, Chip, Input, Page, PageHeader, Popover, Row, Select, Stack, Table, Text, Tooltip,
   useConfirm, useToast,
 } from '../ui';
 import Countdown from '../components/Countdown';
@@ -90,6 +90,38 @@ function formatDate(dateStr: string) {
 
 const INACTIVE_STATUSES = ['declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled'];
 
+interface InstructorPickerProps {
+  title?: string;
+  query: string;
+  onQueryChange: (query: string) => void;
+  emptyText?: string;
+  children: ReactNode;
+}
+
+/** Search field + scrollable list, shared by the add and replace instructor popovers. */
+function InstructorPicker({ title, query, onQueryChange, emptyText, children }: InstructorPickerProps) {
+  const t = useT();
+  return (
+    <>
+      <div className={styles.instructorSearch}>
+        <Stack gap={2}>
+          {title && <Text label>{title}</Text>}
+          <Input
+            type="search"
+            aria-label={t.searchInstructors}
+            placeholder={t.searchInstructors}
+            value={query}
+            onChange={e => onQueryChange(e.target.value)}
+          />
+        </Stack>
+      </div>
+      <div className={styles.instructorList}>
+        {emptyText ? <div className={styles.instructorEmpty}><Text tone="muted" size="sm">{emptyText}</Text></div> : children}
+      </div>
+    </>
+  );
+}
+
 // jsPDF can't read CSS variables; these mirror the light theme in styles/tokens.css
 const PDF_COLORS = {
   text: [29, 33, 36] as [number, number, number],
@@ -121,8 +153,15 @@ export default function SessionDetailPage() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLImageElement | null>(null);
   const [replacingInstructorId, setReplacingInstructorId] = useState<number | null>(null);
-  const [replacementTargetId, setReplacementTargetId] = useState<number | null>(null);
-  const [showAddInstructor, setShowAddInstructor] = useState(false);
+  const [instructorQuery, setInstructorQuery] = useState('');
+  const [pendingInstructorId, setPendingInstructorId] = useState<number | null>(null);
+  const focusInstructorAfterLoad = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (focusInstructorAfterLoad.current === null) return;
+    document.querySelector<HTMLElement>(`[data-instructor-id="${focusInstructorAfterLoad.current}"] button`)?.focus();
+    focusInstructorAfterLoad.current = null;
+  }, [session]);
 
   useEffect(() => {
     const img = new Image();
@@ -266,23 +305,35 @@ export default function SessionDetailPage() {
   };
 
   const replaceInstructor = async (oldInstructorId: number, newInstructorId: number) => {
+    setPendingInstructorId(oldInstructorId);
     try {
       await api.replaceInstructor(Number(id), oldInstructorId, newInstructorId);
       setReplacingInstructorId(null);
-      setReplacementTargetId(null);
+      setInstructorQuery('');
+      focusInstructorAfterLoad.current = newInstructorId;
       load();
     } catch (err: any) {
       toast(err.message);
+    } finally {
+      setPendingInstructorId(null);
     }
   };
 
   const assignInstructor = async (instructorId: number) => {
     try {
       await api.assignInstructor(Number(id), instructorId);
-      setShowAddInstructor(false);
       load();
     } catch (err: any) {
       toast(err.message);
+    }
+  };
+
+  const toggleInstructor = async (instructorId: number, checked: boolean) => {
+    setPendingInstructorId(instructorId);
+    try {
+      await (checked ? assignInstructor(instructorId) : removeInstructor(instructorId));
+    } finally {
+      setPendingInstructorId(null);
     }
   };
 
@@ -401,6 +452,10 @@ export default function SessionDetailPage() {
 
   const assignedIds = new Set(session.instructors.map(i => i.id));
   const availableInstructors = allInstructors.filter(i => !assignedIds.has(i.id));
+  const instructorFilter = instructorQuery.trim().toLowerCase();
+  const matchesQuery = (i: Instructor) => `${i.first_name} ${i.last_name}`.toLowerCase().includes(instructorFilter);
+  const filteredInstructors = allInstructors.filter(matchesQuery);
+  const replacementCandidates = availableInstructors.filter(matchesQuery);
 
   const confirmed = session.invitations.filter(i => i.status === 'confirmed').length;
   const declined = session.invitations.filter(i => i.status === 'declined').length;
@@ -690,76 +745,101 @@ export default function SessionDetailPage() {
             <Text tone="muted">{t.noInstructorsAssigned}</Text>
           ) : (
             <Row gap={2} wrap>
-              {session.instructors.map(i => replacingInstructorId === i.id ? (
-                <div key={i.id} className={styles.inlineEdit}>
-                  <Text weight="medium">{i.first_name} {i.last_name}</Text>
-                  <ArrowLeftRight className={styles.inlineIcon} aria-hidden />
-                  <Select
-                    autoFocus
-                    aria-label={t.replaceWith}
-                    value={replacementTargetId ?? ''}
-                    onChange={e => setReplacementTargetId(e.target.value ? Number(e.target.value) : null)}
-                  >
-                    <option value="">{t.replaceWith}</option>
-                    {availableInstructors.map(inst => (
-                      <option key={inst.id} value={inst.id}>{inst.first_name} {inst.last_name}</option>
-                    ))}
-                  </Select>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    icon={<Check />}
-                    aria-label={t.confirm}
-                    disabled={!replacementTargetId}
-                    onClick={() => { if (replacementTargetId) replaceInstructor(i.id, replacementTargetId); }}
-                  />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<X />}
-                    aria-label={t.cancel}
-                    onClick={() => { setReplacingInstructorId(null); setReplacementTargetId(null); }}
-                  />
-                </div>
-              ) : (
-                <Chip
+              {session.instructors.map(i => (
+                <Popover
                   key={i.id}
-                  actions={isClosed ? undefined : [{
-                    icon: <ArrowLeftRight />,
-                    label: t.replaceInstructor,
-                    onClick: () => { setReplacingInstructorId(i.id); setReplacementTargetId(null); },
-                  }]}
-                  onRemove={isClosed ? undefined : () => removeInstructor(i.id)}
-                  removeLabel={t.remove}
+                  open={replacingInstructorId === i.id}
+                  onOpenChange={open => { if (!open) { setReplacingInstructorId(null); setInstructorQuery(''); } }}
+                  align="start"
+                  flush
+                  className={styles.instructorPanel}
+                  anchor={
+                    <span className={styles.chipAnchor} data-instructor-id={i.id}>
+                      <Chip
+                        actions={isClosed ? undefined : [{
+                          icon: <ArrowLeftRight />,
+                          label: t.replaceInstructor,
+                          onClick: () => { setInstructorQuery(''); setReplacingInstructorId(i.id); },
+                        }]}
+                        onRemove={isClosed ? undefined : () => removeInstructor(i.id)}
+                        removeLabel={t.remove}
+                      >
+                        {i.first_name} {i.last_name}
+                      </Chip>
+                    </span>
+                  }
                 >
-                  {i.first_name} {i.last_name}
-                </Chip>
-              ))}
-              {isEditableStatus && availableInstructors.length > 0 && (showAddInstructor ? (
-                <div className={styles.inlineEdit}>
-                  <Select
-                    autoFocus
-                    aria-label={t.selectInstructor}
-                    value=""
-                    onChange={e => { if (e.target.value) assignInstructor(Number(e.target.value)); }}
-                    onBlur={() => setShowAddInstructor(false)}
+                  <InstructorPicker
+                    title={t.replaceWith(`${i.first_name} ${i.last_name}`)}
+                    query={instructorQuery}
+                    onQueryChange={setInstructorQuery}
+                    emptyText={availableInstructors.length === 0 ? t.allInstructorsAssigned
+                      : replacementCandidates.length === 0 ? t.noInstructorsMatch : undefined}
                   >
-                    <option value="">{t.selectInstructor}</option>
-                    {availableInstructors.map(inst => (
-                      <option key={inst.id} value={inst.id}>{inst.first_name} {inst.last_name}</option>
+                    {replacementCandidates.map(inst => (
+                      <button
+                        key={inst.id}
+                        type="button"
+                        className={styles.replaceOption}
+                        disabled={pendingInstructorId !== null}
+                        onClick={() => replaceInstructor(i.id, inst.id)}
+                      >
+                        {inst.first_name} {inst.last_name}
+                      </button>
                     ))}
-                  </Select>
-                  <Button size="sm" variant="ghost" icon={<X />} aria-label={t.cancel} onClick={() => setShowAddInstructor(false)} />
-                </div>
-              ) : (
-                <Button size="sm" icon={<Plus />} onClick={() => setShowAddInstructor(true)}>{t.addInstructor}</Button>
+                  </InstructorPicker>
+                </Popover>
               ))}
+              {isEditableStatus && (
+                <Popover
+                  align="start"
+                  flush
+                  className={styles.instructorPanel}
+                  onOpenChange={open => { if (!open) setInstructorQuery(''); }}
+                  trigger={<Button size="sm" icon={<Plus />}>{t.addInstructor}</Button>}
+                >
+                  <InstructorPicker
+                    query={instructorQuery}
+                    onQueryChange={setInstructorQuery}
+                    emptyText={filteredInstructors.length === 0 ? t.noInstructorsMatch : undefined}
+                  >
+                    {filteredInstructors.map(inst => (
+                      <div key={inst.id} className={styles.instructorOption}>
+                        <Checkbox
+                          checked={assignedIds.has(inst.id)}
+                          disabled={pendingInstructorId === inst.id}
+                          onCheckedChange={checked => toggleInstructor(inst.id, checked)}
+                          label={`${inst.first_name} ${inst.last_name}`}
+                        />
+                      </div>
+                    ))}
+                  </InstructorPicker>
+                </Popover>
+              )}
             </Row>
           )}
         </Card>
 
-        <Card title={t.timetableSection}>
-          <Stack gap={4}>
+        <Card
+          title={t.timetableSection}
+          actions={session.timeslots.length > 0 && (
+            <>
+              <Tooltip content={<span className={styles.timeslotList}>{session.timeslots.map(ts => ts.start_time).join(', ')}</span>}>
+                <span tabIndex={0}>
+                  <Badge mono>{t.timeslotsBadge(session.timeslots.length)}</Badge>
+                </span>
+              </Tooltip>
+              {session.instructors.length > 0 && (
+                <Tooltip content={t.slotsInfo}>
+                  <span tabIndex={0}>
+                    <Badge mono>{t.slotsCount(session.timeslots.length * session.instructors.length)}</Badge>
+                  </span>
+                </Tooltip>
+              )}
+            </>
+          )}
+        >
+          <Stack gap={3}>
             {session.status === 'draft' || session.status === 'scheduled' ? (
               <Select aria-label={t.timetableSection} value={session.timetable_id ?? ''} onChange={e => changeTimetable(e.target.value)}>
                 <option value="">{t.noTimetable}</option>
@@ -773,21 +853,17 @@ export default function SessionDetailPage() {
             ) : (
               <Text weight="medium">{session.timetable ? session.timetable.name : t.noTimetableAttached}</Text>
             )}
-            {session.timeslots.length === 0 ? (
-              <Text tone="muted">{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</Text>
-            ) : (
-              <Row gap={2} wrap>
-                {session.timeslots.map(ts => <Chip key={ts.id} mono>{ts.start_time}</Chip>)}
-              </Row>
-            )}
-            <Text tone="muted" size="sm">{t.slotsInfo(session.timeslots.length * session.instructors.length)}</Text>
             <AllocationBar
+              legend={false}
               segments={session.timetableGroups.map(g => ({
                 name: g.group_name,
                 percentage: g.percentage,
                 color: g.group_color || 'var(--color-text-subtle)',
               }))}
             />
+            {session.timeslots.length === 0 && (
+              <Text tone="muted">{session.timetable_id ? t.noTimeslotsInTimetable : t.noTimeslotsAttachFirst}.</Text>
+            )}
           </Stack>
         </Card>
       </div>

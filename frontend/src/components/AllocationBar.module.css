@@ -24,6 +24,7 @@
   transition: width var(--duration-normal) var(--ease-out);
 }
 .segment + .segment { border-left: 2px solid var(--color-surface); }
+.segment:focus-visible { outline-offset: -2px; }
 
 .legend { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
 
@@ -45,5 +46,7 @@
 .swatch { width: var(--space-3); height: var(--space-3); flex-shrink: 0; border-radius: var(--radius-sm); }
 
 .percentage { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); }
+/* Tooltips are inverted, so inherit their foreground instead of the muted text colour */
+.tooltipPercentage { font-family: var(--font-mono); font-weight: var(--weight-medium); }
 
 .actions { margin-left: auto; }

@@ -40,7 +40,7 @@ Visual identity for a shooting association: steel/gunmetal neutrals, one blaze-o
 | Few-option switch | `SegmentedControl` (`value`, `onValueChange`, `options=[{ value, label }]`, `aria-label`) — single choice among a handful of short options that users flip between (view filters); use `Select` for long lists |
 | Messages | `Alert` (`tone`, `title?`, `action?`) |
 | Empty lists | `EmptyState` (`icon`, `title`, `description`, `action?`) |
-| Floating panels | `Popover` (`trigger`, `flush`, `align`); `Tooltip` (`content`) — replaces `title=` on interactive hints |
+| Floating panels | `Popover` (`trigger`, or `anchor` + controlled `open` when opened from elsewhere; `flush`, `align`); `Tooltip` (`content`) — replaces `title=` on interactive hints |
 | Tabs | `Tabs`, `TabList`, `Tab`, `TabPanel` (Radix) |
 
 Shared app components (`frontend/src/components`): `CsvActions` + `ImportResultAlert`, `SessionStatusBadge` / `InvitationStatusBadge` / `GroupLabel` (`StatusBadges.tsx`), `AllocationBar`, `StudentSearchResults`, `NotificationItem`, `DecisionLog`, `Logo`, and `BuddyRows.module.css` for buddy-group rows.
