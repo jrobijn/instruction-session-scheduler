@@ -128,7 +128,7 @@ const PDF_COLORS = {
   muted: [93, 101, 107] as [number, number, number],
   rule: [169, 175, 180] as [number, number, number],
   headerFill: [223, 226, 228] as [number, number, number],
-  accent: [232, 89, 12] as [number, number, number],
+  accent: [22, 91, 146] as [number, number, number],
 };
 
 export default function SessionDetailPage() {

@@ -15,9 +15,9 @@
   </defs>
   <path fill="url(#rim)" d="M3.5 1.5H28.5V17.4C28.5 23.6 23.1 27.6 16 30.8 8.9 27.6 3.5 23.6 3.5 17.4Z"/>
   <path fill="url(#body)" d="M5.5 3.5H26.5V17.2C26.5 22.4 21.8 25.8 16 28.6 10.2 25.8 5.5 22.4 5.5 17.2Z"/>
-  <g clip-path="url(#inner)" stroke="#e8590c" stroke-width="2.2" fill="none">
+  <g clip-path="url(#inner)" stroke="#3f8fd2" stroke-width="2.2" fill="none">
     <circle cx="16" cy="14.5" r="6.5"/>
     <path d="M16 4.5V10.5M16 18.5V24.5M6 14.5H12M20 14.5H26"/>
-    <circle cx="16" cy="14.5" r="1.4" fill="#e8590c" stroke="none"/>
+    <circle cx="16" cy="14.5" r="1.4" fill="#3f8fd2" stroke="none"/>
   </g>
 </svg>

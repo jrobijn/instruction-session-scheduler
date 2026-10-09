@@ -93,11 +93,11 @@
   --color-text-muted: #5d656b;
   --color-text-subtle: #80888e;
 
-  /* Blaze orange: use --accent for fills, --accent-text for text/icons on surfaces */
-  --color-accent: #e8590c;
-  --color-accent-hover: #d14d07;
-  --color-accent-text: #b8440a;
-  --color-accent-contrast: #1d2124;
+  /* Club blue (#165b92): use --accent for fills, --accent-text for text/icons on surfaces */
+  --color-accent: #165b92;
+  --color-accent-hover: #124c7a;
+  --color-accent-text: #165b92;
+  --color-accent-contrast: #ffffff;
 
   --color-success: #3f6a2e;
   --color-warning: #8a6b0f;
@@ -106,7 +106,7 @@
   --color-info: #4a6378;
   --color-on-danger: #ffffff;
 
-  --color-focus: #e8590c;
+  --color-focus: #1c6aa8;
   --color-overlay: rgba(20, 23, 26, 0.55);
   --shadow-popover: 0 6px 20px rgba(20, 23, 26, 0.18), 0 1px 3px rgba(20, 23, 26, 0.12);
 
@@ -114,8 +114,8 @@
   --metal-sheen: linear-gradient(180deg, #f4f5f6 0%, #e2e5e7 55%, #d8dcdf 100%);
   --metal-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
   --metal-edge: #b4babf;
-  --accent-sheen: linear-gradient(180deg, #f2702b 0%, #e8590c 60%, #dc5209 100%);
-  --accent-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  --accent-sheen: linear-gradient(180deg, #2269a3 0%, #165b92 60%, #135283 100%);
+  --accent-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 /* ---------- Dark: gunmetal ---------- */
@@ -132,10 +132,11 @@
   --color-text-muted: #9aa2a8;
   --color-text-subtle: #737b82;
 
-  --color-accent: #f06a1f;
-  --color-accent-hover: #ff7a33;
-  --color-accent-text: #ff8a47;
-  --color-accent-contrast: #16191b;
+  /* Club blue lifted for contrast on gunmetal */
+  --color-accent: #2a78bb;
+  --color-accent-hover: #3a88cc;
+  --color-accent-text: #6fb0e8;
+  --color-accent-contrast: #ffffff;
 
   --color-success: #8fbf6a;
   --color-warning: #e0b84a;
@@ -144,15 +145,15 @@
   --color-info: #8fa9bf;
   --color-on-danger: #16191b;
 
-  --color-focus: #ff7a33;
+  --color-focus: #5aa2e0;
   --color-overlay: rgba(0, 0, 0, 0.6);
   --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
 
   --metal-sheen: linear-gradient(180deg, #353a40 0%, #2a2f34 55%, #24282c 100%);
   --metal-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   --metal-edge: #14171a;
-  --accent-sheen: linear-gradient(180deg, #ff7f3a 0%, #f06a1f 60%, #e25d13 100%);
-  --accent-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  --accent-sheen: linear-gradient(180deg, #3486c9 0%, #2a78bb 60%, #236ba9 100%);
+  --accent-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 /* ---------- Base ---------- */

@@ -5,7 +5,7 @@ applyTo: "frontend/src/**"
 
 # Frontend design system — "Range Technical"
 
-Visual identity for a shooting association: steel/gunmetal neutrals, one blaze-orange accent, precise and dense like an instrument panel. Reference implementations: [SessionsPage.tsx](../../frontend/src/pages/SessionsPage.tsx) (list page), [SessionDetailPage.tsx](../../frontend/src/pages/SessionDetailPage.tsx) (detail page).
+Visual identity for a shooting association: steel/gunmetal neutrals, one club-blue accent (official colour `#165b92`), precise and dense like an instrument panel. Reference implementations: [SessionsPage.tsx](../../frontend/src/pages/SessionsPage.tsx) (list page), [SessionDetailPage.tsx](../../frontend/src/pages/SessionDetailPage.tsx) (detail page).
 
 ## Hard rules
 
@@ -49,7 +49,7 @@ Missing something? Add a new primitive in `ui/` (Radix primitive from `radix-ui`
 
 ## Visual language
 
-- **Colour**: neutrals carry the UI. Orange `--color-accent` is reserved for the primary action, the active/selected marker (3px bar) and focus rings — never for large backgrounds or decoration. Use `--color-accent-text` when orange is text/icon on a surface.
+- **Colour**: neutrals carry the UI. Blue `--color-accent` is reserved for the primary action, the active/selected marker (3px bar) and focus rings — never for large backgrounds or decoration. Use `--color-accent-text` when blue is text/icon on a surface.
 - **Status colours**: success = olive, warning = ochre, danger = deep red, info = steel blue. Always pair with an icon or text.
 - **Metal**: `--metal-sheen` / `--accent-sheen` gradients only on the nav bar and buttons. No other gradients, no glassmorphism, no glow.
 - **Type**: Barlow body; Barlow Semi Condensed uppercase for headings, labels, table headers, nav and tabs; IBM Plex Mono for dates, times, counts and ratios.
