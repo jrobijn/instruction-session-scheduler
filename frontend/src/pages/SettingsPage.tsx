@@ -60,8 +60,8 @@ export default function SettingsPage() {
     <Page>
       <PageHeader title={t.settingsTitle} />
       <Card>
-        <Stack gap={5}>
-          <Field label={t.settingEmailLocale} htmlFor="setting-email-locale" hint={hint('email_locale', t.settingEmailLocaleDesc)}>
+        <Stack gap={4}>
+          <Field split label={t.settingEmailLocale} htmlFor="setting-email-locale" hint={hint('email_locale', t.settingEmailLocaleDesc)}>
             <Select
               id="setting-email-locale"
               value={settings.email_locale || 'en'}
@@ -77,7 +77,7 @@ export default function SettingsPage() {
           </Field>
 
           {settingsConfig.map(({ key, label, type, description }) => (
-            <Field key={key} label={label} htmlFor={`setting-${key}`} hint={hint(key, description)}>
+            <Field split key={key} label={label} htmlFor={`setting-${key}`} hint={hint(key, description)}>
               <Input
                 id={`setting-${key}`}
                 type={type}
@@ -88,7 +88,7 @@ export default function SettingsPage() {
             </Field>
           ))}
 
-          <Field label={t.settingClubDays} hint={hint('club_days', t.settingClubDaysDesc)}>
+          <Field split label={t.settingClubDays} hint={hint('club_days', t.settingClubDaysDesc)}>
             <Row gap={4} wrap>
               {[0, 1, 2, 3, 4, 5, 6].map(idx => {
                 const checked = clubDays.includes(String(idx));
@@ -112,7 +112,7 @@ export default function SettingsPage() {
             </Row>
           </Field>
 
-          <Field label={t.settingTimezone} htmlFor="setting-timezone" hint={hint('timezone', t.settingTimezoneDesc)}>
+          <Field split label={t.settingTimezone} htmlFor="setting-timezone" hint={hint('timezone', t.settingTimezoneDesc)}>
             <Select
               id="setting-timezone"
               value={settings.timezone || 'Europe/Amsterdam'}

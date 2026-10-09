@@ -7,6 +7,7 @@
   margin: 0 auto;
   padding: var(--space-8) var(--space-6);
 }
+.wide { max-width: none; }
 
 .centered {
   display: flex;

@@ -24,7 +24,7 @@ Visual identity for a shooting association: steel/gunmetal neutrals, one blaze-o
 
 | Need | Use |
 |---|---|
-| Page wrapper / title bar | `Page`, `PageHeader` (`title`, `back={{ label, onClick }}`, `meta` for badges, `actions` — primary last); `CenteredPage` for standalone screens (login, invitation) |
+| Page wrapper / title bar | `Page` (`wide` only for pages that need the full viewport; cap forms/text locally at ~40rem or use `Field split`), `PageHeader` (`title`, `back={{ label, onClick }}`, `meta` for badges, `actions` — primary last); `CenteredPage` for standalone screens (login, invitation) |
 | Buttons | `Button` — `variant`: `primary` (one per view, the main action) · `secondary` (default, metal) · `ghost` (toolbar/row actions) · `danger`; `size`: `md`/`sm`; `icon={<LucideIcon />}`; `pressed` for toggles; `fullWidth` |
 | Status / labels | `Badge` — `tone`: neutral/accent/success/warning/danger/info. Status tones get an icon automatically (colour is never the only signal). `mono` for counts/ratios |
 | Entity tags | `Chip` (`mono`, `swatch`, `actions=[{ icon, label, onClick }]`, `onRemove`) — timeslots, assigned instructors |
@@ -36,7 +36,7 @@ Visual identity for a shooting association: steel/gunmetal neutrals, one blaze-o
 | Row menus | `ActionMenu` (`actions=[{ label, onClick, icon?, danger? }]`); safe inside clickable rows |
 | Modals | `Dialog` (`open`, `onOpenChange`, `title`, `description?`, `footer`, `size`) — primary button last in footer; forms use `<form id>` + `<Button type="submit" form="id">` |
 | Confirm / errors | `useConfirm()` → `await confirm({ title, message, confirmLabel?, danger? })`; `useToast()` → `toast(message, tone?)` |
-| Forms | `Field` (`label`, `htmlFor`, `hint`, `error`) wrapping `Input`, `Select`, `Textarea`, `DateInput`, `ColorInput`; `Checkbox` (`label`, `description`, `card`); `RadioCards`; `Slider` |
+| Forms | `Field` (`label`, `htmlFor`, `hint`, `error`; `split` for settings rows: label/hint left, control right, stacks when narrow, consecutive rows get dividers; `split="wide"` when the control is large, e.g. `RadioCards`) wrapping `Input`, `Select`, `Textarea`, `DateInput`, `ColorInput`; `Checkbox` (`label`, `description`, `card`); `RadioCards`; `Slider` |
 | Messages | `Alert` (`tone`, `title?`, `action?`) |
 | Empty lists | `EmptyState` (`icon`, `title`, `description`, `action?`) |
 | Floating panels | `Popover` (`trigger`, `flush`, `align`); `Tooltip` (`content`) — replaces `title=` on interactive hints |

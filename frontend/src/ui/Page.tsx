@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from './Button';
+import { cx } from './cx';
 import styles from './Page.module.css';
 
-export function Page({ children }: { children: ReactNode }) {
-  return <main className={styles.page}>{children}</main>;
+/** `wide` lifts the max width for pages that need the full viewport (large grids). */
+export function Page({ wide, children }: { wide?: boolean; children: ReactNode }) {
+  return <main className={cx(styles.page, wide && styles.wide)}>{children}</main>;
 }
 
 /** Full-height centred column for standalone screens (login, invitation). */
