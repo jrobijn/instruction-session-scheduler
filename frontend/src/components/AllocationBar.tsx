@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import { GripVertical } from 'lucide-react';
 import { useT } from '../i18n';
 import { cx } from '../ui/cx';
+import { Tooltip } from '../ui';
 import styles from './AllocationBar.module.css';
 
 export interface AllocationSegment {
@@ -12,6 +13,8 @@ export interface AllocationSegment {
 
 interface AllocationBarProps {
   segments: AllocationSegment[];
+  /** Show the legend below the bar (default true). Group names remain available as segment tooltips. */
+  legend?: boolean;
   /** Legend items can be dragged to reorder. */
   draggable?: boolean;
   onReorder?: (fromIdx: number, toIdx: number) => void;
@@ -20,7 +23,7 @@ interface AllocationBarProps {
 }
 
 /** Stacked percentage bar with legend, showing how a timetable's slots are split over groups. */
-export function AllocationBar({ segments, draggable, onReorder, actions }: AllocationBarProps) {
+export function AllocationBar({ segments, legend = true, draggable, onReorder, actions }: AllocationBarProps) {
   const t = useT();
   const dragIdx = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -33,12 +36,18 @@ export function AllocationBar({ segments, draggable, onReorder, actions }: Alloc
     <div className={styles.root}>
       <div className={styles.bar}>
         {segments.map((seg, i) => seg.percentage > 0 && (
-          <div key={i} className={styles.segment} style={{ width: `${(seg.percentage / total) * 100}%`, background: seg.color }}>
-            {seg.percentage}%
-          </div>
+          <Tooltip key={i} content={<>{seg.name} <span className={styles.tooltipPercentage}>{seg.percentage}%</span></>}>
+            <div
+              className={styles.segment}
+              style={{ width: `${(seg.percentage / total) * 100}%`, background: seg.color }}
+              tabIndex={legend ? undefined : 0}
+            >
+              {seg.percentage}%
+            </div>
+          </Tooltip>
         ))}
       </div>
-      <div className={styles.legend}>
+      {legend && <div className={styles.legend}>
         {segments.map((seg, i) => (
           <div
             key={i}
@@ -62,7 +71,7 @@ export function AllocationBar({ segments, draggable, onReorder, actions }: Alloc
           </div>
         ))}
         {actions && <div className={styles.actions}>{actions}</div>}
-      </div>
+      </div>}
     </div>
   );
 }
