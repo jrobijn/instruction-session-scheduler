@@ -1,4 +1,35 @@
+import crypto from 'crypto';
 import db from './database.js';
+
+// Reorders runs of equal queue position (rows must already be sorted by QUEUE_ORDER_SQL).
+// Stable per (seed, student) but shuffled differently for each seed (e.g. session id).
+export function breakQueueTies<T extends { id: number; invite_next_since: string | null; queue_at: string }>(rows: T[], seed: number): T[] {
+  const tieKey = (r: T) => `${r.invite_next_since ?? ''}|${r.queue_at}`;
+  const hash = (r: T) => crypto.createHash('sha256').update(`${seed}:${r.id}`).digest().readUInt32BE(0);
+  const result: T[] = [];
+  for (let start = 0; start < rows.length;) {
+    let end = start + 1;
+    while (end < rows.length && tieKey(rows[end]) === tieKey(rows[start])) end++;
+    result.push(...rows.slice(start, end)
+      .map(r => ({ r, h: hash(r) }))
+      .sort((a, b) => a.h - b.h || a.r.id - b.r.id)
+      .map(x => x.r));
+    start = end;
+  }
+  return result;
+}
+
+// Seeded PRNG (mulberry32) so random choices are reproducible.
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 // Invite queue: within a group, students are invited in order of who has waited longest.
 // The order is derived from invitation history, so declines/cancellations/regeneration need
@@ -36,13 +67,13 @@ export const QUEUE_ORDER_SQL = 'invite_next_since IS NULL, invite_next_since ASC
 // Pick a group from the given list, weighted by each group's weight (e.g. timetable
 // percentage). Groups with no/zero weight fall back to uniform selection. Weights are
 // implicitly renormalized over the provided groups.
-export function weightedPickGroup(groupIds: number[], weightByGroup: Map<number, number>): number {
+export function weightedPickGroup(groupIds: number[], weightByGroup: Map<number, number>, random: () => number = Math.random): number {
   const weights = groupIds.map(g => Math.max(0, weightByGroup.get(g) ?? 0));
   const total = weights.reduce((a, b) => a + b, 0);
   if (total <= 0) {
-    return groupIds[Math.floor(Math.random() * groupIds.length)];
+    return groupIds[Math.floor(random() * groupIds.length)];
   }
-  let r = Math.random() * total;
+  let r = random() * total;
   for (let i = 0; i < groupIds.length; i++) {
     r -= weights[i];
     if (r < 0) return groupIds[i];

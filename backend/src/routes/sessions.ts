@@ -8,7 +8,7 @@ import {
 } from '../expiryTimers.js';
 import { broadcastSession, broadcast, broadcastSessionsList } from '../sseClients.js';
 import { findAndInviteReplacement } from './invitations.js';
-import { weightedPickGroup, QUEUE_JOIN_SQL, QUEUE_COLUMNS_SQL, QUEUE_ORDER_SQL } from '../priority.js';
+import { weightedPickGroup, seededRandom, breakQueueTies, QUEUE_JOIN_SQL, QUEUE_COLUMNS_SQL, QUEUE_ORDER_SQL } from '../priority.js';
 
 const router = Router();
 
@@ -377,7 +377,7 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
 
   // Students in a timetable group with at least one active discipline (needed to confirm), in queue order
   const sessionDow = String(new Date(session.date + 'T00:00:00').getDay());
-  const allEligibleStudents = db.prepare(`
+  const allEligibleStudents = breakQueueTies(db.prepare(`
     SELECT s.*, sg.group_id AS group_id, ${QUEUE_COLUMNS_SQL} FROM students s
     JOIN student_groups sg ON sg.student_id = s.id
     ${QUEUE_JOIN_SQL}
@@ -396,8 +396,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
         JOIN training_sessions ts ON ts.id = inv.session_id
         WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled')
       )
-    ORDER BY ${QUEUE_ORDER_SQL}, RANDOM()
-  `).all(session.timetable_id, sessionDow, session.date, req.params.id, session.date) as any[];
+    ORDER BY ${QUEUE_ORDER_SQL}
+  `).all(session.timetable_id, sessionDow, session.date, req.params.id, session.date) as any[], session.id);
 
   const studentsByGroup = new Map<number, any[]>(groupSlotCounts.map(gsc => [gsc.group_id, []]));
   for (const student of allEligibleStudents) {
@@ -443,8 +443,6 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     prefsByStudent.get(p.student_id)!.add(p.timeslot_id);
   }
 
-  const allTimeslotIds = new Set(timeslots.map((t: any) => t.id));
-
   // Load buddy group memberships for buddy scheduling
   const allBuddyMembers = db.prepare(
     'SELECT bgm.buddy_group_id, bgm.student_id FROM buddy_group_members bgm'
@@ -472,56 +470,175 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     groupColorMap.set(tg.group_id, tg.group_color);
   }
 
-  // Helper: assign a student to the best available slot
-  // nearTimeslotIdx: optional hint to prefer slots near this timeslot index (for buddy scheduling)
-  function assignStudent(student: any, sessionId: string, groupId: number | null, context?: { candidateRank: number; candidatesConsidered: number; groupQuota?: string; buddyOf?: string; overflow?: boolean }, nearTimeslotIdx?: number): any | null {
-    const storedPrefs = prefsByStudent.get(student.id);
-    const preferredIds = storedPrefs && storedPrefs.size > 0 ? storedPrefs : allTimeslotIds;
+  // ----- Timeslot matching -----
+  // Students are first matched to a timeslot (capacity = free instructor spots); concrete slots are assigned afterwards.
+  const capacity = timeslots.map((_: any, ti: number) =>
+    slotGrid.filter((s, i) => s.timeslotIdx === ti && slotAvailable[i]).length);
+  const occupants: Array<Set<number>> = timeslots.map(() => new Set<number>());
+  const placedTimeslot = new Map<number, number>();
 
-    const preferredIndices = new Set<number>();
-    for (let i = 0; i < timeslots.length; i++) {
-      if (preferredIds.has(timeslots[i].id)) preferredIndices.add(i);
+  const allowedByStudent = new Map<number, number[]>();
+  function allowedTimeslots(studentId: number): number[] {
+    let allowed = allowedByStudent.get(studentId);
+    if (!allowed) {
+      const prefs = prefsByStudent.get(studentId);
+      allowed = timeslots.map((_: any, i: number) => i)
+        .filter((i: number) => !prefs || prefs.size === 0 || prefs.has(timeslots[i].id));
+      allowedByStudent.set(studentId, allowed);
     }
+    return allowed;
+  }
+  const hasTimeslotPreference = (studentId: number) => allowedTimeslots(studentId).length < timeslots.length;
 
-    let assignedIdx = -1;
+  function putInTimeslot(studentId: number, ti: number) {
+    const prev = placedTimeslot.get(studentId);
+    if (prev !== undefined) occupants[prev].delete(studentId);
+    occupants[ti].add(studentId);
+    placedTimeslot.set(studentId, ti);
+  }
 
-    // If nearTimeslotIdx is set (buddy scheduling), prefer slots near buddy's timeslot
-    // but only among the student's preferred timeslots
-    if (nearTimeslotIdx !== undefined) {
-      const nearIndices = new Set<number>();
-      nearIndices.add(nearTimeslotIdx);
-      if (nearTimeslotIdx > 0) nearIndices.add(nearTimeslotIdx - 1);
-      if (nearTimeslotIdx < timeslots.length - 1) nearIndices.add(nearTimeslotIdx + 1);
+  // Allowed timeslots closest to the anchor first; earliest first without an anchor
+  function orderedTimeslots(studentId: number, anchor?: number): number[] {
+    const allowed = allowedTimeslots(studentId);
+    if (anchor === undefined) return allowed;
+    return [...allowed].sort((a, b) => Math.abs(a - anchor) - Math.abs(b - anchor) || a - b);
+  }
 
-      for (let i = 0; i < slotGrid.length; i++) {
-        if (slotAvailable[i] && nearIndices.has(slotGrid[i].timeslotIdx) && preferredIndices.has(slotGrid[i].timeslotIdx)) {
-          assignedIdx = i;
-          break;
+  // Augmenting path: may move already-placed students to another allowed timeslot, but never unplaces them
+  function tryPlace(studentId: number, order: number[], visited: Set<number>): boolean {
+    for (const ti of order) {
+      if (!visited.has(ti) && occupants[ti].size < capacity[ti]) { putInTimeslot(studentId, ti); return true; }
+    }
+    for (const ti of order) {
+      if (visited.has(ti)) continue;
+      visited.add(ti);
+      for (const other of [...occupants[ti]]) {
+        if (other !== studentId && tryPlace(other, orderedTimeslots(other, ti), visited)) {
+          putInTimeslot(studentId, ti);
+          return true;
         }
       }
     }
+    return false;
+  }
 
-    // Fallback: any preferred timeslot
-    if (assignedIdx === -1) {
-      for (let i = 0; i < slotGrid.length; i++) {
-        if (slotAvailable[i] && preferredIndices.has(slotGrid[i].timeslotIdx)) {
-          assignedIdx = i;
-          break;
-        }
+  function placeStudent(studentId: number): boolean {
+    let anchor: number | undefined;
+    for (const buddyId of buddiesByStudent.get(studentId) ?? []) {
+      anchor = placedTimeslot.get(buddyId);
+      if (anchor !== undefined) break;
+    }
+    return tryPlace(studentId, orderedTimeslots(studentId, anchor), new Set());
+  }
+
+  // ----- Selection: top n per group (n = group quota), buddies pulled up within the same group -----
+  type PlacementContext = { groupId: number; candidateRank: number; candidatesConsidered: number; groupQuota?: string; buddyOf?: string; overflow?: boolean };
+  const contexts = new Map<number, PlacementContext>();
+  const groupQuotaById = new Map<number, string>(groupSlotCounts.map(gsc => {
+    const pct = timetableGroups.find(t => t.group_id === gsc.group_id)?.percentage ?? 0;
+    return [gsc.group_id, `${gsc.slots} slots (${pct}%)`];
+  }));
+  const groupContext = (student: any, groupId: number, buddyOf?: string): PlacementContext => {
+    const groupStudents = studentsByGroup.get(groupId)!;
+    return {
+      groupId,
+      candidateRank: groupStudents.indexOf(student) + 1,
+      candidatesConsidered: groupStudents.length,
+      groupQuota: groupQuotaById.get(groupId),
+      buddyOf,
+    };
+  };
+
+  const selected: any[] = [];
+  const remainingByGroup = new Map<number, any[]>();
+  for (const gsc of groupSlotCounts) {
+    const groupStudents = studentsByGroup.get(gsc.group_id)!;
+    const taken = new Set<number>();
+    const select = (student: any, buddyOf?: string) => {
+      taken.add(student.id);
+      selected.push(student);
+      contexts.set(student.id, groupContext(student, gsc.group_id, buddyOf));
+    };
+    for (const student of groupStudents) {
+      if (taken.size >= gsc.slots) break;
+      if (taken.has(student.id)) continue;
+      select(student);
+      const buddyIds = buddiesByStudent.get(student.id);
+      if (!buddyIds) continue;
+      for (const buddy of groupStudents) {
+        if (taken.size >= gsc.slots) break;
+        if (buddyIds.has(buddy.id) && !taken.has(buddy.id)) select(buddy, `${student.first_name} ${student.last_name}`);
       }
     }
+    remainingByGroup.set(gsc.group_id, groupStudents.filter(s => !taken.has(s.id)));
+  }
 
-    if (assignedIdx === -1) return null;
+  // ----- Placement -----
+  const queueIndex = new Map<number, number>(allEligibleStudents.map((s, i) => [s.id, i]));
+  const byQueue = (a: any, b: any) => queueIndex.get(a.id)! - queueIndex.get(b.id)!;
+  const withPreference = selected.filter(s => hasTimeslotPreference(s.id)).sort(byQueue);
+  const withoutPreference = selected.filter(s => !hasTimeslotPreference(s.id)).sort(byQueue);
+  const placed: any[] = [];
+  // Placing more students never frees room, so a student who failed once can't be placed later
+  const unplaceable = new Set<number>();
 
+  // Phase 1: students with timeslot preferences; an unplaceable one is replaced by the next candidate of its group
+  while (withPreference.length > 0) {
+    const student = withPreference.shift()!;
+    if (placeStudent(student.id)) { placed.push(student); continue; }
+    unplaceable.add(student.id);
+    const groupId = contexts.get(student.id)!.groupId;
+    contexts.delete(student.id);
+    const replacement = remainingByGroup.get(groupId)!.shift();
+    if (!replacement) continue;
+    contexts.set(replacement.id, groupContext(replacement, groupId));
+    (hasTimeslotPreference(replacement.id) ? withPreference : withoutPreference).push(replacement);
+  }
+
+  // Phase 2: students without preferences fill the remaining spots
+  for (const student of withoutPreference) {
+    if (placeStudent(student.id)) placed.push(student);
+    else { contexts.delete(student.id); unplaceable.add(student.id); }
+  }
+
+  // Phase 3 (overflow): fill any remaining spots with uninvited eligible students from any group.
+  // For each pick a group is chosen at random (weighted by timetable percentage) and its first candidate is tried.
+  const totalCapacity = capacity.reduce((sum: number, c: number) => sum + c, 0);
+  const overflowCandidates = allEligibleStudents.filter(s => !placedTimeslot.has(s.id) && !unplaceable.has(s.id));
+  const overflowQueues = new Map<number, any[]>();
+  for (const student of overflowCandidates) {
+    if (!overflowQueues.has(student.group_id)) overflowQueues.set(student.group_id, []);
+    overflowQueues.get(student.group_id)!.push(student); // already queue-ordered
+  }
+  const percentageByGroup = new Map<number, number>(timetableGroups.map(tg => [tg.group_id, tg.percentage]));
+  const overflowRandom = seededRandom(session.id);
+  let overflowRank = 0;
+  while (overflowQueues.size > 0 && placedTimeslot.size < totalCapacity) {
+    const pickedGroupId = weightedPickGroup([...overflowQueues.keys()], percentageByGroup, overflowRandom);
+    const queue = overflowQueues.get(pickedGroupId)!;
+    const student = queue.shift()!;
+    if (queue.length === 0) overflowQueues.delete(pickedGroupId);
+    overflowRank++;
+    if (!placeStudent(student.id)) continue;
+    placed.push(student);
+    contexts.set(student.id, { groupId: pickedGroupId, candidateRank: overflowRank, candidatesConsidered: overflowCandidates.length, overflow: true });
+  }
+
+  const clubDaysStr = (db.prepare("SELECT value FROM settings WHERE key = 'club_days'").get() as any)?.value || '0|1|2|3|4|5|6';
+  const clubDaysSet = new Set(clubDaysStr.split('|').map(Number));
+
+  // Create the invitation in the first free instructor spot of the student's matched timeslot
+  function insertForStudent(student: any, sessionId: string, context: PlacementContext): any {
+    const timeslotIdx = placedTimeslot.get(student.id)!;
+    const assignedIdx = slotGrid.findIndex((s, i) => slotAvailable[i] && s.timeslotIdx === timeslotIdx);
     slotAvailable[assignedIdx] = false;
+    const groupId = context.groupId;
     const slot = slotGrid[assignedIdx];
     const token = crypto.randomUUID();
     const storedPrefsForLog = prefsByStudent.get(student.id);
     const preferredTimeslots = storedPrefsForLog && storedPrefsForLog.size > 0
       ? timeslots.filter((t: any) => storedPrefsForLog.has(t.id)).map((t: any) => t.start_time)
       : null;
-    const clubDaysStr = (db.prepare("SELECT value FROM settings WHERE key = 'club_days'").get() as any)?.value || '0|1|2|3|4|5|6';
-    const clubDaysSet = new Set(clubDaysStr.split('|').map(Number));
     const preferredDaysFiltered = student.preferred_days
       ? student.preferred_days.split('|').map(Number).filter((d: number) => clubDaysSet.has(d))
       : null;
@@ -530,15 +647,15 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
       trigger: 'batch_schedule',
       last_turn_at: student.last_turn_at ?? null,
       invite_next: student.invite_next_since != null,
-      candidate_rank: context?.candidateRank ?? 0,
-      candidates_considered: context?.candidatesConsidered ?? 0,
-      group_name: groupId ? (groupNameMap.get(groupId) || null) : null,
-      group_color: groupId ? (groupColorMap.get(groupId) || null) : null,
-      group_quota: context?.groupQuota || null,
+      candidate_rank: context.candidateRank,
+      candidates_considered: context.candidatesConsidered,
+      group_name: groupNameMap.get(groupId) || null,
+      group_color: groupColorMap.get(groupId) || null,
+      group_quota: context.groupQuota || null,
       preferred_timeslots: preferredTimeslots,
       preferred_days: preferredDays,
-      buddy_placed_near: context?.buddyOf || null,
-      overflow: context?.overflow || false,
+      buddy_placed_near: context.buddyOf || null,
+      overflow: context.overflow || false,
     });
     insertInvitation.run(sessionId, student.id, slot.timeslot.id, slot.instructor.slot_id, token, groupId, decisionLog);
     return { ...student, token, timeslot_id: slot.timeslot.id, slot_id: slot.instructor.slot_id, start_time: slot.timeslot.start_time, group_id: groupId, timeslotIdx: slot.timeslotIdx };
@@ -549,73 +666,8 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const insertMany = db.transaction(() => {
-    const invited: any[] = [];
-    const invitedStudentIds = new Set<number>();
-
-    // Process each group, allocating its share of slots
-    for (const gsc of groupSlotCounts) {
-      const groupStudents = studentsByGroup.get(gsc.group_id) || [];
-      let groupSlotsUsed = 0;
-      const processedInGroup = new Set<number>();
-      const tg = timetableGroups.find(t => t.group_id === gsc.group_id);
-      const groupQuota = `${gsc.slots} slots (${tg?.percentage ?? 0}%)`;
-
-      for (const student of groupStudents) {
-        if (processedInGroup.has(student.id)) continue;
-        if (groupSlotsUsed >= gsc.slots) break;
-        const candidateRank = groupStudents.indexOf(student) + 1;
-        const result = assignStudent(student, req.params.id as string, gsc.group_id, { candidateRank, candidatesConsidered: groupStudents.length, groupQuota });
-        if (!result) continue; // This student's preferred slots are full, try next student
-        invited.push(result);
-        invitedStudentIds.add(student.id);
-        processedInGroup.add(student.id);
-        groupSlotsUsed++;
-
-        // Try to schedule buddies from the same timetable group near the same timeslot
-        const buddyIds = buddiesByStudent.get(student.id);
-        if (buddyIds) {
-          for (const buddyStudent of groupStudents) {
-            if (!buddyIds.has(buddyStudent.id)) continue;
-            if (processedInGroup.has(buddyStudent.id)) continue;
-            if (groupSlotsUsed >= gsc.slots) break;
-            const buddyCandidateRank = groupStudents.indexOf(buddyStudent) + 1;
-            const buddyResult = assignStudent(buddyStudent, req.params.id as string, gsc.group_id, { candidateRank: buddyCandidateRank, candidatesConsidered: groupStudents.length, groupQuota, buddyOf: result.first_name + ' ' + result.last_name }, result.timeslotIdx);
-            if (!buddyResult) continue; // This buddy couldn't be placed, try others
-            invited.push(buddyResult);
-            invitedStudentIds.add(buddyStudent.id);
-            processedInGroup.add(buddyStudent.id);
-            groupSlotsUsed++;
-          }
-        }
-      }
-    }
-
-    // Second pass: fill any remaining slots with uninvited eligible students from any group.
-    // For each remaining slot we pick a group at random (weighted by the group's timetable
-    // percentage) and take the first uninvited candidate in its queue.
-    const overflowCandidates = allEligibleStudents.filter(s => !invitedStudentIds.has(s.id));
-    const overflowQueues = new Map<number, any[]>();
-    for (const student of overflowCandidates) {
-      if (!overflowQueues.has(student.group_id)) overflowQueues.set(student.group_id, []);
-      overflowQueues.get(student.group_id)!.push(student); // already queue-ordered
-    }
-    const percentageByGroup = new Map<number, number>(timetableGroups.map(tg => [tg.group_id, tg.percentage]));
-    let overflowRank = 0;
-    while (overflowQueues.size > 0) {
-      const groupIds = [...overflowQueues.keys()];
-      const pickedGroupId = weightedPickGroup(groupIds, percentageByGroup);
-      const queue = overflowQueues.get(pickedGroupId)!;
-      const student = queue.shift()!;
-      if (queue.length === 0) overflowQueues.delete(pickedGroupId);
-      overflowRank++;
-      const result = assignStudent(student, req.params.id as string, pickedGroupId, { candidateRank: overflowRank, candidatesConsidered: overflowCandidates.length, overflow: true });
-      if (!result) continue; // This student's preferred slots are full, try next student
-      invited.push(result);
-    }
-
-    return invited;
-  });
+  const insertMany = db.transaction(() =>
+    placed.map(student => insertForStudent(student, req.params.id as string, contexts.get(student.id)!)));
 
   const invited = insertMany();
 
