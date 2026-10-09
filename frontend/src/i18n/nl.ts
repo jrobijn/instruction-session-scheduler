@@ -260,7 +260,7 @@ const nl: Translations = {
   timeslotsBadge: (n: number) => n === 1 ? '1 tijdslot' : `${n} tijdsloten`,
   generateSchedule: 'Planning genereren',
   generating: 'Genereren...',
-  scheduleHint: 'Dit selecteert leerlingen met de minste bijgewoonde sessies en maakt uitnodigingen aan.',
+  scheduleHint: 'Dit selecteert leerlingen die het langst hebben gewacht sinds hun laatste bijgewoonde sessie en maakt uitnodigingen aan.',
   sendInvitations: 'Uitnodigingen versturen',
   confirmSendInvitations: 'Uitnodigingsmails versturen naar alle ingeplande leerlingen?',
   sending: 'Versturen...',
