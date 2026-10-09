@@ -224,14 +224,16 @@ router.get('/:id/members', (req: Request, res: Response) => {
 
   // Build buddy group names from member first names (matches students list behavior)
   const buddyMemberships = db.prepare(`
-    SELECT bgm.student_id, bgm.buddy_group_id, s.first_name
+    SELECT bgm.student_id, bgm.buddy_group_id, s.first_name, s.last_name, sg.group_id, g.name AS group_name
     FROM buddy_group_members bgm
     JOIN students s ON s.id = bgm.student_id AND s.deleted_at IS NULL
-  `).all() as Array<{ student_id: number; buddy_group_id: number; first_name: string }>;
-  const buddyGroupNames = new Map<number, string[]>();
+    LEFT JOIN student_groups sg ON sg.student_id = s.id
+    LEFT JOIN groups g ON g.id = sg.group_id
+  `).all() as Array<{ student_id: number; buddy_group_id: number; first_name: string; last_name: string; group_id: number | null; group_name: string | null }>;
+  const buddyGroupMembers = new Map<number, typeof buddyMemberships>();
   for (const m of buddyMemberships) {
-    if (!buddyGroupNames.has(m.buddy_group_id)) buddyGroupNames.set(m.buddy_group_id, []);
-    buddyGroupNames.get(m.buddy_group_id)!.push(m.first_name);
+    if (!buddyGroupMembers.has(m.buddy_group_id)) buddyGroupMembers.set(m.buddy_group_id, []);
+    buddyGroupMembers.get(m.buddy_group_id)!.push(m);
   }
 
   let position = 0;
@@ -254,7 +256,13 @@ router.get('/:id/members', (req: Request, res: Response) => {
       invite_next: invite_next_since != null,
       queue_override: decisive ? { reason: decisive[0], at: decisive[1] } : null,
       buddy_group: buddy_group_id
-        ? { id: buddy_group_id, name: (buddyGroupNames.get(buddy_group_id) || []).join(' & ') }
+        ? {
+          id: buddy_group_id,
+          name: (buddyGroupMembers.get(buddy_group_id) || []).map(b => b.first_name).join(' & '),
+          buddies: (buddyGroupMembers.get(buddy_group_id) || [])
+            .filter(b => b.student_id !== m.id)
+            .map(b => ({ id: b.student_id, first_name: b.first_name, last_name: b.last_name, group_id: b.group_id, group_name: b.group_name })),
+        }
         : null,
     };
   });

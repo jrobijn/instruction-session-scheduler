@@ -14,6 +14,7 @@ export { CenteredPage, Page, PageHeader } from './Page';
 export { Popover } from './Popover';
 export { RadioCards } from './RadioCards';
 export { Row, Stack } from './Stack';
+export { SegmentedControl } from './SegmentedControl';
 export { Slider } from './Slider';
 export { ExpandIcon, SortHeader, Table } from './Table';
 export { Tab, TabList, TabPanel, Tabs } from './Tabs';

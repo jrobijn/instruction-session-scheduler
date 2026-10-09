@@ -37,6 +37,7 @@ Visual identity for a shooting association: steel/gunmetal neutrals, one blaze-o
 | Modals | `Dialog` (`open`, `onOpenChange`, `title`, `description?`, `footer`, `size`) — primary button last in footer; forms use `<form id>` + `<Button type="submit" form="id">` |
 | Confirm / errors | `useConfirm()` → `await confirm({ title, message, confirmLabel?, danger? })`; `useToast()` → `toast(message, tone?)` |
 | Forms | `Field` (`label`, `htmlFor`, `hint`, `error`; `split` for settings rows: label/hint left, control right, stacks when narrow, consecutive rows get dividers; `split="wide"` when the control is large, e.g. `RadioCards`) wrapping `Input`, `Select`, `Textarea`, `DateInput`, `ColorInput`; `Checkbox` (`label`, `description`, `card`); `RadioCards`; `Slider` |
+| Few-option switch | `SegmentedControl` (`value`, `onValueChange`, `options=[{ value, label }]`, `aria-label`) — single choice among a handful of short options that users flip between (view filters); use `Select` for long lists |
 | Messages | `Alert` (`tone`, `title?`, `action?`) |
 | Empty lists | `EmptyState` (`icon`, `title`, `description`, `action?`) |
 | Floating panels | `Popover` (`trigger`, `flush`, `align`); `Tooltip` (`content`) — replaces `title=` on interactive hints |
