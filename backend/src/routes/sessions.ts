@@ -375,76 +375,37 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     remainder--;
   }
 
-  // Get active students in queue order (longest waiting first)
-  // Filter by preferred_days matching the session's day of week
+  // Students in a timetable group with at least one active discipline (needed to confirm), in queue order
   const sessionDow = String(new Date(session.date + 'T00:00:00').getDay());
   const allEligibleStudents = db.prepare(`
-    SELECT s.*, ${QUEUE_COLUMNS_SQL} FROM students s
+    SELECT s.*, sg.group_id AS group_id, ${QUEUE_COLUMNS_SQL} FROM students s
     JOIN student_groups sg ON sg.student_id = s.id
     ${QUEUE_JOIN_SQL}
     WHERE s.active = 1
       AND s.deleted_at IS NULL
+      AND sg.group_id IN (SELECT group_id FROM timetable_groups WHERE timetable_id = ?)
+      AND EXISTS (
+        SELECT 1 FROM discipline_groups dg JOIN disciplines d ON d.id = dg.discipline_id
+        WHERE dg.group_id = sg.group_id AND d.active = 1
+      )
       AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
       AND (s.cooldown_until IS NULL OR date(s.cooldown_until) <= ?)
+      AND s.id NOT IN (SELECT student_id FROM invitations WHERE session_id = ? AND group_id IS NULL)
       AND s.id NOT IN (
         SELECT inv.student_id FROM invitations inv
         JOIN training_sessions ts ON ts.id = inv.session_id
         WHERE ts.date = ? AND inv.status NOT IN ('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled')
       )
     ORDER BY ${QUEUE_ORDER_SQL}, RANDOM()
-  `).all(sessionDow, session.date, session.date) as any[];
+  `).all(session.timetable_id, sessionDow, session.date, req.params.id, session.date) as any[];
 
-  // Load group memberships for all students
-  const allMemberships = db.prepare(
-    'SELECT sg.student_id, sg.group_id FROM student_groups sg'
-  ).all() as Array<{ student_id: number; group_id: number }>;
-  const groupByStudent = new Map<number, number>();
-  for (const m of allMemberships) {
-    groupByStudent.set(m.student_id, m.group_id);
-  }
-
-  // Load discipline-group associations to check which students have available disciplines
-  const allDisciplineGroups = db.prepare(
-    'SELECT dg.discipline_id, dg.group_id FROM discipline_groups dg JOIN disciplines d ON d.id = dg.discipline_id WHERE d.active = 1'
-  ).all() as Array<{ discipline_id: number; group_id: number }>;
-  const disciplineGroupIds = new Set<number>();
-  for (const dg of allDisciplineGroups) {
-    disciplineGroupIds.add(dg.group_id);
-  }
-
-  // Determine the timetable group IDs (the groups assigned to this timetable)
-  const timetableGroupIds = new Set(timetableGroups.map(tg => tg.group_id));
-
-  // For each student, check if they have a discipline available through their group
-  const studentHasDisciplines = (studentId: number): boolean => {
-    const gid = groupByStudent.get(studentId);
-    if (gid === undefined) return false;
-    return timetableGroupIds.has(gid) && disciplineGroupIds.has(gid);
-  };
-
-  // Assign each student to their group (students are in exactly one group)
-  const studentsByGroup = new Map<number, any[]>();
-  for (const gsc of groupSlotCounts) {
-    studentsByGroup.set(gsc.group_id, []);
-  }
-
-  const assignedStudents = new Set<number>();
-  const manualStudentIds = new Set(manualInvitations.map((mi: any) => mi.student_id as number));
-
+  const studentsByGroup = new Map<number, any[]>(groupSlotCounts.map(gsc => [gsc.group_id, []]));
   for (const student of allEligibleStudents) {
-    if (manualStudentIds.has(student.id)) continue;
-    const gid = groupByStudent.get(student.id);
-    if (gid === undefined || !timetableGroupIds.has(gid)) continue;
-
-    // Skip students with no available disciplines through their group
-    if (!studentHasDisciplines(student.id)) continue;
-
-    studentsByGroup.get(gid)!.push(student);
-    assignedStudents.add(student.id);
+    studentsByGroup.get(student.group_id)!.push(student);
   }
 
   // Check if there are any eligible students at all (manual students still count)
-  if (assignedStudents.size === 0 && manualInvitations.length === 0) {
+  if (allEligibleStudents.length === 0 && manualInvitations.length === 0) {
     res.status(400).json({ error: 'No eligible students found. Ensure students have group memberships with access to disciplines.' });
     return;
   }
@@ -633,13 +594,11 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
     // Second pass: fill any remaining slots with uninvited eligible students from any group.
     // For each remaining slot we pick a group at random (weighted by the group's timetable
     // percentage) and take the first uninvited candidate in its queue.
-    const overflowCandidates = allEligibleStudents.filter(s => !invitedStudentIds.has(s.id) && assignedStudents.has(s.id));
+    const overflowCandidates = allEligibleStudents.filter(s => !invitedStudentIds.has(s.id));
     const overflowQueues = new Map<number, any[]>();
     for (const student of overflowCandidates) {
-      const gid = groupByStudent.get(student.id);
-      if (gid === undefined) continue;
-      if (!overflowQueues.has(gid)) overflowQueues.set(gid, []);
-      overflowQueues.get(gid)!.push(student); // already queue-ordered
+      if (!overflowQueues.has(student.group_id)) overflowQueues.set(student.group_id, []);
+      overflowQueues.get(student.group_id)!.push(student); // already queue-ordered
     }
     const percentageByGroup = new Map<number, number>(timetableGroups.map(tg => [tg.group_id, tg.percentage]));
     let overflowRank = 0;
