@@ -579,11 +579,14 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   const withPreference = selected.filter(s => hasTimeslotPreference(s.id)).sort(byQueue);
   const withoutPreference = selected.filter(s => !hasTimeslotPreference(s.id)).sort(byQueue);
   const placed: any[] = [];
+  // Placing more students never frees room, so a student who failed once can't be placed later
+  const unplaceable = new Set<number>();
 
   // Phase 1: students with timeslot preferences; an unplaceable one is replaced by the next candidate of its group
   while (withPreference.length > 0) {
     const student = withPreference.shift()!;
     if (placeStudent(student.id)) { placed.push(student); continue; }
+    unplaceable.add(student.id);
     const groupId = contexts.get(student.id)!.groupId;
     contexts.delete(student.id);
     const replacement = remainingByGroup.get(groupId)!.shift();
@@ -595,13 +598,13 @@ router.post('/:id/generate-schedule', (req: Request, res: Response) => {
   // Phase 2: students without preferences fill the remaining spots
   for (const student of withoutPreference) {
     if (placeStudent(student.id)) placed.push(student);
-    else contexts.delete(student.id);
+    else { contexts.delete(student.id); unplaceable.add(student.id); }
   }
 
   // Phase 3 (overflow): fill any remaining spots with uninvited eligible students from any group.
   // For each pick a group is chosen at random (weighted by timetable percentage) and its first candidate is tried.
   const totalCapacity = capacity.reduce((sum: number, c: number) => sum + c, 0);
-  const overflowCandidates = allEligibleStudents.filter(s => !placedTimeslot.has(s.id));
+  const overflowCandidates = allEligibleStudents.filter(s => !placedTimeslot.has(s.id) && !unplaceable.has(s.id));
   const overflowQueues = new Map<number, any[]>();
   for (const student of overflowCandidates) {
     if (!overflowQueues.has(student.group_id)) overflowQueues.set(student.group_id, []);
