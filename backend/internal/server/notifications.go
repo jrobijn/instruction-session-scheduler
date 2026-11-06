@@ -1,0 +1,121 @@
+package server
+
+import (
+	"net/http"
+
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
+)
+
+func (s *Server) notificationRoutes() {
+	s.adminRoute("GET /api/notifications", func(w http.ResponseWriter, r *http.Request) error {
+		page := 1
+		if n, ok := jsParseInt(r.URL.Query().Get("page")); ok && n != 0 {
+			page = max(1, n)
+		}
+		limit := 20
+		if n, ok := jsParseInt(r.URL.Query().Get("limit")); ok && n != 0 {
+			limit = min(100, max(1, n))
+		}
+		offset := (page - 1) * limit
+
+		total, err := s.unreadOrTotal("SELECT COUNT(*) FROM notifications")
+		if err != nil {
+			return err
+		}
+		notifications, err := db.All(s.db, "SELECT * FROM notifications ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", limit, offset)
+		if err != nil {
+			return err
+		}
+		httpx.OK(w, map[string]any{"notifications": notifications, "total": total, "page": page, "limit": limit})
+		return nil
+	})
+
+	s.adminRoute("GET /api/notifications/unread-count", func(w http.ResponseWriter, r *http.Request) error {
+		count, err := s.unreadCount()
+		if err != nil {
+			return err
+		}
+		httpx.OK(w, map[string]int64{"count": count})
+		return nil
+	})
+
+	s.adminRoute("POST /api/notifications/{id}/read", func(w http.ResponseWriter, r *http.Request) error {
+		id, ok := jsParseInt(r.PathValue("id"))
+		if !ok {
+			httpx.Error(w, http.StatusBadRequest, "Invalid id")
+			return nil
+		}
+		if _, err := s.db.Exec("UPDATE notifications SET read = 1 WHERE id = ?", id); err != nil {
+			return err
+		}
+		count, err := s.unreadCount()
+		if err != nil {
+			return err
+		}
+		s.hub.Broadcast("notifications", "unread_count_updated", map[string]int64{"unread_count": count})
+		httpx.Success(w)
+		return nil
+	})
+
+	s.adminRoute("POST /api/notifications/read-all", func(w http.ResponseWriter, r *http.Request) error {
+		if _, err := s.db.Exec("UPDATE notifications SET read = 1 WHERE read = 0"); err != nil {
+			return err
+		}
+		s.hub.Broadcast("notifications", "unread_count_updated", map[string]int64{"unread_count": 0})
+		httpx.Success(w)
+		return nil
+	})
+}
+
+func (s *Server) unreadOrTotal(query string) (int64, error) {
+	var n int64
+	err := s.db.QueryRow(query).Scan(&n)
+	return n, err
+}
+
+func (s *Server) unreadCount() (int64, error) {
+	return s.unreadOrTotal("SELECT COUNT(*) FROM notifications WHERE read = 0")
+}
+
+// Notification is the input of createNotification in notifications.ts. Zero values are
+// stored as NULL (an empty string for StudentName), matching the `|| null` defaults there.
+type Notification struct {
+	Type              string
+	InvitationID      int64
+	SessionID         int64
+	StudentName       string
+	SessionDate       string
+	TimeslotStartTime string
+}
+
+// CreateNotification inserts a notification and broadcasts it to SSE listeners.
+// It logs instead of failing: notifications are a side effect of the caller's real work.
+func (s *Server) CreateNotification(n Notification) {
+	var invitationID, startTime any
+	if n.InvitationID != 0 {
+		invitationID = n.InvitationID
+	}
+	if n.TimeslotStartTime != "" {
+		startTime = n.TimeslotStartTime
+	}
+	res, err := s.db.Exec(`
+		INSERT INTO notifications (type, invitation_id, session_id, student_name, session_date, timeslot_start_time)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		n.Type, invitationID, n.SessionID, n.StudentName, n.SessionDate, startTime)
+	if err != nil {
+		logf("create notification %s for session %d: %v", n.Type, n.SessionID, err)
+		return
+	}
+	notification, err := db.Get(s.db, "SELECT * FROM notifications WHERE id = ?", lastID(res))
+	if err != nil {
+		logf("load notification: %v", err)
+		return
+	}
+	count, err := s.unreadCount()
+	if err != nil {
+		logf("count unread notifications: %v", err)
+		return
+	}
+	s.hub.Broadcast("notifications", "new_notification", map[string]any{"notification": notification, "unread_count": count})
+}

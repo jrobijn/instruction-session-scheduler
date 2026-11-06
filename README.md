@@ -27,8 +27,7 @@ A web application for scheduling instruction sessions at a sports club. Features
 ```bash
 cd backend
 cp .env.example .env     # Edit .env with your settings
-npm install
-npm run dev              # Starts on http://localhost:3001
+go run .                 # Starts on http://localhost:3001 (needs Go 1.26+)
 ```
 
 ### 2. Frontend
@@ -47,7 +46,7 @@ Open http://localhost:5173 and log in with the password set in `backend/.env` (d
 
 ### Environment Variables
 
-Edit `backend/.env`:
+Edit `backend/.env` (see [backend/README.md](backend/README.md) for all variables):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -58,10 +57,10 @@ Edit `backend/.env`:
 | `DB_PATH` | SQLite database file path | `./data.db` |
 | `SMTP_HOST` | SMTP server for sending emails | — |
 | `SMTP_PORT` | SMTP port | `587` |
-| `SMTP_SECURE` | Use TLS (true/false) | `false` |
+| `SMTP_SECURE` | Use TLS from the start (true) or STARTTLS (false) | `false` |
 | `SMTP_USER` | SMTP username | — |
 | `SMTP_PASS` | SMTP password | — |
-| `SMTP_FROM` | From address for emails | — |
+| `SMTP_FROM` | From address for emails | `SMTP_USER` |
 
 ### In-App Settings
 
@@ -155,7 +154,7 @@ There is no stored priority number; the queue is derived from invitation history
 
 ## Tech Stack
 
-- **Backend**: Node.js, Express, TypeScript (executed via tsx), SQLite (better-sqlite3, WAL mode), Nodemailer
+- **Backend**: Go (standard library HTTP server and SMTP client), SQLite via the pure-Go `modernc.org/sqlite` driver (WAL mode)
 - **Frontend**: React, TypeScript, Vite, React Router
 - **Database**: SQLite (file-based, no separate DB server needed)
 - **Real-Time**: Server-Sent Events (SSE) for live admin updates
@@ -178,7 +177,9 @@ docker run -p 3000:3000 \
   session-scheduler
 ```
 
-The app will be available at http://localhost:3000. In Docker, the frontend is built and served as static files from the backend — no separate frontend server is needed.
+The app will be available at http://localhost:3000. In Docker, the frontend is built and served as static files from the backend — no separate frontend server is needed. The image is a single static Go binary on Alpine (about 35 MB).
+
+To test the mail server settings without sending email: `docker run --rm -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... session-scheduler ./server -smtp-check`.
 
 ### Environment Variables
 
