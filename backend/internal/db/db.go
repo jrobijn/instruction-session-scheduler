@@ -14,6 +14,7 @@ import (
 
 type DB struct {
 	*sql.DB
+	path string
 }
 
 // Querier is satisfied by both *sql.DB and *sql.Tx.
@@ -40,28 +41,12 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, err
 	}
-	return &DB{sqlDB}, nil
-}
-
-// Initialize creates the current schema on an empty database and refuses to run on a
-// database that still needs the legacy migrations of the former TypeScript backend
-// (removed after commit 75f9869).
-func (d *DB) Initialize() error {
-	var tables int
-	if err := d.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='students'").Scan(&tables); err != nil {
-		return err
-	}
-	if tables > 0 {
-		if err := d.checkUpToDate(); err != nil {
-			return err
-		}
-	}
-	_, err := d.Exec(schema)
-	return err
+	return &DB{DB: sqlDB, path: path}, nil
 }
 
 // requiredColumns lists the most recently added columns per table; if any is missing, the
-// database predates the last TypeScript migrations.
+// database predates the last TypeScript migrations (removed after commit 75f9869). Only
+// checked on databases created before goose, see Migrate.
 var requiredColumns = map[string][]string{
 	"students":         {"cooldown_until", "deleted_at", "membership_id"},
 	"instructors":      {"deleted_at"},

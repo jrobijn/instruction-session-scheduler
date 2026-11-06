@@ -39,7 +39,13 @@ Environment variables (read from `.env` if present; real environment variables w
 
 ## Database
 
-The server creates the schema on an empty database. Databases from before the switch to Go must have been migrated by the last TypeScript release (git commit `75f9869`). The server refuses to start on an older one and says which column is missing; run that release on it once to migrate it.
+The schema is managed with [goose](https://github.com/pressly/goose) migrations in `internal/db/migrations/`, embedded in the binary. The server applies pending migrations on startup and records them in the `goose_db_version` table. `go run . -migrate` (or `./server -migrate` in the container) applies them and exits, without starting the server.
+
+Before applying migrations to a database that has data, the server writes a backup next to it as `<db>.bak-v<version>`. It refuses to start on a database that a newer build has migrated.
+
+To change the schema, add a new file `NNNNN_description.sql` with the next number, starting with `-- +goose Up`. Never edit a migration that has been released, because databases that already ran it won't run it again. To rebuild a table (needed to change a constraint or column type), turn foreign keys off with `PRAGMA foreign_keys` first. That pragma is ignored inside a transaction, so such a migration needs `-- +goose NO TRANSACTION`.
+
+`00001_init.sql` is the final schema of the TypeScript backend. Databases from before the switch to Go must have been migrated by the last TypeScript release (git commit `75f9869`). The server refuses to start on an older one and says which column is missing; run that release on it once to migrate it.
 
 ## Layout
 

@@ -24,6 +24,7 @@ import (
 
 func main() {
 	smtpCheck := flag.Bool("smtp-check", false, "connect to the SMTP server, report TLS details and test the login, then exit (sends no email)")
+	migrateOnly := flag.Bool("migrate", false, "apply pending database migrations, then exit (the server also applies them on startup)")
 	flag.Parse()
 	cfg := config.Load()
 	if *smtpCheck {
@@ -43,8 +44,12 @@ func main() {
 		log.Fatalf("open database %s: %v", cfg.DBPath, err)
 	}
 	defer database.Close()
-	if err := database.Initialize(); err != nil {
-		log.Fatalf("initialize database: %v", err)
+	if err := database.Migrate(context.Background()); err != nil {
+		log.Fatalf("migrate database %s: %v", cfg.DBPath, err)
+	}
+	if *migrateOnly {
+		log.Printf("database %s is up to date", cfg.DBPath)
+		return
 	}
 
 	mailer := email.New(email.Config{

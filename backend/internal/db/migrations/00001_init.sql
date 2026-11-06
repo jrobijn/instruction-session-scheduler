@@ -1,7 +1,11 @@
-package db
+-- The end state of the former TypeScript backend's database.ts after all of its migrations
+-- (last TypeScript commit 75f9869).
+--
+-- This is the only migration that uses IF NOT EXISTS / INSERT OR IGNORE: databases created
+-- before goose already have this schema, and running it on them must change nothing.
+-- Later migrations run exactly once, so they don't need these guards.
 
-// schema is the end state of database.ts after all of its migrations have run.
-const schema = `
+-- +goose Up
 CREATE TABLE IF NOT EXISTS students (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   first_name TEXT NOT NULL,
@@ -164,4 +168,3 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_expiry_minutes',
 INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_check_interval_minutes', '15');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('email_locale', 'en');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('timezone', 'Europe/Amsterdam');
-`
