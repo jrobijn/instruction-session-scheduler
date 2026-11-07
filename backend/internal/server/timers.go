@@ -1,0 +1,115 @@
+package server
+
+import (
+	"sync"
+	"time"
+
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
+)
+
+// expiryTimers holds one timer per invited invitation. Timer callbacks take the server lock, like handlers do.
+type expiryTimers struct {
+	mu     sync.Mutex
+	timers map[int64]*time.Timer
+}
+
+func (s *Server) scheduleInvitationExpiry(invitationID int64, at time.Time) {
+	s.cancelInvitationExpiry(invitationID)
+	t := s.timers
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var timer *time.Timer
+	timer = time.AfterFunc(max(0, time.Until(at)), func() {
+		t.mu.Lock()
+		current := t.timers[invitationID] == timer
+		if current {
+			delete(t.timers, invitationID)
+		}
+		t.mu.Unlock()
+		if !current { // cancelled or rescheduled after firing
+			return
+		}
+		s.locked(func() {
+			if err := s.processExpiredInvitation(invitationID); err != nil {
+				logf("Error processing expiry for invitation %d: %v", invitationID, err)
+			}
+		})
+	})
+	t.timers[invitationID] = timer
+}
+
+func (s *Server) cancelInvitationExpiry(invitationID int64) {
+	t := s.timers
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if timer, ok := t.timers[invitationID]; ok {
+		timer.Stop()
+		delete(t.timers, invitationID)
+	}
+}
+
+func (s *Server) clearAllTimers() {
+	t := s.timers
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for id, timer := range t.timers {
+		timer.Stop()
+		delete(t.timers, id)
+	}
+}
+
+// scheduleExpiryForInvitation (re)schedules the timer of an invited invitation.
+func (s *Server) scheduleExpiryForInvitation(invitationID int64) {
+	inv, err := db.Get(s.db, `
+		SELECT inv.invited_at, ts.date AS session_date, tslot.start_time AS timeslot_start_time
+		FROM invitations inv
+		JOIN training_sessions ts ON ts.id = inv.session_id
+		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
+		WHERE inv.id = ? AND inv.status = 'invited'`, invitationID)
+	if err != nil {
+		logf("schedule expiry for invitation %d: %v", invitationID, err)
+		return
+	}
+	if inv == nil {
+		return
+	}
+	timing := timingOf(inv, "session_date")
+	if deadline, ok := invitationDeadline(timing.InvitedAt, timing.SessionDate, timing.StartTime, s.expiryMinutes(), s.clubLocation()); ok {
+		s.scheduleInvitationExpiry(invitationID, deadline)
+	}
+}
+
+func (s *Server) cancelAllSessionTimers(sessionID any) error {
+	rows, err := db.All(s.db, "SELECT id FROM invitations WHERE session_id = ? AND status = 'invited'", sessionID)
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		s.cancelInvitationExpiry(toInt64(r["id"]))
+	}
+	return nil
+}
+
+// rehydrateTimers schedules timers for every pending invitation (startup, setting changes).
+func (s *Server) rehydrateTimers() {
+	s.clearAllTimers()
+	minutes, loc := s.expiryMinutes(), s.clubLocation()
+	pending, err := db.All(s.db, `
+		SELECT inv.id, inv.invited_at, ts.date AS session_date, tslot.start_time AS timeslot_start_time
+		FROM invitations inv
+		JOIN training_sessions ts ON ts.id = inv.session_id
+		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
+		WHERE inv.status = 'invited'
+			AND ts.status NOT IN ('completed', 'cancelled')`)
+	if err != nil {
+		logf("rehydrate timers: %v", err)
+		return
+	}
+	for _, inv := range pending {
+		timing := timingOf(inv, "session_date")
+		if deadline, ok := invitationDeadline(timing.InvitedAt, timing.SessionDate, timing.StartTime, minutes, loc); ok {
+			s.scheduleInvitationExpiry(toInt64(inv["id"]), deadline)
+		}
+	}
+	logf("Rehydrated %d invitation expiry timer(s)", len(pending))
+}

@@ -1,0 +1,182 @@
+package server
+
+import (
+	"database/sql"
+	"fmt"
+	"net/http"
+
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
+)
+
+func (s *Server) instructorRoutes() {
+	s.adminRoute("GET /api/instructors", func(w http.ResponseWriter, r *http.Request) error {
+		rows, err := db.All(s.db, "SELECT * FROM instructors WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC")
+		if err != nil {
+			return err
+		}
+		httpx.OK(w, rows)
+		return nil
+	})
+
+	s.adminRoute("GET /api/instructors/export", func(w http.ResponseWriter, r *http.Request) error {
+		rows, err := db.All(s.db, "SELECT first_name, last_name, email, active FROM instructors WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC")
+		if err != nil {
+			return err
+		}
+		lines := make([]string, len(rows))
+		for i, row := range rows {
+			lines[i] = csvRow(row["first_name"], row["last_name"], row["email"], row["active"])
+		}
+		writeCSV(w, "instructors.csv", "first_name,last_name,email,active", lines)
+		return nil
+	})
+
+	s.adminRoute("POST /api/instructors/import", func(w http.ResponseWriter, r *http.Request) error {
+		lines, ok := readCSVImport(w, r)
+		if !ok {
+			return nil
+		}
+		header := csvHeader(lines[0])
+		firstIdx, lastIdx, emailIdx := indexOf(header, "first_name"), indexOf(header, "last_name"), indexOf(header, "email")
+		if firstIdx == -1 || lastIdx == -1 || emailIdx == -1 {
+			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
+			return nil
+		}
+
+		result := importResult{Errors: []string{}}
+		err := s.db.InTx(func(tx *sql.Tx) error {
+			for i := 1; i < len(lines); i++ {
+				fields := parseCSVLine(lines[i])
+				first, last, email := field(fields, firstIdx), field(fields, lastIdx), field(fields, emailIdx)
+				if first == "" || last == "" || email == "" {
+					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: missing required fields", i+1))
+					result.Skipped++
+					continue
+				}
+				var id int64
+				var err error
+				switch scanErr := tx.QueryRow("SELECT id FROM instructors WHERE email = ? AND deleted_at IS NULL", email).Scan(&id); scanErr {
+				case nil:
+					_, err = tx.Exec("UPDATE instructors SET first_name = ?, last_name = ? WHERE id = ?", first, last, id)
+				case sql.ErrNoRows:
+					_, err = tx.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)", first, last, email)
+				default:
+					err = scanErr
+				}
+				if err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: %s", i+1, sqliteMessage(err)))
+					result.Skipped++
+					continue
+				}
+				result.Imported++
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		httpx.OK(w, result)
+		return nil
+	})
+
+	s.adminRoute("GET /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
+		row, err := db.Get(s.db, "SELECT * FROM instructors WHERE id = ? AND deleted_at IS NULL", r.PathValue("id"))
+		if err != nil {
+			return err
+		}
+		if row == nil {
+			httpx.Error(w, http.StatusNotFound, "Instructor not found")
+			return nil
+		}
+		httpx.OK(w, row)
+		return nil
+	})
+
+	s.adminRoute("POST /api/instructors", func(w http.ResponseWriter, r *http.Request) error {
+		b, ok := decodeBody(w, r)
+		if !ok {
+			return nil
+		}
+		if !truthy(b["first_name"]) || !truthy(b["last_name"]) || !truthy(b["email"]) {
+			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
+			return nil
+		}
+		res, err := s.db.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)",
+			arg(b["first_name"]), arg(b["last_name"]), arg(b["email"]))
+		if isUniqueErr(err) {
+			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		row, err := db.Get(s.db, "SELECT * FROM instructors WHERE id = ?", lastID(res))
+		if err != nil {
+			return err
+		}
+		httpx.JSON(w, http.StatusCreated, row)
+		return nil
+	})
+
+	s.adminRoute("PUT /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
+		b, ok := decodeBody(w, r)
+		if !ok {
+			return nil
+		}
+		id := r.PathValue("id")
+		if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id) {
+			httpx.Error(w, http.StatusNotFound, "Instructor not found")
+			return nil
+		}
+		_, err := s.db.Exec(`
+			UPDATE instructors SET
+				first_name = COALESCE(?, first_name),
+				last_name = COALESCE(?, last_name),
+				email = COALESCE(?, email),
+				active = COALESCE(?, active)
+			WHERE id = ?`,
+			arg(b["first_name"]), arg(b["last_name"]), arg(b["email"]), arg(b["active"]), id)
+		if isUniqueErr(err) {
+			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		row, err := db.Get(s.db, "SELECT * FROM instructors WHERE id = ?", id)
+		if err != nil {
+			return err
+		}
+		httpx.OK(w, row)
+		return nil
+	})
+
+	s.adminRoute("DELETE /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
+		id := r.PathValue("id")
+		if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id) {
+			httpx.Error(w, http.StatusNotFound, "Instructor not found")
+			return nil
+		}
+		// The instructor leaves every session that hasn't taken place, as if removed from each
+		// one; completed sessions are history and stay as they are.
+		slots, err := db.All(s.db, `
+			SELECT ss.id AS slot_id, ss.session_id FROM session_slots ss
+			JOIN training_sessions ts ON ts.id = ss.session_id
+			WHERE ss.instructor_id = ? AND ss.removed = 0 AND ts.status != 'completed'`, id)
+		if err != nil {
+			return err
+		}
+		for _, slot := range slots {
+			if _, err := s.removeSlot(toInt64(slot["session_id"]), toInt64(slot["slot_id"])); err != nil {
+				return err
+			}
+		}
+		// Soft-delete: mark as deleted and deactivate.
+		if _, err := s.db.Exec("UPDATE instructors SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id); err != nil {
+			return err
+		}
+		httpx.Success(w)
+		return nil
+	})
+}
