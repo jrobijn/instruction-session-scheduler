@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -56,7 +55,8 @@ func (s *Server) sessionRoutes() {
 		date := jsString(b["date"])
 		dow, valid := dayOfWeek(date)
 		if !valid {
-			return fmt.Errorf("invalid session date %q", date) // new Date() → NaN day_of_week fails NOT NULL in TS too
+			httpx.Error(w, http.StatusBadRequest, "Invalid date")
+			return nil
 		}
 		var notes any
 		if truthy(b["notes"]) {
@@ -88,6 +88,15 @@ func (s *Server) sessionRoutes() {
 			return err
 		}
 		id := r.PathValue("id")
+		var dow any
+		if date := b["date"]; date != nil {
+			d, valid := dayOfWeek(jsString(date))
+			if !valid {
+				httpx.Error(w, http.StatusBadRequest, "Invalid date")
+				return nil
+			}
+			dow = d
+		}
 		if tt, present := b["timetable_id"]; present && !jsStrictEqual(tt, session["timetable_id"]) {
 			switch session["status"] {
 			case "invitations_sent", "completed":
@@ -103,14 +112,20 @@ func (s *Server) sessionRoutes() {
 				}
 			}
 		}
-		if _, err := s.db.Exec(`
+		_, err = s.db.Exec(`
 			UPDATE training_sessions SET
 				date = COALESCE(?, date),
+				day_of_week = COALESCE(?, day_of_week),
 				notes = COALESCE(?, notes),
 				status = COALESCE(?, status),
 				timetable_id = COALESCE(?, timetable_id)
 			WHERE id = ?`,
-			arg(b["date"]), arg(b["notes"]), arg(b["status"]), arg(b["timetable_id"]), id); err != nil {
+			arg(b["date"]), dow, arg(b["notes"]), arg(b["status"]), arg(b["timetable_id"]), id)
+		if isUniqueErr(err) {
+			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
+			return nil
+		}
+		if err != nil {
 			return err
 		}
 		row, err := db.Get(s.db, "SELECT * FROM training_sessions WHERE id = ?", id)
@@ -460,8 +475,13 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) error 
 		}
 		timing := timingOf(inv, "")
 		timing.SessionDate = sessionDate
-		inv["status"] = effectiveStatus(timing, minutes, loc, now)
-		inv["expires_at"] = expiresAtISO(timing, minutes, loc)
+		status := effectiveStatus(timing, minutes, loc, now)
+		inv["status"] = status
+		// Like GET /api/invitations/{token}: a deadline only while the invitation is still open.
+		inv["expires_at"] = nil
+		if status == "invited" {
+			inv["expires_at"] = expiresAtISO(timing, minutes, loc)
+		}
 	}
 
 	session["instructors"] = instructors
@@ -525,49 +545,74 @@ func (s *Server) handleRemoveInstructor(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusNotFound, "Assignment not found")
 		return nil
 	}
-	affected, err := db.All(s.db, `
-		SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
-			tslot.start_time AS timeslot_start_time, d.name AS discipline_name
-		FROM invitations inv
-		JOIN students s ON s.id = inv.student_id
-		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
-		LEFT JOIN disciplines d ON d.id = inv.discipline_id
-		WHERE inv.slot_id = ?`, slotID)
+	cancelled, err := s.removeSlot(toInt64(session["id"]), slotID)
 	if err != nil {
 		return err
 	}
-	clubName, locale := s.clubName(), s.emailLocale()
+	httpx.OK(w, map[string]any{"success": true, "cancelled": cancelled})
+	return nil
+}
+
+// cancelInvitationSQL selects an invitation with the columns adminCancelInvitation needs.
+const cancelInvitationSQL = `
+	SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
+		tslot.start_time AS timeslot_start_time, d.name AS discipline_name, ts.date AS session_date
+	FROM invitations inv
+	JOIN students s ON s.id = inv.student_id
+	JOIN timeslots tslot ON tslot.id = inv.timeslot_id
+	JOIN training_sessions ts ON ts.id = inv.session_id
+	LEFT JOIN disciplines d ON d.id = inv.discipline_id`
+
+// adminCancelInvitation cancels an invitation on the admin's behalf: its expiry timer stops,
+// the student's invitation page updates and, if the invitation was emailed, the student is
+// told. inv is a row selected with cancelInvitationSQL. Session-wide broadcasts are left to
+// the caller, which may cancel several invitations at once.
+func (s *Server) adminCancelInvitation(inv map[string]any) error {
+	if _, err := s.db.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?", inv["id"]); err != nil {
+		return err
+	}
+	s.cancelInvitationExpiry(toInt64(inv["id"]))
+	s.broadcastInvitation(str(inv, "token"), "admin_cancelled")
+	if truthy(inv["email_sent"]) {
+		s.mailer.SendAdminCancellation(email.SessionParams{
+			To: str(inv, "student_email"), StudentName: str(inv, "student_name"), Date: str(inv, "session_date"),
+			StartTime: str(inv, "timeslot_start_time"), DisciplineName: str(inv, "discipline_name"),
+			ClubName: s.clubName(), Locale: s.emailLocale(),
+		})
+	}
+	return nil
+}
+
+// removeSlot takes an instructor's slot out of a session: active invitations on it are
+// admin-cancelled, unsent ones deleted, and older ones kept as history. It returns the number
+// of cancelled invitations.
+func (s *Server) removeSlot(sessionID int64, slotID int64) (int, error) {
+	affected, err := db.All(s.db, cancelInvitationSQL+" WHERE inv.slot_id = ?", slotID)
+	if err != nil {
+		return 0, err
+	}
 	cancelled := 0
 	for _, inv := range affected {
 		switch inv["status"] {
 		case "invited", "confirmed":
-			// Active invitations are admin-cancelled and the student is told.
 			cancelled++
-			if _, err := s.db.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?", inv["id"]); err != nil {
-				return err
-			}
-			s.cancelInvitationExpiry(toInt64(inv["id"]))
-			s.broadcastInvitation(str(inv, "token"), "admin_cancelled")
-			if truthy(inv["email_sent"]) {
-				s.mailer.SendAdminCancellation(email.SessionParams{
-					To: str(inv, "student_email"), StudentName: str(inv, "student_name"), Date: str(session, "date"),
-					StartTime: str(inv, "timeslot_start_time"), DisciplineName: str(inv, "discipline_name"), ClubName: clubName, Locale: locale,
-				})
+			if err := s.adminCancelInvitation(inv); err != nil {
+				return 0, err
 			}
 		case "scheduled":
 			// Not sent yet: just delete.
 			if _, err := s.db.Exec("DELETE FROM invitations WHERE id = ?", inv["id"]); err != nil {
-				return err
+				return 0, err
 			}
 		}
 		// Other statuses are history and stay linked to the slot.
 	}
 	if _, err := s.db.Exec("UPDATE session_slots SET removed = 1 WHERE id = ?", slotID); err != nil {
-		return err
+		return 0, err
 	}
-	httpx.OK(w, map[string]any{"success": true, "cancelled": cancelled})
-	s.hub.BroadcastSession(toInt64(session["id"]), "reload", map[string]any{})
-	return nil
+	s.hub.BroadcastSession(sessionID, "reload", map[string]any{})
+	s.broadcastSessionCounts(sessionID)
+	return cancelled, nil
 }
 
 func (s *Server) handleReplaceInstructor(w http.ResponseWriter, r *http.Request) error {
@@ -745,15 +790,7 @@ func (s *Server) handleAdminCancelInvitation(w http.ResponseWriter, r *http.Requ
 		httpx.Error(w, http.StatusBadRequest, "Session already completed")
 		return nil
 	}
-	inv, err := db.Get(s.db, `
-		SELECT inv.*, s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
-			tslot.start_time AS timeslot_start_time,
-			d.name AS discipline_name
-		FROM invitations inv
-		JOIN students s ON s.id = inv.student_id
-		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
-		LEFT JOIN disciplines d ON d.id = inv.discipline_id
-		WHERE inv.id = ? AND inv.session_id = ?`, r.PathValue("invitationId"), r.PathValue("id"))
+	inv, err := db.Get(s.db, cancelInvitationSQL+" WHERE inv.id = ? AND inv.session_id = ?", r.PathValue("invitationId"), r.PathValue("id"))
 	if err != nil {
 		return err
 	}
@@ -767,20 +804,11 @@ func (s *Server) handleAdminCancelInvitation(w http.ResponseWriter, r *http.Requ
 		return nil
 	}
 	invID, sessionID := toInt64(inv["id"]), toInt64(session["id"])
-	if _, err := s.db.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?", invID); err != nil {
+	if err := s.adminCancelInvitation(inv); err != nil {
 		return err
 	}
-	s.cancelInvitationExpiry(invID)
 	s.hub.BroadcastSession(sessionID, "invitation_updated", map[string]any{"id": invID, "status": "admin_cancelled"})
-	s.broadcastInvitation(str(inv, "token"), "admin_cancelled")
 	s.broadcastSessionCounts(sessionID)
-	if truthy(inv["email_sent"]) {
-		s.mailer.SendAdminCancellation(email.SessionParams{
-			To: str(inv, "student_email"), StudentName: str(inv, "student_name"), Date: str(session, "date"),
-			StartTime: str(inv, "timeslot_start_time"), DisciplineName: str(inv, "discipline_name"),
-			ClubName: s.clubName(), Locale: s.emailLocale(),
-		})
-	}
 	httpx.Success(w)
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -186,17 +187,29 @@ func (s *Server) studentRoutes() {
 			return nil
 		}
 		id := r.PathValue("id")
-		err := s.db.InTx(func(tx *sql.Tx) error {
-			// Cancel any active (invited/scheduled) invitations for this student.
-			if _, err := tx.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE student_id = ? AND status IN ('invited', 'scheduled')", id); err != nil {
-				return err
-			}
-			// Soft-delete: mark as deleted and deactivate.
-			_, err := tx.Exec("UPDATE students SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id)
-			return err
-		})
+		// Open invitations for sessions that haven't taken place are admin-cancelled, as if
+		// the admin cancelled each one; completed sessions are history and stay as they are.
+		open, err := db.All(s.db, cancelInvitationSQL+`
+			WHERE inv.student_id = ? AND inv.status IN ('scheduled', 'invited', 'confirmed') AND ts.status != 'completed'`, id)
 		if err != nil {
 			return err
+		}
+		var sessions []int64
+		for _, inv := range open {
+			if err := s.adminCancelInvitation(inv); err != nil {
+				return err
+			}
+			if sid := toInt64(inv["session_id"]); !slices.Contains(sessions, sid) {
+				sessions = append(sessions, sid)
+			}
+		}
+		// Soft-delete: mark as deleted and deactivate.
+		if _, err := s.db.Exec("UPDATE students SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id); err != nil {
+			return err
+		}
+		for _, sid := range sessions {
+			s.hub.BroadcastSession(sid, "reload", map[string]any{})
+			s.broadcastSessionCounts(sid)
 		}
 		httpx.Success(w)
 		return nil
@@ -245,19 +258,25 @@ func (s *Server) studentRoutes() {
 		for _, t := range all {
 			allIDs[float64(toInt64(t["id"]))] = true
 		}
+		// Keep only ids of this timetable's timeslots, once each, in the order sent. String ids
+		// never match (Set.has() in the TS version is strict).
+		var selected []float64
+		seen := map[float64]bool{}
+		for _, tsID := range timeslotIDs {
+			if n, isNum := tsID.(float64); isNum && allIDs[n] && !seen[n] {
+				seen[n] = true
+				selected = append(selected, n)
+			}
+		}
 		err = s.db.InTx(func(tx *sql.Tx) error {
 			if _, err := tx.Exec("DELETE FROM student_preferred_timeslots WHERE student_id = ? AND timetable_id = ?", id, timetableID); err != nil {
 				return err
 			}
 			// Selecting every timeslot is stored as no preference (= all).
-			if len(timeslotIDs) >= len(allIDs) {
+			if len(selected) >= len(allIDs) {
 				return nil
 			}
-			for _, tsID := range timeslotIDs {
-				n, isNum := tsID.(float64) // Set.has() is strict: string ids never match
-				if !isNum || !allIDs[n] {
-					continue
-				}
+			for _, n := range selected {
 				if _, err := tx.Exec("INSERT INTO student_preferred_timeslots (student_id, timeslot_id, timetable_id) VALUES (?, ?, ?)", id, arg(n), timetableID); err != nil {
 					return err
 				}

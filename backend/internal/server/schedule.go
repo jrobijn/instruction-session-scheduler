@@ -93,6 +93,10 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	if !ok || err != nil {
 		return err
 	}
+	if st := session["status"]; st != "draft" && st != "scheduled" {
+		httpx.Error(w, http.StatusBadRequest, "A schedule can only be generated before invitations are sent")
+		return nil
+	}
 	id := r.PathValue("id")
 	sessionID := toInt64(session["id"])
 	timetableID := session["timetable_id"]
@@ -119,12 +123,8 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	totalSlots := len(timeslots) * int(instructorCount)
 
 	// Manually-added invitations (group_id IS NULL) are kept; auto-generated ones are redone.
-	// As in the TS version this delete is not undone by the validation errors below.
 	manual, err := db.All(s.db, "SELECT * FROM invitations WHERE session_id = ? AND group_id IS NULL", id)
 	if err != nil {
-		return err
-	}
-	if _, err := s.db.Exec("DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL", id); err != nil {
 		return err
 	}
 	availableSlots := totalSlots - len(manual)
@@ -169,16 +169,13 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		remainder--
 	}
 
-	// Students of the timetable's groups that have an active discipline, in queue order.
+	// Students of the timetable's groups that have an active discipline.
 	sessionDate := str(session, "date")
 	dow := "NaN"
 	if d, ok := dayOfWeek(sessionDate); ok {
 		dow = strconv.Itoa(d)
 	}
-	rows, err := db.All(s.db, `
-		SELECT s.*, sg.group_id AS group_id, `+queue.ColumnsSQL+` FROM students s
-		JOIN student_groups sg ON sg.student_id = s.id
-		`+queue.JoinSQL+`
+	eligibleWhere := `
 		WHERE s.active = 1
 			AND s.deleted_at IS NULL
 			AND sg.group_id IN (SELECT group_id FROM timetable_groups WHERE timetable_id = ?)
@@ -192,9 +189,34 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 			AND s.id NOT IN (
 				SELECT inv.student_id FROM invitations inv
 				JOIN training_sessions ts ON ts.id = inv.session_id
-				WHERE ts.date = ? AND inv.status NOT IN `+terminalStatuses+`
-			)
-		ORDER BY `+queue.OrderSQL, timetableID, dow, sessionDate, id, sessionDate)
+				WHERE ts.date = ? AND inv.status NOT IN ` + terminalStatuses + `
+					AND NOT (inv.session_id = ? AND inv.group_id IS NOT NULL) -- auto-generated ones are redone
+			)`
+	eligibleArgs := []any{timetableID, dow, sessionDate, id, sessionDate, id}
+
+	// Every check that can fail runs before the current schedule is touched, so a failed
+	// regeneration leaves it in place.
+	if len(manual) == 0 {
+		var n int64
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM students s JOIN student_groups sg ON sg.student_id = s.id"+eligibleWhere, eligibleArgs...).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			httpx.Error(w, http.StatusBadRequest, "No eligible students found. Ensure students have group memberships with access to disciplines.")
+			return nil
+		}
+	}
+
+	// The auto-generated invitations go before the queue is read: as counted invitations they
+	// would otherwise make everyone in the current schedule look like they just had a turn.
+	if _, err := s.db.Exec("DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL", id); err != nil {
+		return err
+	}
+	rows, err := db.All(s.db, `
+		SELECT s.*, sg.group_id AS group_id, `+queue.ColumnsSQL+` FROM students s
+		JOIN student_groups sg ON sg.student_id = s.id
+		`+queue.JoinSQL+eligibleWhere+`
+		ORDER BY `+queue.OrderSQL, eligibleArgs...)
 	if err != nil {
 		return err
 	}
@@ -211,11 +233,6 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	for _, st := range eligible {
 		gid := toInt64(st["group_id"])
 		studentsByGroup[gid] = append(studentsByGroup[gid], st)
-	}
-
-	if len(eligible) == 0 && len(manual) == 0 {
-		httpx.Error(w, http.StatusBadRequest, "No eligible students found. Ensure students have group memberships with access to disciplines.")
-		return nil
 	}
 
 	instructors, err := db.All(s.db, `

@@ -92,9 +92,12 @@ type Notification struct {
 // CreateNotification inserts a notification and broadcasts it to SSE listeners.
 // It logs instead of failing: notifications are a side effect of the caller's real work.
 func (s *Server) CreateNotification(n Notification) {
-	var invitationID, startTime any
+	var invitationID, sessionID, startTime any
 	if n.InvitationID != 0 {
 		invitationID = n.InvitationID
+	}
+	if n.SessionID != 0 {
+		sessionID = n.SessionID
 	}
 	if n.TimeslotStartTime != "" {
 		startTime = n.TimeslotStartTime
@@ -102,7 +105,7 @@ func (s *Server) CreateNotification(n Notification) {
 	res, err := s.db.Exec(`
 		INSERT INTO notifications (type, invitation_id, session_id, student_name, session_date, timeslot_start_time)
 		VALUES (?, ?, ?, ?, ?, ?)`,
-		n.Type, invitationID, n.SessionID, n.StudentName, n.SessionDate, startTime)
+		n.Type, invitationID, sessionID, n.StudentName, n.SessionDate, startTime)
 	if err != nil {
 		logf("create notification %s for session %d: %v", n.Type, n.SessionID, err)
 		return

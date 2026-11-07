@@ -158,6 +158,20 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
+		// The instructor leaves every session that hasn't taken place, as if removed from each
+		// one; completed sessions are history and stay as they are.
+		slots, err := db.All(s.db, `
+			SELECT ss.id AS slot_id, ss.session_id FROM session_slots ss
+			JOIN training_sessions ts ON ts.id = ss.session_id
+			WHERE ss.instructor_id = ? AND ss.removed = 0 AND ts.status != 'completed'`, id)
+		if err != nil {
+			return err
+		}
+		for _, slot := range slots {
+			if _, err := s.removeSlot(toInt64(slot["session_id"]), toInt64(slot["slot_id"])); err != nil {
+				return err
+			}
+		}
 		// Soft-delete: mark as deleted and deactivate.
 		if _, err := s.db.Exec("UPDATE instructors SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id); err != nil {
 			return err
