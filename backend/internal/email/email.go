@@ -47,6 +47,12 @@ func New(cfg Config) *Mailer {
 	return m
 }
 
+// NewCapturing returns a Mailer that hands every email to capture instead of sending or
+// logging it. It is meant for tests of packages that send email.
+func NewCapturing(cfg Config, capture func(to, subject, text, html string)) *Mailer {
+	return &Mailer{cfg: cfg, capture: capture}
+}
+
 // deliver sends in the background, like the TS version whose sendMail callback only logs
 // failures: callers never see SMTP errors. Emails go out one after another.
 func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []string) {
