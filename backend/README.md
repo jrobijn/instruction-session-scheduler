@@ -13,14 +13,15 @@ go run .                 # http://localhost:3001
 go test ./...
 ```
 
-The frontend dev server (`cd frontend && npm run dev`) talks to it on port 3001.
+The frontend dev server (`cd frontend && npm run dev`) proxies `/api` to it on port 3001, so the
+browser sees a single origin in development just as in production.
 
 Environment variables (read from `.env` if present; real environment variables win):
 
 | Variable | Notes | Default |
 |---|---|---|
 | `PORT` | HTTP port | `3001` |
-| `FRONTEND_URL` | Allowed CORS origin and base URL for links in emails | `http://localhost:5173` |
+| `FRONTEND_URL` | Base URL for links in emails | `http://localhost:5173` |
 | `ADMIN_PASSWORD` | Admin login password | *(required)* |
 | `JWT_SECRET` | Signing key for the login cookie | `ADMIN_PASSWORD` |
 | `DB_PATH` | SQLite database file, relative to the working directory | `data.db` |

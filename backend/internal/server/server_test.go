@@ -93,29 +93,6 @@ func TestHealth(t *testing.T) {
 	}
 }
 
-func TestCORS(t *testing.T) {
-	e := newTestEnv(t)
-	req := httptest.NewRequest(http.MethodOptions, "/api/students", nil)
-	req.Header.Set("Origin", "http://frontend.test")
-	req.Header.Set("Access-Control-Request-Method", "POST")
-	req.Header.Set("Access-Control-Request-Headers", "content-type")
-	rec := httptest.NewRecorder()
-	e.handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("preflight status = %d", rec.Code)
-	}
-	h := rec.Header()
-	if h.Get("Access-Control-Allow-Origin") != "http://frontend.test" || h.Get("Access-Control-Allow-Credentials") != "true" ||
-		h.Get("Access-Control-Allow-Headers") != "content-type" || !strings.Contains(h.Get("Access-Control-Allow-Methods"), "POST") {
-		t.Fatalf("preflight headers = %v", h)
-	}
-
-	res := e.public(http.MethodGet, "/api/health", nil)
-	if res.rec.Header().Get("Access-Control-Allow-Origin") != "http://frontend.test" {
-		t.Fatal("CORS header missing on normal responses")
-	}
-}
-
 func TestStaticFiles(t *testing.T) {
 	e := newTestEnv(t)
 	dir := e.srv.cfg.PublicDir

@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 export { API_BASE };
 
 let authErrorCallback: (() => void) | null = null;
@@ -9,7 +9,7 @@ export function onAuthError(cb: () => void) {
 
 async function request(path: string, options: RequestInit = {}): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as Record<string, string>) };
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' });
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (res.status === 401 || res.status === 403) {
     authErrorCallback?.();
   }
@@ -19,7 +19,7 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
 }
 
 async function requestCsv(path: string): Promise<string> {
-  const res = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
+  const res = await fetch(`${API_BASE}${path}`);
   if (res.status === 401 || res.status === 403) {
     authErrorCallback?.();
   }

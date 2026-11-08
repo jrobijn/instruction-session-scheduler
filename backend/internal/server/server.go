@@ -66,7 +66,7 @@ func (s *Server) locked(fn func()) {
 }
 
 func (s *Server) Handler() http.Handler {
-	return httpx.CORS(s.cfg.FrontendURL, s.mux)
+	return s.mux
 }
 
 func (s *Server) routes() {

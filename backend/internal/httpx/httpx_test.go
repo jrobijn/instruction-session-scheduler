@@ -41,37 +41,3 @@ func TestDecode(t *testing.T) {
 		t.Fatal("body over 1 MiB accepted")
 	}
 }
-
-func TestPathInt64(t *testing.T) {
-	mux := http.NewServeMux()
-	var got int64
-	var ok bool
-	mux.HandleFunc("/x/{id}", func(_ http.ResponseWriter, r *http.Request) { got, ok = PathInt64(r, "id") })
-	for path, want := range map[string]bool{"/x/42": true, "/x/abc": false} {
-		mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
-		if ok != want || (ok && got != 42) {
-			t.Errorf("%s: %d, %v", path, got, ok)
-		}
-	}
-}
-
-func TestCORS(t *testing.T) {
-	var called bool
-	h := CORS("http://app.test", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = true }))
-
-	// A plain OPTIONS request (no preflight header) goes to the handler.
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/", nil))
-	if !called || rec.Header().Get("Access-Control-Allow-Origin") != "http://app.test" {
-		t.Fatal("plain OPTIONS should reach the handler with CORS headers")
-	}
-
-	called = false
-	req := httptest.NewRequest(http.MethodOptions, "/", nil)
-	req.Header.Set("Access-Control-Request-Method", "PUT")
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if called || rec.Code != http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Headers") != "" {
-		t.Fatalf("preflight: called %v, code %d, headers %v", called, rec.Code, rec.Header())
-	}
-}

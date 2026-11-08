@@ -9,7 +9,6 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 COPY frontend/ ./
-ENV VITE_API_BASE=/api
 RUN npm run build
 
 # Stage 2: Build the Go backend (pure Go SQLite driver, so no cgo toolchain is needed)

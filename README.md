@@ -35,7 +35,7 @@ go run .                 # Starts on http://localhost:3001 (needs Go 1.26+)
 ```bash
 cd frontend
 npm install
-npm run dev              # Starts on http://localhost:5173
+npm run dev              # Starts on http://localhost:5173, proxies /api to the backend
 ```
 
 ### 3. Login
@@ -51,7 +51,7 @@ Edit `backend/.env` (see [backend/README.md](backend/README.md) for all variable
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | Backend port | `3001` |
-| `FRONTEND_URL` | Frontend URL for CORS and email links | `http://localhost:5173` |
+| `FRONTEND_URL` | Frontend URL for email links | `http://localhost:5173` |
 | `ADMIN_PASSWORD` | Password for admin login | *(required)* |
 | `JWT_SECRET` | JWT signing key | Falls back to `ADMIN_PASSWORD` |
 | `DB_PATH` | SQLite database file path | `./data.db` |

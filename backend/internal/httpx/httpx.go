@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strconv"
 )
 
 func JSON(w http.ResponseWriter, status int, v any) {
@@ -38,31 +37,4 @@ func Decode(r *http.Request, v any) error {
 		return nil
 	}
 	return err
-}
-
-// PathInt64 parses a numeric path value; ok is false if it is missing or not a number.
-func PathInt64(r *http.Request, name string) (int64, bool) {
-	n, err := strconv.ParseInt(r.PathValue(name), 10, 64)
-	return n, err == nil
-}
-
-// CORS mirrors the `cors({ origin, credentials: true })` configuration of the TS backend.
-func CORS(origin string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("Access-Control-Allow-Origin", origin)
-		h.Set("Access-Control-Allow-Credentials", "true")
-		h.Add("Vary", "Origin")
-		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
-			h.Set("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE")
-			if reqHeaders := r.Header.Get("Access-Control-Request-Headers"); reqHeaders != "" {
-				h.Set("Access-Control-Allow-Headers", reqHeaders)
-				h.Add("Vary", "Access-Control-Request-Headers")
-			}
-			h.Set("Content-Length", "0")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

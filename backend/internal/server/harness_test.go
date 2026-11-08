@@ -2,7 +2,7 @@ package server
 
 // Test harness for the server package: every test gets its own migrated SQLite database and
 // a Server behind its real HTTP handler. Fixtures are inserted with SQL so tests state exactly
-// the rows they depend on; requests go through the full stack (CORS, auth, routing, handlers).
+// the rows they depend on; requests go through the full stack (auth, routing, handlers).
 
 import (
 	"bytes"
