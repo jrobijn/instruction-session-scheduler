@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
@@ -33,11 +34,11 @@ type NewNotification struct {
 func (s *Server) notificationRoutes() {
 	s.adminRoute("GET /api/notifications", func(w http.ResponseWriter, r *http.Request) error {
 		page := 1
-		if n, ok := jsParseInt(r.URL.Query().Get("page")); ok && n != 0 {
+		if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n != 0 {
 			page = max(1, n)
 		}
 		limit := 20
-		if n, ok := jsParseInt(r.URL.Query().Get("limit")); ok && n != 0 {
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n != 0 {
 			limit = min(100, max(1, n))
 		}
 		offset := (page - 1) * limit
@@ -68,8 +69,8 @@ func (s *Server) notificationRoutes() {
 	})
 
 	s.adminRoute("POST /api/notifications/{id}/read", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok := jsParseInt(r.PathValue("id"))
-		if !ok {
+		id, err := strconv.Atoi(r.PathValue("id"))
+		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "Invalid id")
 			return nil
 		}

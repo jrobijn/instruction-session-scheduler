@@ -147,15 +147,6 @@ func TestDayOfWeek(t *testing.T) {
 	}
 }
 
-func TestJSONMinutes(t *testing.T) {
-	if got := jsonMinutes(120); got != int64(120) {
-		t.Errorf("jsonMinutes(120) = %#v", got)
-	}
-	if got := jsonMinutes(1.5); got != 1.5 {
-		t.Errorf("jsonMinutes(1.5) = %#v", got)
-	}
-}
-
 func TestExpiryMinutesSetting(t *testing.T) {
 	e := newTestEnv(t)
 	for value, want := range map[string]float64{"120": 120, " 30 ": 30, "1.5": 1.5, "abc": 0, "NaN": 0, "": 120 /* empty falls back to the default */} {

@@ -7,35 +7,6 @@ import (
 
 // The helpers below mimic JavaScript semantics of the former TS backend; these tables pin them.
 
-func TestJSString(t *testing.T) {
-	for _, tc := range []struct {
-		in   any
-		want string
-	}{
-		{nil, "null"}, {"s", "s"}, {true, "true"}, {1.5, "1.5"}, {100.0, "100"}, {int64(7), "7"},
-		{[]any{1.0, nil, "x"}, "1,,x"}, {map[string]any{}, "[object Object]"},
-	} {
-		if got := jsString(tc.in); got != tc.want {
-			t.Errorf("jsString(%#v) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestJSParseInt(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		want int
-		ok   bool
-	}{
-		{"42", 42, true}, {" 7 ", 7, true}, {"12abc", 12, true}, {"-3", -3, true}, {"+4", 4, true},
-		{"", 0, false}, {"abc", 0, false}, {"-", 0, false}, {"3.9", 3, true},
-	} {
-		if got, ok := jsParseInt(tc.in); got != tc.want || ok != tc.ok {
-			t.Errorf("jsParseInt(%q) = %d, %v; want %d, %v", tc.in, got, ok, tc.want, tc.ok)
-		}
-	}
-}
-
 func TestSessionSameTimetable(t *testing.T) {
 	zero, three, four := int64(0), int64(3), int64(4)
 	for _, tc := range []struct {
@@ -68,15 +39,15 @@ func TestPreferredDays(t *testing.T) {
 	all := "0|1|2|3|4|5|6"
 	for _, tc := range []struct {
 		student, club string
-		want          []any // nil = covers all club days
+		want          []int // nil = covers all club days
 	}{
 		{all, all, nil},
-		{"1|3", all, []any{1.0, 3.0}},
-		{"1|3", "1|3", nil},          // every club day
-		{"1|3|5", "1|3", nil},        // more than the club days
-		{"1|6", "1|2|3", []any{1.0}}, // non-club days are dropped
+		{"1|3", all, []int{1, 3}},
+		{"1|3", "1|3", nil},        // every club day
+		{"1|3|5", "1|3", nil},      // more than the club days
+		{"1|6", "1|2|3", []int{1}}, // non-club days are dropped
 		{"", all, nil},
-		{" 1 |x", all, []any{1.0}}, // NaN entries are not club days
+		{" 1 |x", all, []int{1}}, // entries that are not numbers are ignored
 	} {
 		got := preferredDays(tc.student, tc.club)
 		if len(got) != len(tc.want) || (got == nil) != (tc.want == nil) {
@@ -89,19 +60,10 @@ func TestPreferredDays(t *testing.T) {
 			}
 		}
 	}
-	if nilIfEmpty(nil) != nil || nilIfEmpty([]any{}) == nil {
-		t.Error("nilIfEmpty")
-	}
 }
 
 func TestSQLiteHelpers(t *testing.T) {
 	err := errors.New("constraint failed: UNIQUE constraint failed: students.email (2067)")
-	if got := sqliteMessage(err); got != "UNIQUE constraint failed: students.email" {
-		t.Errorf("sqliteMessage = %q", got)
-	}
-	if got := sqliteMessage(errors.New("no such table: x")); got != "no such table: x" {
-		t.Errorf("sqliteMessage passthrough = %q", got)
-	}
 	if !isUniqueErr(err) || isUniqueErr(nil) || isUniqueErr(errors.New("FOREIGN KEY constraint failed")) {
 		t.Error("isUniqueErr")
 	}
@@ -111,8 +73,8 @@ func TestSQLiteHelpers(t *testing.T) {
 }
 
 func TestMarshalJS(t *testing.T) {
-	if got := marshalJS(map[string]any{"html": "<b>&</b>"}); got != `{"html":"<b>&</b>"}` {
-		t.Errorf("marshalJS = %s", got)
+	if got := encodeJSON(map[string]any{"html": "<b>&</b>"}); got != `{"html":"<b>&</b>"}` {
+		t.Errorf("encodeJSON = %s", got)
 	}
 }
 

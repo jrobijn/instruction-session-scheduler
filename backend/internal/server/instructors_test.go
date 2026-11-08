@@ -130,3 +130,17 @@ func TestInstructorImportExport(t *testing.T) {
 	e.admin(http.MethodPost, "/api/instructors/import", map[string]any{"csv": "name\nx"}).
 		wantError(http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
 }
+
+// A soft-deleted instructor's email stays taken; importing it again is a row error.
+func TestImportInstructorWithDeletedEmail(t *testing.T) {
+	e := newTestEnv(t)
+	id := e.instructor("Gone")
+	addr := e.row("SELECT email FROM instructors WHERE id = ?", id)["email"].(string)
+	e.admin(http.MethodDelete, fmt.Sprintf("/api/instructors/%d", id), nil).status(http.StatusOK)
+
+	res := e.admin(http.MethodPost, "/api/instructors/import", map[string]any{"csv": "first_name,last_name,email\nIda,Back," + addr + "\nNew,One,new@example.test"}).
+		status(http.StatusOK).object()
+	if res["imported"] != 1.0 || res["skipped"] != 1.0 || fmt.Sprint(res["errors"]) != "[Row 2: An instructor with this email already exists]" {
+		t.Fatalf("import = %v", res)
+	}
+}

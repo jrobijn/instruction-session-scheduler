@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
@@ -49,7 +50,7 @@ func (s *Server) instructorRoutes() {
 		}
 		lines := make([]string, len(instructors))
 		for i, in := range instructors {
-			lines[i] = csvRow(in.FirstName, in.LastName, in.Email, in.Active)
+			lines[i] = csvRow(in.FirstName, in.LastName, in.Email, strconv.FormatInt(in.Active, 10))
 		}
 		writeCSV(w, "instructors.csv", "first_name,last_name,email,active", lines)
 		return nil
@@ -87,10 +88,13 @@ func (s *Server) instructorRoutes() {
 				default:
 					err = scanErr
 				}
-				if err != nil {
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: %s", i+1, sqliteMessage(err)))
+				if isUniqueErr(err) { // the email belongs to a deleted instructor
+					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: An instructor with this email already exists", i+1))
 					result.Skipped++
 					continue
+				}
+				if err != nil {
+					return err
 				}
 				result.Imported++
 			}

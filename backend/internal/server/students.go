@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -104,7 +105,7 @@ func (s *Server) studentRoutes() {
 		lines := make([]string, len(students))
 		for i, st := range students {
 			lines[i] = csvRow(st.FirstName, st.LastName, st.Email, st.MembershipID,
-				st.AttendedSessions, st.NoShowCount, st.PreferredDays, st.Active)
+				strconv.FormatInt(st.AttendedSessions, 10), strconv.FormatInt(st.NoShowCount, 10), st.PreferredDays, strconv.FormatInt(st.Active, 10))
 		}
 		writeCSV(w, "students.csv", "first_name,last_name,email,membership_id,attended_sessions,no_show_count,preferred_days,active", lines)
 		return nil
@@ -593,26 +594,43 @@ func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) er
 			}
 			membershipID := field(fields, membershipIdx)
 
-			// Optional columns: only written when present and valid (like the TS `!isNaN` checks).
+			// Optional columns: written only when the value is not blank. A number column
+			// holding anything but a whole number makes the row an error.
 			var cols []string
 			var vals []any
-			if n, ok := jsParseInt(field(fields, attendedIdx)); ok && attendedIdx != -1 {
-				cols, vals = append(cols, "attended_sessions"), append(vals, n)
+			invalid := ""
+			for _, c := range []struct {
+				name string
+				idx  int
+			}{{"attended_sessions", attendedIdx}, {"no_show_count", noShowIdx}, {"active", activeIdx}} {
+				v := field(fields, c.idx)
+				if v == "" {
+					continue
+				}
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					invalid = fmt.Sprintf("%s must be a whole number, got %q", c.name, v)
+					break
+				}
+				cols, vals = append(cols, c.name), append(vals, n)
 			}
-			if n, ok := jsParseInt(field(fields, noShowIdx)); ok && noShowIdx != -1 {
-				cols, vals = append(cols, "no_show_count"), append(vals, n)
+			if invalid != "" {
+				result.Errors = append(result.Errors, fmt.Sprintf("Row %d: %s", i+1, invalid))
+				result.Skipped++
+				continue
 			}
 			if d := field(fields, daysIdx); d != "" {
 				cols, vals = append(cols, "preferred_days"), append(vals, d)
 			}
-			if n, ok := jsParseInt(field(fields, activeIdx)); ok && activeIdx != -1 {
-				cols, vals = append(cols, "active"), append(vals, n)
-			}
 
-			if err := importStudentRow(tx, first, last, email, membershipID, cols, vals, defaultGroup); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("Row %d: %s", i+1, sqliteMessage(err)))
+			err := importStudentRow(tx, first, last, email, membershipID, cols, vals, defaultGroup)
+			if isUniqueErr(err) { // the email belongs to a deleted student
+				result.Errors = append(result.Errors, fmt.Sprintf("Row %d: A student with this email already exists", i+1))
 				result.Skipped++
 				continue
+			}
+			if err != nil {
+				return err
 			}
 			result.Imported++
 		}

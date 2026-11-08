@@ -179,7 +179,7 @@ func TestDeletedStudentEmailCannotBeReused(t *testing.T) {
 	e.admin(http.MethodPost, "/api/students", map[string]any{"first_name": "Ann", "last_name": "Test", "email": addr}).
 		wantError(http.StatusConflict, "A student with this email already exists")
 	res := e.admin(http.MethodPost, "/api/students/import", map[string]any{"csv": "first_name,last_name,email\nAnn,Test," + addr}).status(http.StatusOK).object()
-	if res["imported"] != 0.0 || res["errors"].([]any)[0] != "Row 2: UNIQUE constraint failed: students.email" {
+	if res["imported"] != 0.0 || res["errors"].([]any)[0] != "Row 2: A student with this email already exists" {
 		t.Fatalf("import = %v", res)
 	}
 }
@@ -353,12 +353,14 @@ func TestImportStudents(t *testing.T) {
 	csv := strings.Join([]string{
 		`"First_Name",last_name,email,membership_id,attended_sessions,active,preferred_days`,
 		`"Smith, Jr.",Ann,ann@example.test,M-1,5,1,1|2`,
-		`New,Name,` + addr + `,M-2,x,0,`,
+		`New,Name,` + addr + `,M-2,,0,`,
 		`,Missing,missing@example.test`,
 		`Bo,Ng,bo@example.test`,
+		`Cy,Ng,cy@example.test,,3.7,1,`,
 	}, "\n")
 	res := e.admin(http.MethodPost, "/api/students/import", map[string]any{"csv": csv}).status(http.StatusOK).object()
-	if res["imported"] != 3.0 || res["skipped"] != 1.0 || fmt.Sprint(res["errors"]) != "[Row 4: missing required fields]" {
+	if res["imported"] != 3.0 || res["skipped"] != 2.0 ||
+		fmt.Sprint(res["errors"]) != `[Row 4: missing required fields Row 6: attended_sessions must be a whole number, got "3.7"]` {
 		t.Fatalf("import = %v", res)
 	}
 
@@ -369,7 +371,7 @@ func TestImportStudents(t *testing.T) {
 	if g := e.row("SELECT group_id FROM student_groups WHERE student_id = ?", ann["id"]); toInt64(g["group_id"]) != def {
 		t.Errorf("new student group = %v, want default", g)
 	}
-	// The existing student is updated by email; invalid numbers are ignored and their group kept.
+	// The existing student is updated by email; blank numbers are left as they are and their group kept.
 	old := e.row("SELECT * FROM students WHERE id = ?", existing)
 	if old["first_name"] != "New" || old["membership_id"] != "M-2" || old["attended_sessions"] != int64(0) || old["active"] != int64(0) {
 		t.Errorf("updated = %v", old)

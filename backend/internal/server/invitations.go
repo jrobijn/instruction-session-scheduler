@@ -101,8 +101,8 @@ func newToken() string {
 func (s *Server) clubName() string    { return db.Setting(s.db, "club_name", "Sports Club") }
 func (s *Server) emailLocale() string { return db.Setting(s.db, "email_locale", "en") }
 
-// marshalJS encodes like JSON.stringify: struct field order, no HTML escaping.
-func marshalJS(v any) string {
+// encodeJSON encodes v for storage (decision logs) without escaping <, > and &.
+func encodeJSON(v any) string {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -164,44 +164,29 @@ func nonEmpty(s string) *string {
 	return &s
 }
 
-// preferredDays filters a student's preferred days to the club days; nil when it covers
-// all club days (mirrors the decision-log logic in sessions.ts / invitations.ts).
-func preferredDays(studentDays, clubDays string) []any {
+// preferredDays lists the student's preferred days that are club days, for the decision log.
+// It is nil (null in the log) when they cover every club day. Entries that are not day
+// numbers are ignored.
+func preferredDays(studentDays, clubDays string) []int {
 	if studentDays == "" {
 		return nil
 	}
-	clubSet := map[string]bool{}
+	club := map[int]bool{}
 	for _, d := range strings.Split(clubDays, "|") {
-		clubSet[jsNumberKey(d)] = true
-	}
-	out := []any{}
-	for _, d := range strings.Split(studentDays, "|") {
-		k := jsNumberKey(d)
-		if clubSet[k] {
-			if n, err := strconv.ParseFloat(k, 64); err == nil {
-				out = append(out, n)
-			} else {
-				out = append(out, nil) // NaN serializes as null
-			}
+		if n, err := strconv.Atoi(strings.TrimSpace(d)); err == nil {
+			club[n] = true
 		}
 	}
-	if len(out) >= len(clubSet) {
+	out := []int{}
+	for _, d := range strings.Split(studentDays, "|") {
+		if n, err := strconv.Atoi(strings.TrimSpace(d)); err == nil && club[n] {
+			out = append(out, n)
+		}
+	}
+	if len(out) >= len(club) {
 		return nil
 	}
 	return out
-}
-
-// jsNumberKey normalizes a string the way Number() would, for set membership.
-func jsNumberKey(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "0"
-	}
-	n, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return "NaN"
-	}
-	return strconv.FormatFloat(n, 'f', -1, 64)
 }
 
 func (s *Server) prefsByStudent(timetableID int64) (map[int64]map[int64]bool, error) {
@@ -252,7 +237,7 @@ type replacementLog struct {
 	ReplacementReason    string   `json:"replacement_reason"`
 	SameGroupMatch       bool     `json:"same_group_match"`
 	PreferredTimeslots   []string `json:"preferred_timeslots"`
-	PreferredDays        any      `json:"preferred_days"`
+	PreferredDays        []int    `json:"preferred_days"`
 }
 
 // vacatedSpot is an instructor x timeslot spot of a session that needs a new student.
@@ -401,7 +386,7 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 		reason = vacated.Status
 	}
 	days := preferredDays(replacement.PreferredDays, db.Setting(s.db, "club_days", "0|1|2|3|4|5|6"))
-	decisionLog := marshalJS(replacementLog{
+	decisionLog := encodeJSON(replacementLog{
 		Trigger:              "replacement",
 		LastTurnAt:           replacement.LastTurnAt,
 		InviteNext:           replacement.InviteNextSince != nil,
@@ -413,7 +398,7 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 		ReplacementReason:    reason,
 		SameGroupMatch:       sameGroupMatch,
 		PreferredTimeslots:   preferredTimeslots,
-		PreferredDays:        nilIfEmpty(days),
+		PreferredDays:        days,
 	})
 
 	token := newToken()
@@ -444,13 +429,6 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 	s.broadcastSessionCounts(sessionID)
 
 	return &Replacement{Name: name, Email: replacement.Email}, nil
-}
-
-func nilIfEmpty(days []any) any {
-	if days == nil {
-		return nil
-	}
-	return days
 }
 
 // processExpiredInvitation runs when an invitation's expiry timer fires.

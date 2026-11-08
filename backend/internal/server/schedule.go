@@ -97,7 +97,7 @@ type batchLog struct {
 	GroupColor           *string  `json:"group_color"`
 	GroupQuota           *string  `json:"group_quota"`
 	PreferredTimeslots   []string `json:"preferred_timeslots"`
-	PreferredDays        any      `json:"preferred_days"`
+	PreferredDays        []int    `json:"preferred_days"`
 	BuddyPlacedNear      *string  `json:"buddy_placed_near"`
 	Overflow             bool     `json:"overflow"`
 }
@@ -416,7 +416,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	contexts := map[int64]*placementContext{}
 	quotaLabel := map[int64]string{}
 	for _, g := range groupSlotCounts {
-		quotaLabel[g.groupID] = fmt.Sprintf("%d slots (%s%%)", g.slots, jsString(percentage[g.groupID]))
+		quotaLabel[g.groupID] = fmt.Sprintf("%d slots (%d%%)", g.slots, int64(percentage[g.groupID]))
 	}
 	groupContext := func(st candidate, gid int64, buddyOf string) *placementContext {
 		list := studentsByGroup[gid]
@@ -580,7 +580,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 			spot := grid[spotIdx]
 			token := newToken()
 
-			decisionLog := marshalJS(batchLog{
+			decisionLog := encodeJSON(batchLog{
 				Trigger:              "batch_schedule",
 				LastTurnAt:           st.LastTurnAt,
 				InviteNext:           st.InviteNextSince != nil,
@@ -590,7 +590,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 				GroupColor:           nonEmpty(groupColor[ctx.groupID]),
 				GroupQuota:           nonEmpty(ctx.groupQuota),
 				PreferredTimeslots:   preferredStartTimes(prefs[st.ID], timeslots),
-				PreferredDays:        nilIfEmpty(preferredDays(st.PreferredDays, clubDays)),
+				PreferredDays:        preferredDays(st.PreferredDays, clubDays),
 				BuddyPlacedNear:      nonEmpty(ctx.buddyOf),
 				Overflow:             ctx.overflow,
 			})

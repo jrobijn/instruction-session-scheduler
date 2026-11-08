@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -125,7 +126,7 @@ func (s *Server) groupRoutes() {
 		}
 		lines := make([]string, len(groups))
 		for i, g := range groups {
-			lines[i] = csvRow(g.Name, g.IsDefault, g.Active)
+			lines[i] = csvRow(g.Name, strconv.FormatInt(g.IsDefault, 10), strconv.FormatInt(g.Active, 10))
 		}
 		writeCSV(w, "groups.csv", "name,is_default,active", lines)
 		return nil
@@ -155,15 +156,18 @@ func (s *Server) groupRoutes() {
 				case nil:
 					result.Skipped++
 				case sql.ErrNoRows:
-					if _, err := tx.Exec("INSERT INTO groups (name) VALUES (?)", name); err != nil {
-						result.Errors = append(result.Errors, fmt.Sprintf("Row %d: %s", i+1, sqliteMessage(err)))
+					_, err := tx.Exec("INSERT INTO groups (name) VALUES (?)", name)
+					switch {
+					case isUniqueErr(err):
+						result.Errors = append(result.Errors, fmt.Sprintf("Row %d: A group with this name already exists", i+1))
 						result.Skipped++
-					} else {
+					case err != nil:
+						return err
+					default:
 						result.Imported++
 					}
 				default:
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: %s", i+1, sqliteMessage(err)))
-					result.Skipped++
+					return err
 				}
 			}
 			return nil

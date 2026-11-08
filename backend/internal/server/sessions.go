@@ -75,7 +75,7 @@ type SessionDetail struct {
 	Timeslots               []Timeslot          `json:"timeslots"`
 	TimetableGroups         []TimetableGroup    `json:"timetableGroups"`
 	Invitations             []SessionInvitation `json:"invitations"`
-	InvitationExpiryMinutes any                 `json:"invitation_expiry_minutes"` // see jsonMinutes
+	InvitationExpiryMinutes float64             `json:"invitation_expiry_minutes"`
 }
 
 // sessionInvitations lists invitations of a session on the given date, selected by where
@@ -502,7 +502,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) error 
 		ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC, inv.id ASC`, session.ID); err != nil {
 		return err
 	}
-	detail.InvitationExpiryMinutes = jsonMinutes(s.expiryMinutes())
+	detail.InvitationExpiryMinutes = s.expiryMinutes()
 	httpx.OK(w, detail)
 	return nil
 }

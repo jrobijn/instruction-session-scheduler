@@ -6,8 +6,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -80,50 +78,6 @@ func (o *optional[T]) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// jsString mimics JavaScript's String(value) for JSON values.
-func jsString(v any) string {
-	switch x := v.(type) {
-	case nil:
-		return "null"
-	case string:
-		return x
-	case bool:
-		return strconv.FormatBool(x)
-	case float64:
-		return strconv.FormatFloat(x, 'f', -1, 64)
-	case int64:
-		return strconv.FormatInt(x, 10)
-	case []any:
-		parts := make([]string, len(x))
-		for i, e := range x {
-			if e != nil {
-				parts[i] = jsString(e)
-			}
-		}
-		return strings.Join(parts, ",")
-	default:
-		return "[object Object]"
-	}
-}
-
-// jsParseInt mimics parseInt(s, 10): leading digits are parsed, ok is false if there are none.
-func jsParseInt(s string) (int, bool) {
-	s = strings.TrimSpace(s)
-	end := 0
-	if end < len(s) && (s[end] == '-' || s[end] == '+') {
-		end++
-	}
-	start := end
-	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-		end++
-	}
-	if end == start {
-		return 0, false
-	}
-	n, err := strconv.Atoi(s[:end])
-	return n, err == nil
-}
-
 // deref returns *p, or "" for a NULL column.
 func deref(p *string) string {
 	if p == nil {
@@ -134,19 +88,6 @@ func deref(p *string) string {
 
 func isUniqueErr(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
-}
-
-var sqliteCodeSuffix = regexp.MustCompile(` \(\d+\)$`)
-
-// sqliteMessage strips modernc's "constraint failed: ... (2067)" wrapping so error texts
-// match better-sqlite3's (e.g. "UNIQUE constraint failed: students.email").
-func sqliteMessage(err error) string {
-	msg := sqliteCodeSuffix.ReplaceAllString(err.Error(), "")
-	const prefix = "constraint failed: "
-	if rest, ok := strings.CutPrefix(msg, prefix); ok && strings.Contains(rest, "constraint failed") {
-		msg = rest
-	}
-	return msg
 }
 
 func lastID(res sql.Result) int64 {

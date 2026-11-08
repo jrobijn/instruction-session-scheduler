@@ -9,16 +9,13 @@ import (
 
 func TestEscapeCSVField(t *testing.T) {
 	for _, tc := range []struct {
-		in   any
-		want string
+		in, want string
 	}{
 		{"plain", "plain"},
 		{"a,b", `"a,b"`},
 		{`say "hi"`, `"say ""hi"""`},
 		{"two\nlines", "\"two\nlines\""},
-		{nil, ""},
-		{int64(3), "3"},
-		{1.5, "1.5"},
+		{"", ""},
 	} {
 		if got := escapeCSVField(tc.in); got != tc.want {
 			t.Errorf("escapeCSVField(%#v) = %q, want %q", tc.in, got, tc.want)
@@ -47,7 +44,7 @@ func TestParseCSVLine(t *testing.T) {
 }
 
 func TestCSVRoundTrip(t *testing.T) {
-	values := []any{"Smith, Jr.", `the "best"`, "plain", ""}
+	values := []string{"Smith, Jr.", `the "best"`, "plain", ""}
 	got := parseCSVLine(csvRow(values...))
 	for i, v := range values {
 		if got[i] != v {

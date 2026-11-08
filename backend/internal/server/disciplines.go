@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
@@ -77,7 +78,7 @@ func (s *Server) disciplineRoutes() {
 		}
 		lines := make([]string, len(disciplines))
 		for i, d := range disciplines {
-			lines[i] = csvRow(d.Name, d.Abbreviation, d.Active)
+			lines[i] = csvRow(d.Name, d.Abbreviation, strconv.FormatInt(d.Active, 10))
 		}
 		writeCSV(w, "disciplines.csv", "name,abbreviation,active", lines)
 		return nil
@@ -118,9 +119,11 @@ func (s *Server) disciplineRoutes() {
 					err = scanErr
 				}
 				switch {
-				case err != nil:
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: %s", i+1, sqliteMessage(err)))
+				case isUniqueErr(err):
+					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: A discipline with this name already exists", i+1))
 					result.Skipped++
+				case err != nil:
+					return err
 				case existing: // updating an existing discipline counts as skipped in the TS version
 					result.Skipped++
 				default:

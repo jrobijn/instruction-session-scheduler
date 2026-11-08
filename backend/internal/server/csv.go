@@ -11,18 +11,14 @@ import (
 // These helpers reproduce the hand-written CSV handling of the TS routes exactly, so
 // imports and exports behave identically (encoding/csv is stricter about quoting).
 
-func escapeCSVField(v any) string {
-	var s string
-	if v != nil {
-		s = jsString(v)
-	}
+func escapeCSVField(s string) string {
 	if strings.ContainsAny(s, ",\"\n") {
 		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 	}
 	return s
 }
 
-func csvRow(values ...any) string {
+func csvRow(values ...string) string {
 	parts := make([]string, len(values))
 	for i, v := range values {
 		parts[i] = escapeCSVField(v)

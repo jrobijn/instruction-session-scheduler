@@ -119,14 +119,6 @@ func expiresAtISO(inv invitationTiming, minutes float64, loc *time.Location) *st
 	return &iso
 }
 
-// jsonMinutes renders the expiry setting the way res.json would (NaN is already 0 here).
-func jsonMinutes(v float64) any {
-	if v == math.Trunc(v) {
-		return int64(v)
-	}
-	return v
-}
-
 // dayOfWeek mirrors new Date(date + 'T00:00:00').getDay().
 func dayOfWeek(date string) (int, bool) {
 	d, err := time.Parse(time.DateOnly, date)
