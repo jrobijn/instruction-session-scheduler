@@ -2,16 +2,9 @@
 package email
 
 import (
-	"crypto/rand"
 	"crypto/x509"
-	"encoding/hex"
 	"fmt"
 	"log"
-	"mime"
-	"mime/multipart"
-	"mime/quotedprintable"
-	"net/mail"
-	"net/textproto"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -55,7 +48,7 @@ func NewCapturing(cfg Config, capture func(to, subject, text, html string)) *Mai
 }
 
 // deliver sends in the background, like the TS version whose sendMail callback only logs
-// failures: callers never see SMTP errors. Emails go out one after another.
+// failures: callers never see SMTP errors. send makes the emails go out one after another.
 func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []string) {
 	if m.capture != nil {
 		m.capture(to, subject, text, htmlBody)
@@ -77,8 +70,6 @@ func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []stri
 		return
 	}
 	go func() {
-		m.sending.Lock()
-		defer m.sending.Unlock()
 		if err := m.send(to, subject, text, htmlBody); err != nil {
 			log.Printf("email to %s (%q) failed: %v", to, subject, err)
 			return
@@ -88,91 +79,6 @@ func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []stri
 }
 
 var nonAlnum = regexp.MustCompile(`(?i)[^a-z0-9]+`)
-
-func (m *Mailer) send(toRaw, subject, text, htmlBody string) error {
-	fromRaw := m.cfg.From
-	if fromRaw == "" {
-		fromRaw = m.cfg.User
-	}
-	from, err := mail.ParseAddress(fromRaw)
-	if err != nil {
-		return fmt.Errorf("invalid sender address %q: %w", fromRaw, err)
-	}
-	to, err := mail.ParseAddress(toRaw)
-	if err != nil {
-		return fmt.Errorf("invalid recipient address %q: %w", toRaw, err)
-	}
-	msg, err := buildMessage(from, to, subject, text, htmlBody)
-	if err != nil {
-		return err
-	}
-
-	c, err := m.connect()
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	if err := m.authenticate(c); err != nil {
-		return err
-	}
-	if err := c.Mail(from.Address); err != nil {
-		return err
-	}
-	if err := c.Rcpt(to.Address); err != nil {
-		return err
-	}
-	wc, err := c.Data()
-	if err != nil {
-		return err
-	}
-	if _, err := wc.Write(msg); err != nil {
-		return err
-	}
-	if err := wc.Close(); err != nil {
-		return err
-	}
-	return c.Quit()
-}
-
-// buildMessage takes parsed addresses so the From and To headers are always well-formed:
-// mail.Address.String() quotes or RFC 2047-encodes the display name as needed, and
-// ParseAddress has already rejected anything with CR/LF that could inject headers.
-func buildMessage(from, to *mail.Address, subject, text, htmlBody string) ([]byte, error) {
-	var b strings.Builder
-	mw := multipart.NewWriter(&b)
-	id := make([]byte, 12)
-	rand.Read(id)
-	domain := "localhost"
-	if at := strings.LastIndex(from.Address, "@"); at >= 0 {
-		domain = from.Address[at+1:]
-	}
-	headers := []string{
-		"From: " + from.String(),
-		"To: " + to.String(),
-		"Subject: " + mime.QEncoding.Encode("utf-8", subject),
-		"Date: " + time.Now().Format(time.RFC1123Z),
-		"Message-ID: <" + hex.EncodeToString(id) + "@" + domain + ">",
-		"MIME-Version: 1.0",
-		`Content-Type: multipart/alternative; boundary="` + mw.Boundary() + `"`,
-	}
-	b.WriteString(strings.Join(headers, "\r\n") + "\r\n\r\n")
-	for _, part := range []struct{ ctype, body string }{{"text/plain", text}, {"text/html", htmlBody}} {
-		w, err := mw.CreatePart(textproto.MIMEHeader{
-			"Content-Type":              {part.ctype + "; charset=utf-8"},
-			"Content-Transfer-Encoding": {"quoted-printable"},
-		})
-		if err != nil {
-			return nil, err
-		}
-		qp := quotedprintable.NewWriter(w)
-		qp.Write([]byte(part.body))
-		qp.Close()
-	}
-	if err := mw.Close(); err != nil {
-		return nil, err
-	}
-	return []byte(b.String()), nil
-}
 
 // --- Public send functions -------------------------------------------------------------
 

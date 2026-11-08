@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/mail"
 	"strings"
 	"sync"
 	"testing"
@@ -182,22 +183,24 @@ func TestSend(t *testing.T) {
 }
 
 // Display names are quoted or RFC 2047-encoded in the headers.
-func TestSendEncodesDisplayNames(t *testing.T) {
-	srv, roots := clubLikeServer(t)
-	m := mailerFor(srv, roots)
-	m.cfg.From = "Schietclüb Zuid <club@example.test>"
-	if err := m.send("John Q. Doe <student@example.test>", "Uitnodiging", "text", "<p>html</p>"); err != nil {
-		t.Fatalf("send: %v", err)
+func TestBuildMessageEncodesDisplayNames(t *testing.T) {
+	from := &mail.Address{Name: "Schietclüb Zuid", Address: "club@example.test"}
+	to := &mail.Address{Name: "John Q. Doe", Address: "student@example.test"}
+	msg, err := buildMessage(from, to, "Uitnodiging", "text", "<p>html</p>")
+	if err != nil {
+		t.Fatal(err)
 	}
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
 	for _, want := range []string{
 		"From: =?utf-8?q?Schietcl=C3=BCb_Zuid?= <club@example.test>\r\n",
 		`To: "John Q. Doe" <student@example.test>` + "\r\n",
+		"Message-ID: <",
 	} {
-		if !strings.Contains(srv.data, want) {
-			t.Errorf("missing header %q in:\n%s", want, srv.data)
+		if !strings.Contains(string(msg), want) {
+			t.Errorf("missing %q in:\n%s", want, msg)
 		}
+	}
+	if !strings.Contains(string(msg), "@example.test>\r\nMIME-Version") {
+		t.Errorf("Message-ID does not use the sender's domain:\n%s", msg)
 	}
 }
 
@@ -216,28 +219,26 @@ func TestSendRejectsHeaderInjection(t *testing.T) {
 }
 
 // A burst of emails (e.g. a batch of invitations) must use one connection at a time.
-func TestDeliverSendsOneAtATime(t *testing.T) {
+func TestSendOneAtATime(t *testing.T) {
 	srv, roots := clubLikeServer(t)
 	srv.dataDelay = 20 * time.Millisecond
 	m := mailerFor(srv, roots)
 	const n = 8
+	var wg sync.WaitGroup
 	for i := range n {
-		m.deliver(fmt.Sprintf("s%d@example.test", i), "Uitnodiging", "t", "h", nil)
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		srv.mu.Lock()
-		sent, peak := srv.messages, srv.maxActive
-		srv.mu.Unlock()
-		if sent == n {
-			if peak != 1 {
-				t.Fatalf("%d simultaneous SMTP connections, want 1", peak)
+		wg.Go(func() {
+			if err := m.send(fmt.Sprintf("s%d@example.test", i), "Uitnodiging", "t", "h"); err != nil {
+				t.Errorf("send %d: %v", i, err)
 			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("only %d of %d emails delivered", sent, n)
-		}
-		time.Sleep(10 * time.Millisecond)
+		})
+	}
+	wg.Wait()
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if srv.messages != n {
+		t.Fatalf("%d of %d emails delivered", srv.messages, n)
+	}
+	if srv.maxActive != 1 {
+		t.Fatalf("%d simultaneous SMTP connections, want 1", srv.maxActive)
 	}
 }
