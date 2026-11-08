@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -23,21 +22,9 @@ import (
 )
 
 func main() {
-	smtpCheck := flag.Bool("smtp-check", false, "connect to the SMTP server, report TLS details and test the login, then exit (sends no email)")
 	migrateOnly := flag.Bool("migrate", false, "apply pending database migrations, then exit (the server also applies them on startup)")
 	flag.Parse()
 	cfg := config.Load()
-	if *smtpCheck {
-		mailer := email.New(email.Config{
-			Host: cfg.SMTPHost, Port: cfg.SMTPPort, User: cfg.SMTPUser, Pass: cfg.SMTPPass,
-			Secure: cfg.SMTPSecure,
-		})
-		if err := mailer.Check(os.Stdout); err != nil {
-			fmt.Println("FAILED:", err)
-			os.Exit(1)
-		}
-		return
-	}
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {

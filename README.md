@@ -179,7 +179,7 @@ docker run -p 3000:3000 \
 
 The app will be available at http://localhost:3000. In Docker, the frontend is built and served as static files from the backend — no separate frontend server is needed. The image is a single static Go binary on Alpine (about 35 MB).
 
-To test the mail server settings without sending email: `docker run --rm -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... session-scheduler ./server -smtp-check`.
+To check the mail server's TLS settings without sending email, see [backend/README.md](backend/README.md#email).
 
 ### Environment Variables
 

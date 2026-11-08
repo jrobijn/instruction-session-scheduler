@@ -107,7 +107,7 @@ func (m *Mailer) send(toRaw, subject, text, htmlBody string) error {
 		return err
 	}
 
-	c, err := m.connect(m.tlsConfig())
+	c, err := m.connect()
 	if err != nil {
 		return err
 	}

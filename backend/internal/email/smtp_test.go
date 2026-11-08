@@ -241,16 +241,3 @@ func TestDeliverSendsOneAtATime(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
-
-func TestCheckReportsServer(t *testing.T) {
-	srv, roots := clubLikeServer(t)
-	var out strings.Builder
-	if err := mailerFor(srv, roots).Check(&out); err != nil {
-		t.Fatalf("check: %v\n%s", err, out.String())
-	}
-	for _, want := range []string{"TLS 1.2, TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", "Certificate: trusted", "AUTH:        CRAM-MD5 PLAIN LOGIN", "Login:       OK"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("report lacks %q:\n%s", want, out.String())
-		}
-	}
-}
