@@ -1,6 +1,5 @@
-// Package queue holds the invite queue SQL and the deterministic randomness used when
-// generating schedules. The random helpers are bit-for-bit identical to the former
-// TypeScript backend's, so schedules come out the same as before the switch to Go.
+// Package queue holds the invite queue SQL and the tie-breaking and weighted-pick
+// helpers used when generating schedules.
 package queue
 
 import (
@@ -99,18 +98,6 @@ func BreakTies[T Entry](rows []T, seed int64) []T {
 		start = end
 	}
 	return out
-}
-
-// SeededRandom is mulberry32, returning floats in [0, 1) like the TS seededRandom.
-func SeededRandom(seed int64) func() float64 {
-	a := uint32(seed) // JS: seed >>> 0
-	return func() float64 {
-		a += 0x6D2B79F5
-		t := a
-		t = (t ^ (t >> 15)) * (t | 1)
-		t ^= t + (t^(t>>7))*(t|61)
-		return float64(t^(t>>14)) / 4294967296
-	}
 }
 
 // WeightedPickGroup picks a group id weighted by weightByGroup. When all weights are

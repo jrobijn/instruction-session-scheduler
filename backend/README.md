@@ -61,7 +61,7 @@ To change the schema, add a new file `NNNNN_description.sql` with the next numbe
 |---|---|
 | `main.go` | Startup and shutdown |
 | `internal/server/` | Routes, one file per resource; `schedule.go` is schedule generation; `timing.go` and `timers.go` handle invitation expiry |
-| `internal/queue/` | Invite queue SQL, seeded PRNG, tie-breaking |
+| `internal/queue/` | Invite queue SQL, tie-breaking, weighted group picks |
 | `internal/email/` | Email templates (en/nl) and SMTP |
 | `internal/sse/` | Server-Sent Events hub |
 | `internal/db/` | Database schema and query helpers |
@@ -72,8 +72,9 @@ All handlers and expiry timers share one mutex, and the database uses a single c
 
 ## Changes from the former TypeScript backend
 
-The Go server replaced the Express backend after commit `75f9869`. Its API is the same: same JSON bodies, cookies, SSE events, email HTML and scheduling decisions. Where they differ:
+The Go server replaced the Express backend after commit `75f9869`. Its API is the same: same JSON bodies, cookies, SSE events, email HTML and scheduling rules. Where they differ:
 
+- **Overflow picks:** the random group picks for leftover spots use a different seeded generator, so regenerating a schedule can fill overflow spots differently than the TypeScript backend did.
 - **Removed variable:** `SMTP_TLS_CIPHERS` is gone, along with OpenSSL cipher strings. The club's mail server works with Go's default TLS.
 - **Email:** credentials are never sent over an unencrypted connection, and AUTH LOGIN is no longer used.
 - **Login:** a login without a password is rejected even when `ADMIN_PASSWORD` is unset.

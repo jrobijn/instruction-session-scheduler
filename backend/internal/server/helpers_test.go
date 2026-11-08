@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The helpers below mimic JavaScript semantics of the former TS backend; these tables pin them.
+// These tables pin the edge cases of small helpers.
 
 func TestSessionSameTimetable(t *testing.T) {
 	zero, three, four := int64(0), int64(3), int64(4)
@@ -72,7 +72,7 @@ func TestSQLiteHelpers(t *testing.T) {
 	}
 }
 
-func TestMarshalJS(t *testing.T) {
+func TestEncodeJSON(t *testing.T) {
 	if got := encodeJSON(map[string]any{"html": "<b>&</b>"}); got != `{"html":"<b>&</b>"}` {
 		t.Errorf("encodeJSON = %s", got)
 	}

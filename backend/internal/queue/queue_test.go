@@ -5,26 +5,6 @@ import (
 	"testing"
 )
 
-// Expected values were produced by running backend/src/priority.ts under Node.
-
-func TestSeededRandomMatchesTS(t *testing.T) {
-	want := map[int64][]float64{
-		0:          {0.26642920868471265, 0.0003297457005828619, 0.2232720274478197, 0.1462021479383111, 0.46732782293111086},
-		1:          {0.6270739405881613, 0.002735721180215478, 0.5274470399599522, 0.9810509674716741, 0.9683778982143849},
-		42:         {0.6011037519201636, 0.44829055899754167, 0.8524657934904099, 0.6697340414393693, 0.17481389874592423},
-		123456789:  {0.2577907438389957, 0.9707721115555614, 0.7853280142880976, 0.20616457983851433, 0.30307188746519387},
-		4294967295: {0.8964226141106337, 0.189478256739676, 0.7156526781618595, 0.9440599093213677, 0.8452364315744489},
-	}
-	for seed, expected := range want {
-		r := SeededRandom(seed)
-		for i, w := range expected {
-			if got := r(); got != w {
-				t.Errorf("seed %d draw %d = %v, want %v", seed, i, got, w)
-			}
-		}
-	}
-}
-
 type row struct {
 	id         int64
 	inviteNext *string
@@ -34,7 +14,8 @@ type row struct {
 func (r row) QueueID() int64      { return r.id }
 func (r row) QueueTieKey() string { return TieKey(r.inviteNext, r.queueAt) }
 
-func TestBreakTiesMatchesTS(t *testing.T) {
+// The expected orders pin the hash-based shuffle: a change to it reorders existing queues.
+func TestBreakTies(t *testing.T) {
 	feb := "2026-02-02"
 	rows := []row{
 		{1, nil, ""}, {2, nil, ""}, {3, nil, ""},
@@ -57,24 +38,39 @@ func TestBreakTiesMatchesTS(t *testing.T) {
 	}
 }
 
-func TestWeightedPickGroupMatchesTS(t *testing.T) {
-	weights := map[int64]float64{1: 70, 2: 30, 3: 0}
+// scripted returns a random source that yields the given values in order.
+func scripted(values ...float64) func() float64 {
+	return func() float64 {
+		v := values[0]
+		values = values[1:]
+		return v
+	}
+}
 
-	r := SeededRandom(5)
-	var got []int64
-	for range 12 {
-		got = append(got, WeightedPickGroup([]int64{1, 2, 3}, weights, r))
-	}
-	if want := []int64{1, 2, 1, 1, 1, 1, 2, 1, 2, 1, 2, 2}; !reflect.DeepEqual(got, want) {
-		t.Errorf("weighted: got %v, want %v", got, want)
-	}
+func TestWeightedPickGroup(t *testing.T) {
+	weights := map[int64]float64{1: 70, 2: 30, 3: 0, 5: -10}
 
-	r = SeededRandom(9)
-	got = nil
-	for range 8 {
-		got = append(got, WeightedPickGroup([]int64{3, 4}, weights, r))
+	tests := []struct {
+		name   string
+		groups []int64
+		draw   float64
+		want   int64
+	}{
+		// Weighted: group 1 covers [0, 0.7), group 2 covers [0.7, 1); zero and negative weights are never picked.
+		{"weighted start", []int64{1, 2, 3}, 0, 1},
+		{"weighted just below boundary", []int64{1, 2, 3}, 0.6999, 1},
+		{"weighted at boundary", []int64{1, 2, 3}, 0.7, 2},
+		{"weighted end", []int64{1, 2, 3}, 0.9999, 2},
+		{"zero weight first", []int64{3, 1}, 0, 1},
+		{"negative weight first", []int64{5, 2}, 0, 2},
+		// Uniform: all weights zero or missing, so each group gets an equal share.
+		{"uniform first", []int64{3, 4}, 0.4999, 3},
+		{"uniform second", []int64{3, 4}, 0.5, 4},
+		{"uniform last", []int64{3, 4, 6}, 0.9999, 6},
 	}
-	if want := []int64{3, 4, 3, 4, 4, 4, 3, 4}; !reflect.DeepEqual(got, want) {
-		t.Errorf("uniform: got %v, want %v", got, want)
+	for _, tc := range tests {
+		if got := WeightedPickGroup(tc.groups, weights, scripted(tc.draw)); got != tc.want {
+			t.Errorf("%s: draw %v picked %d, want %d", tc.name, tc.draw, got, tc.want)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"math"
+	mrand "math/rand/v2"
 	"net/http"
 	"slices"
 	"sort"
@@ -14,8 +15,8 @@ import (
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
 )
 
-// POST /api/sessions/:id/generate-schedule. Iteration orders of the former TypeScript
-// implementation (JS Map/Set insertion order, stable sorts) are reproduced exactly: they decide who gets moved or placed.
+// POST /api/sessions/:id/generate-schedule. Iteration orders (insertion order, stable sorts)
+// are kept deterministic on purpose: they decide who gets moved or placed.
 
 // candidate is a student in a group's invitation queue. Load it with queueCandidates.
 type candidate struct {
@@ -53,7 +54,7 @@ type ScheduledInvitation struct {
 	GroupID    int64  `json:"group_id"`
 }
 
-// orderedSet is a JS Set of ids: membership plus insertion order.
+// orderedSet is a set of ids that remembers insertion order.
 type orderedSet struct {
 	items []int64
 	index map[int64]bool
@@ -285,7 +286,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	// Buddies: for each student the other members of their buddy group, in JS Map/Set order.
+	// Buddies: for each student the other members of their buddy group, in insertion order.
 	type buddyMembership struct {
 		BuddyGroupID int64 `db:"buddy_group_id"`
 		StudentID    int64 `db:"student_id"`
@@ -541,7 +542,8 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		}
 		overflowQueues[st.GroupID] = append(overflowQueues[st.GroupID], st)
 	}
-	random := queue.SeededRandom(sessionID)
+	// Seeded by session so regenerating the same session yields the same overflow picks.
+	random := mrand.New(mrand.NewPCG(uint64(sessionID), 0)).Float64
 	overflowRank := 0
 	for len(overflowOrder) > 0 && len(placedTimeslot) < totalCapacity {
 		picked := queue.WeightedPickGroup(overflowOrder, percentage, random)
