@@ -60,8 +60,8 @@ func (s *Server) clearAllTimers() {
 
 // scheduleExpiryForInvitation (re)schedules the timer of an invited invitation.
 func (s *Server) scheduleExpiryForInvitation(invitationID int64) {
-	inv, err := db.Get(s.db, `
-		SELECT inv.invited_at, ts.date AS session_date, tslot.start_time AS timeslot_start_time
+	timing, found, err := db.One[invitationTiming](s.db, `
+		SELECT inv.status, inv.invited_at, ts.date AS session_date, tslot.start_time
 		FROM invitations inv
 		JOIN training_sessions ts ON ts.id = inv.session_id
 		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
@@ -70,22 +70,21 @@ func (s *Server) scheduleExpiryForInvitation(invitationID int64) {
 		logf("schedule expiry for invitation %d: %v", invitationID, err)
 		return
 	}
-	if inv == nil {
+	if !found {
 		return
 	}
-	timing := timingOf(inv, "session_date")
 	if deadline, ok := invitationDeadline(timing.InvitedAt, timing.SessionDate, timing.StartTime, s.expiryMinutes(), s.clubLocation()); ok {
 		s.scheduleInvitationExpiry(invitationID, deadline)
 	}
 }
 
 func (s *Server) cancelAllSessionTimers(sessionID any) error {
-	rows, err := db.All(s.db, "SELECT id FROM invitations WHERE session_id = ? AND status = 'invited'", sessionID)
+	ids, err := db.Many[int64](s.db, "SELECT id FROM invitations WHERE session_id = ? AND status = 'invited'", sessionID)
 	if err != nil {
 		return err
 	}
-	for _, r := range rows {
-		s.cancelInvitationExpiry(toInt64(r["id"]))
+	for _, id := range ids {
+		s.cancelInvitationExpiry(id)
 	}
 	return nil
 }
@@ -94,8 +93,12 @@ func (s *Server) cancelAllSessionTimers(sessionID any) error {
 func (s *Server) rehydrateTimers() {
 	s.clearAllTimers()
 	minutes, loc := s.expiryMinutes(), s.clubLocation()
-	pending, err := db.All(s.db, `
-		SELECT inv.id, inv.invited_at, ts.date AS session_date, tslot.start_time AS timeslot_start_time
+	type pendingInvitation struct {
+		ID int64 `db:"id"`
+		invitationTiming
+	}
+	pending, err := db.Many[pendingInvitation](s.db, `
+		SELECT inv.id, inv.status, inv.invited_at, ts.date AS session_date, tslot.start_time
 		FROM invitations inv
 		JOIN training_sessions ts ON ts.id = inv.session_id
 		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
@@ -105,10 +108,9 @@ func (s *Server) rehydrateTimers() {
 		logf("rehydrate timers: %v", err)
 		return
 	}
-	for _, inv := range pending {
-		timing := timingOf(inv, "session_date")
-		if deadline, ok := invitationDeadline(timing.InvitedAt, timing.SessionDate, timing.StartTime, minutes, loc); ok {
-			s.scheduleInvitationExpiry(toInt64(inv["id"]), deadline)
+	for _, p := range pending {
+		if deadline, ok := invitationDeadline(p.InvitedAt, p.SessionDate, p.StartTime, minutes, loc); ok {
+			s.scheduleInvitationExpiry(p.ID, deadline)
 		}
 	}
 	logf("Rehydrated %d invitation expiry timer(s)", len(pending))

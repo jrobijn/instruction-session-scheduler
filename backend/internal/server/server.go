@@ -189,52 +189,6 @@ func (s *Server) handleInvitationEvents(w http.ResponseWriter, r *http.Request) 
 	s.hub.Serve(w, r, "invitation:"+token)
 }
 
-const activeDisciplinesSQL = "SELECT id, name FROM disciplines WHERE active = 1 ORDER BY name ASC"
-
-func (s *Server) handlePublicDisciplines(w http.ResponseWriter, _ *http.Request) {
-	rows, err := db.All(s.db, activeDisciplinesSQL)
-	if err != nil {
-		s.internalError(w, err)
-		return
-	}
-	httpx.OK(w, rows)
-}
-
-// handlePublicDisciplinesForToken returns the disciplines available to the invited student.
-func (s *Server) handlePublicDisciplinesForToken(w http.ResponseWriter, r *http.Request) {
-	inv, err := db.Get(s.db, "SELECT inv.student_id, inv.group_id FROM invitations inv WHERE inv.token = ?", r.PathValue("token"))
-	if err != nil {
-		s.internalError(w, err)
-		return
-	}
-
-	var rows []map[string]any
-	switch {
-	case inv == nil:
-		rows, err = db.All(s.db, activeDisciplinesSQL)
-	case inv["group_id"] != nil:
-		// Auto-scheduled: disciplines linked to the invitation's specific group.
-		rows, err = db.All(s.db, `
-			SELECT DISTINCT d.id, d.name FROM disciplines d
-			JOIN discipline_groups dg ON dg.discipline_id = d.id
-			WHERE d.active = 1 AND dg.group_id = ?
-			ORDER BY d.name ASC`, inv["group_id"])
-	default:
-		// Manually assigned (no group): disciplines from all the student's groups.
-		rows, err = db.All(s.db, `
-			SELECT DISTINCT d.id, d.name FROM disciplines d
-			JOIN discipline_groups dg ON dg.discipline_id = d.id
-			JOIN student_groups sg ON sg.group_id = dg.group_id
-			WHERE d.active = 1 AND sg.student_id = ?
-			ORDER BY d.name ASC`, inv["student_id"])
-	}
-	if err != nil {
-		s.internalError(w, err)
-		return
-	}
-	httpx.OK(w, rows)
-}
-
 // handleStatic serves the built frontend, falling back to index.html for client-side routes.
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {

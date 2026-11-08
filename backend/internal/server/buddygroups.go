@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
@@ -34,7 +35,7 @@ func (s *Server) buddyGroupRoutes() {
 
 		// Unlike the TS version, the inserts are atomic: a bad student id leaves no half-made group.
 		var groupID int64
-		err = s.db.InTx(func(tx *sql.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			res, err := tx.Exec("INSERT INTO buddy_groups DEFAULT VALUES")
 			if err != nil {
 				return err

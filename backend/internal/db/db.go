@@ -1,27 +1,31 @@
-// Package db opens the SQLite database and provides helpers that return rows in the same
-// shape the former TypeScript backend's driver did (column name -> value), which the
-// frontend expects in JSON responses.
+// Package db opens the SQLite database and provides helpers that scan query results into
+// typed values (Many, One).
+//
+// Rows are scanned into structs by column name (sqlx): each field that is read from the
+// database has a `db:"column"` tag, and every selected column must have a matching field.
+// Name computed columns with AS. Fields filled in by Go code are tagged `db:"-"`.
 package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 
+	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite"
 )
 
 type DB struct {
-	*sql.DB
+	*sqlx.DB
 	path string
 }
 
-// Querier is satisfied by both *sql.DB and *sql.Tx.
+// Querier is satisfied by both *DB and *sqlx.Tx.
 type Querier interface {
-	Exec(query string, args ...any) (sql.Result, error)
-	Query(query string, args ...any) (*sql.Rows, error)
-	QueryRow(query string, args ...any) *sql.Row
+	sqlx.Queryer
+	sqlx.Execer
 }
 
 func Open(path string) (*DB, error) {
@@ -29,7 +33,9 @@ func Open(path string) (*DB, error) {
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "busy_timeout(5000)")
-	sqlDB, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode())
+	// modernc registers as "sqlite", which sqlx does not know uses ? placeholders.
+	sqlx.BindDriver("sqlite", sqlx.QUESTION)
+	sqlDB, err := sqlx.Open("sqlite", "file:"+path+"?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
@@ -90,62 +96,39 @@ func (d *DB) checkUpToDate() error {
 	return nil
 }
 
-// All runs a query and returns every row as a column->value map.
-func All(q Querier, query string, args ...any) ([]map[string]any, error) {
-	rows, err := q.Query(query, args...)
-	if err != nil {
+// Many runs a query and scans every row into a T: a struct (by column name, see the package
+// comment) or a single-column value such as int64. It never returns a nil slice, so an empty
+// result encodes as [] rather than null.
+func Many[T any](q Querier, query string, args ...any) ([]T, error) {
+	out := []T{}
+	if err := sqlx.Select(q, &out, query, args...); err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	cols, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	out := []map[string]any{}
-	for rows.Next() {
-		values := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range values {
-			ptrs[i] = &values[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			return nil, err
-		}
-		row := make(map[string]any, len(cols))
-		for i, c := range cols {
-			if b, ok := values[i].([]byte); ok {
-				row[c] = string(b)
-			} else {
-				row[c] = values[i]
-			}
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
-// Get returns the first row, or nil if there is none (like better-sqlite3's .get() in the former TypeScript backend).
-func Get(q Querier, query string, args ...any) (map[string]any, error) {
-	rows, err := All(q, query, args...)
-	if err != nil || len(rows) == 0 {
-		return nil, err
+// One scans the first row of a query into a T, like Many. found is false (with a nil error)
+// if there is no row.
+func One[T any](q Querier, query string, args ...any) (v T, found bool, err error) {
+	err = sqlx.Get(q, &v, query, args...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return v, false, nil
 	}
-	return rows[0], nil
+	return v, err == nil, err
 }
 
 // Setting reads a value from the settings table, falling back to def.
 func Setting(q Querier, key, def string) string {
 	var v string
-	if err := q.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&v); err != nil || v == "" {
+	if err := q.QueryRowx("SELECT value FROM settings WHERE key = ?", key).Scan(&v); err != nil || v == "" {
 		return def
 	}
 	return v
 }
 
 // InTx runs fn in a transaction, committing on success and rolling back on error or panic.
-func (d *DB) InTx(fn func(tx *sql.Tx) error) (err error) {
-	tx, err := d.Begin()
+func (d *DB) InTx(fn func(tx *sqlx.Tx) error) (err error) {
+	tx, err := d.Beginx()
 	if err != nil {
 		return err
 	}

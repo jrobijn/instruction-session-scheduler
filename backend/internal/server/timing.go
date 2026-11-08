@@ -84,12 +84,10 @@ func invitationDeadline(invitedAt, sessionDate, startTime string, minutes float6
 
 // invitationTiming is the subset of an invitation row the timing functions read.
 type invitationTiming struct {
-	Status, InvitedAt, SessionDate, StartTime string
-}
-
-func timingOf(row map[string]any, sessionDateKey string) invitationTiming {
-	str := func(k string) string { v, _ := row[k].(string); return v }
-	return invitationTiming{Status: str("status"), InvitedAt: str("invited_at"), SessionDate: str(sessionDateKey), StartTime: str("timeslot_start_time")}
+	Status      string `db:"status"`
+	InvitedAt   string `db:"invited_at"`
+	SessionDate string `db:"session_date"`
+	StartTime   string `db:"start_time"`
 }
 
 // effectiveStatus is the status as it should be shown, even if the expiry timer has not fired yet.
@@ -109,7 +107,7 @@ func effectiveStatus(inv invitationTiming, minutes float64, loc *time.Location, 
 }
 
 // expiresAtISO returns the deadline as toISOString() would, or nil.
-func expiresAtISO(inv invitationTiming, minutes float64, loc *time.Location) any {
+func expiresAtISO(inv invitationTiming, minutes float64, loc *time.Location) *string {
 	if inv.Status != "invited" || inv.InvitedAt == "" {
 		return nil
 	}
@@ -117,7 +115,8 @@ func expiresAtISO(inv invitationTiming, minutes float64, loc *time.Location) any
 	if !ok {
 		return nil
 	}
-	return d.UTC().Format("2006-01-02T15:04:05.000Z")
+	iso := d.UTC().Format("2006-01-02T15:04:05.000Z")
+	return &iso
 }
 
 // jsonMinutes renders the expiry setting the way res.json would (NaN is already 0 here).

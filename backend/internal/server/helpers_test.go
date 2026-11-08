@@ -88,16 +88,20 @@ func TestJSNumberAndStrictEqual(t *testing.T) {
 			t.Errorf("jsNumber(%#v) = %v, want NaN", in, got)
 		}
 	}
+}
 
+func TestSessionSameTimetable(t *testing.T) {
+	three := int64(3)
 	for _, tc := range []struct {
-		a, b any
-		want bool
+		timetable *int64
+		v         any
+		want      bool
 	}{
-		{nil, nil, true}, {nil, int64(0), false},
-		{int64(3), 3.0, true}, {int64(3), "3", false}, {"a", "a", true}, {"a", "b", false},
+		{nil, nil, true}, {nil, 0.0, false}, {&three, nil, false},
+		{&three, 3.0, true}, {&three, 4.0, false}, {&three, "3", false},
 	} {
-		if got := jsStrictEqual(tc.a, tc.b); got != tc.want {
-			t.Errorf("jsStrictEqual(%#v, %#v) = %v", tc.a, tc.b, got)
+		if got := (Session{TimetableID: tc.timetable}).sameTimetable(tc.v); got != tc.want {
+			t.Errorf("sameTimetable(%v, %#v) = %v", tc.timetable, tc.v, got)
 		}
 	}
 }

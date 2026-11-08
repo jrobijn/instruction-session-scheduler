@@ -44,6 +44,17 @@ const ColumnsSQL = `
 
 const OrderSQL = "invite_next_since IS NULL, invite_next_since ASC, queue_at ASC"
 
+// Columns holds the values selected by ColumnsSQL; embed it in a row struct. Only
+// last_turn_at is part of API responses.
+type Columns struct {
+	LastTurnAt      *string `db:"last_turn_at" json:"last_turn_at"`
+	QueueAt         string  `db:"queue_at" json:"-"`
+	InviteNextSince *string `db:"invite_next_since" json:"-"`
+}
+
+// QueueTieKey implements part of Entry.
+func (c Columns) QueueTieKey() string { return TieKey(c.InviteNextSince, c.QueueAt) }
+
 // Entry is the part of a queue row that tie-breaking looks at.
 type Entry interface {
 	QueueID() int64

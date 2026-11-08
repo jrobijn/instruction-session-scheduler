@@ -3,6 +3,7 @@ module github.com/jrobijn/instruction-session-scheduler/backend
 go 1.26.0
 
 require (
+	github.com/jmoiron/sqlx v1.4.0
 	github.com/pressly/goose/v3 v3.29.0
 	modernc.org/sqlite v1.61.1
 )

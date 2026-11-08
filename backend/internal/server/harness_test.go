@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -203,22 +204,68 @@ func (e *testEnv) exec(query string, args ...any) int64 {
 	return lastID(res)
 }
 
+// rows runs an ad-hoc query for assertions and returns each row as a column -> value map
+// (TEXT as string, INTEGER as int64, NULL as nil; BLOBs become strings).
 func (e *testEnv) rows(query string, args ...any) []map[string]any {
 	e.t.Helper()
-	rows, err := db.All(e.db, query, args...)
+	rows, err := e.db.Query(query, args...)
 	if err != nil {
 		e.t.Fatalf("query %q: %v", query, err)
 	}
-	return rows
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		e.t.Fatalf("query %q: %v", query, err)
+	}
+	out := []map[string]any{}
+	for rows.Next() {
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			e.t.Fatalf("query %q: %v", query, err)
+		}
+		row := make(map[string]any, len(cols))
+		for i, c := range cols {
+			if b, ok := values[i].([]byte); ok {
+				row[c] = string(b)
+			} else {
+				row[c] = values[i]
+			}
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		e.t.Fatalf("query %q: %v", query, err)
+	}
+	return out
 }
 
+// row returns the first row of rows, or nil if there is none.
 func (e *testEnv) row(query string, args ...any) map[string]any {
 	e.t.Helper()
-	row, err := db.Get(e.db, query, args...)
-	if err != nil {
-		e.t.Fatalf("query %q: %v", query, err)
+	if rows := e.rows(query, args...); len(rows) > 0 {
+		return rows[0]
 	}
-	return row
+	return nil
+}
+
+// toInt64 reads an id or count from a row map or decoded JSON (int64 or float64).
+func toInt64(v any) int64 {
+	switch x := v.(type) {
+	case int64:
+		return x
+	case float64:
+		return int64(x)
+	case int:
+		return int64(x)
+	case string:
+		n, _ := strconv.ParseInt(x, 10, 64)
+		return n
+	}
+	return 0
 }
 
 func (e *testEnv) setSetting(key, value string) {

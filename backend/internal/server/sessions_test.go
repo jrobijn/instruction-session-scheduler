@@ -40,8 +40,11 @@ func TestCreateSession(t *testing.T) {
 	tt, _ := e.timetable("18:00")
 	e.exec("UPDATE timetables SET is_default = 1 WHERE id = ?", tt)
 	got := e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": sessionDate, "notes": "Bring water"}).status(http.StatusCreated).object()
-	if got["status"] != "draft" || toInt64(got["timetable_id"]) != tt || got["notes"] != "Bring water" || got["day_of_week"] != 1.0 {
+	if got["status"] != "draft" || toInt64(got["timetable_id"]) != tt || got["notes"] != "Bring water" {
 		t.Fatalf("created session = %v", got)
+	}
+	if dow := e.row("SELECT day_of_week FROM training_sessions WHERE id = ?", got["id"])["day_of_week"]; dow != int64(1) {
+		t.Fatalf("day_of_week = %v, want 1", dow)
 	}
 
 	e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": sessionDate}).
@@ -78,8 +81,11 @@ func TestSessionDateValidation(t *testing.T) {
 
 	// Moving a session also updates its day of the week.
 	got := e.admin(http.MethodPut, sessionPath(id), map[string]any{"date": "2030-01-12"}).status(http.StatusOK).object()
-	if got["date"] != "2030-01-12" || got["day_of_week"] != 6.0 {
+	if got["date"] != "2030-01-12" {
 		t.Fatalf("moved session = %v", got)
+	}
+	if dow := e.row("SELECT day_of_week FROM training_sessions WHERE id = ?", id)["day_of_week"]; dow != int64(6) {
+		t.Fatalf("day_of_week = %v, want 6", dow)
 	}
 }
 

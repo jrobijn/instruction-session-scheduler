@@ -7,6 +7,29 @@ import (
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
+type Notification struct {
+	ID                int64   `db:"id" json:"id"`
+	Type              string  `db:"type" json:"type"`
+	InvitationID      *int64  `db:"invitation_id" json:"invitation_id"`
+	SessionID         *int64  `db:"session_id" json:"session_id"`
+	StudentName       string  `db:"student_name" json:"student_name"`
+	SessionDate       string  `db:"session_date" json:"session_date"`
+	TimeslotStartTime *string `db:"timeslot_start_time" json:"timeslot_start_time"`
+	Read              int64   `db:"read" json:"read"`
+	CreatedAt         string  `db:"created_at" json:"created_at"`
+}
+
+// NewNotification is the input of createNotification in notifications.ts. Zero values are
+// stored as NULL (an empty string for StudentName), matching the `|| null` defaults there.
+type NewNotification struct {
+	Type              string
+	InvitationID      int64
+	SessionID         int64
+	StudentName       string
+	SessionDate       string
+	TimeslotStartTime string
+}
+
 func (s *Server) notificationRoutes() {
 	s.adminRoute("GET /api/notifications", func(w http.ResponseWriter, r *http.Request) error {
 		page := 1
@@ -23,7 +46,11 @@ func (s *Server) notificationRoutes() {
 		if err != nil {
 			return err
 		}
-		notifications, err := db.All(s.db, "SELECT * FROM notifications ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", limit, offset)
+		notifications, err := db.Many[Notification](s.db, `
+			SELECT id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at
+			FROM notifications
+			ORDER BY created_at DESC, id DESC
+			LIMIT ? OFFSET ?`, limit, offset)
 		if err != nil {
 			return err
 		}
@@ -78,20 +105,9 @@ func (s *Server) unreadCount() (int64, error) {
 	return s.unreadOrTotal("SELECT COUNT(*) FROM notifications WHERE read = 0")
 }
 
-// Notification is the input of createNotification in notifications.ts. Zero values are
-// stored as NULL (an empty string for StudentName), matching the `|| null` defaults there.
-type Notification struct {
-	Type              string
-	InvitationID      int64
-	SessionID         int64
-	StudentName       string
-	SessionDate       string
-	TimeslotStartTime string
-}
-
 // CreateNotification inserts a notification and broadcasts it to SSE listeners.
 // It logs instead of failing: notifications are a side effect of the caller's real work.
-func (s *Server) CreateNotification(n Notification) {
+func (s *Server) CreateNotification(n NewNotification) {
 	var invitationID, sessionID, startTime any
 	if n.InvitationID != 0 {
 		invitationID = n.InvitationID
@@ -110,7 +126,9 @@ func (s *Server) CreateNotification(n Notification) {
 		logf("create notification %s for session %d: %v", n.Type, n.SessionID, err)
 		return
 	}
-	notification, err := db.Get(s.db, "SELECT * FROM notifications WHERE id = ?", lastID(res))
+	notification, _, err := db.One[Notification](s.db, `
+		SELECT id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at
+		FROM notifications WHERE id = ?`, lastID(res))
 	if err != nil {
 		logf("load notification: %v", err)
 		return

@@ -5,28 +5,51 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
+type Instructor struct {
+	ID        int64  `db:"id" json:"id"`
+	FirstName string `db:"first_name" json:"first_name"`
+	LastName  string `db:"last_name" json:"last_name"`
+	Email     string `db:"email" json:"email"`
+	Active    int64  `db:"active" json:"active"`
+}
+
+func (s *Server) listInstructors() ([]Instructor, error) {
+	return db.Many[Instructor](s.db, `
+		SELECT id, first_name, last_name, email, active FROM instructors
+		WHERE deleted_at IS NULL
+		ORDER BY last_name ASC, first_name ASC`)
+}
+
+// getInstructor loads a (non-deleted) instructor; found is false if there is none.
+func (s *Server) getInstructor(id any) (Instructor, bool, error) {
+	return db.One[Instructor](s.db, `
+		SELECT id, first_name, last_name, email, active FROM instructors
+		WHERE id = ? AND deleted_at IS NULL`, id)
+}
+
 func (s *Server) instructorRoutes() {
 	s.adminRoute("GET /api/instructors", func(w http.ResponseWriter, r *http.Request) error {
-		rows, err := db.All(s.db, "SELECT * FROM instructors WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC")
+		instructors, err := s.listInstructors()
 		if err != nil {
 			return err
 		}
-		httpx.OK(w, rows)
+		httpx.OK(w, instructors)
 		return nil
 	})
 
 	s.adminRoute("GET /api/instructors/export", func(w http.ResponseWriter, r *http.Request) error {
-		rows, err := db.All(s.db, "SELECT first_name, last_name, email, active FROM instructors WHERE deleted_at IS NULL ORDER BY last_name ASC, first_name ASC")
+		instructors, err := s.listInstructors()
 		if err != nil {
 			return err
 		}
-		lines := make([]string, len(rows))
-		for i, row := range rows {
-			lines[i] = csvRow(row["first_name"], row["last_name"], row["email"], row["active"])
+		lines := make([]string, len(instructors))
+		for i, in := range instructors {
+			lines[i] = csvRow(in.FirstName, in.LastName, in.Email, in.Active)
 		}
 		writeCSV(w, "instructors.csv", "first_name,last_name,email,active", lines)
 		return nil
@@ -45,7 +68,7 @@ func (s *Server) instructorRoutes() {
 		}
 
 		result := importResult{Errors: []string{}}
-		err := s.db.InTx(func(tx *sql.Tx) error {
+		err := s.db.InTx(func(tx *sqlx.Tx) error {
 			for i := 1; i < len(lines); i++ {
 				fields := parseCSVLine(lines[i])
 				first, last, email := field(fields, firstIdx), field(fields, lastIdx), field(fields, emailIdx)
@@ -81,11 +104,11 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("GET /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		row, err := db.Get(s.db, "SELECT * FROM instructors WHERE id = ? AND deleted_at IS NULL", r.PathValue("id"))
+		row, found, err := s.getInstructor(r.PathValue("id"))
 		if err != nil {
 			return err
 		}
-		if row == nil {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
@@ -111,7 +134,7 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := db.Get(s.db, "SELECT * FROM instructors WHERE id = ?", lastID(res))
+		row, _, err := s.getInstructor(lastID(res))
 		if err != nil {
 			return err
 		}
@@ -144,7 +167,7 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := db.Get(s.db, "SELECT * FROM instructors WHERE id = ?", id)
+		row, _, err := s.getInstructor(id)
 		if err != nil {
 			return err
 		}
@@ -160,15 +183,19 @@ func (s *Server) instructorRoutes() {
 		}
 		// The instructor leaves every session that hasn't taken place, as if removed from each
 		// one; completed sessions are history and stay as they are.
-		slots, err := db.All(s.db, `
-			SELECT ss.id AS slot_id, ss.session_id FROM session_slots ss
+		type openSlot struct {
+			SessionID int64 `db:"session_id"`
+			SlotID    int64 `db:"slot_id"`
+		}
+		slots, err := db.Many[openSlot](s.db, `
+			SELECT ss.session_id, ss.id AS slot_id FROM session_slots ss
 			JOIN training_sessions ts ON ts.id = ss.session_id
 			WHERE ss.instructor_id = ? AND ss.removed = 0 AND ts.status != 'completed'`, id)
 		if err != nil {
 			return err
 		}
 		for _, slot := range slots {
-			if _, err := s.removeSlot(toInt64(slot["session_id"]), toInt64(slot["slot_id"])); err != nil {
+			if _, err := s.removeSlot(slot.SessionID, slot.SlotID); err != nil {
 				return err
 			}
 		}

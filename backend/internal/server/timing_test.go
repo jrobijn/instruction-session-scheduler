@@ -121,7 +121,7 @@ func TestEffectiveStatus(t *testing.T) {
 func TestExpiresAtISO(t *testing.T) {
 	loc := amsterdam(t)
 	inv := invitationTiming{Status: "invited", InvitedAt: "2030-01-07 10:00:00", SessionDate: "2030-01-07", StartTime: "18:00"}
-	if got := expiresAtISO(inv, 120, loc); got != "2030-01-07T12:00:00.000Z" {
+	if got := expiresAtISO(inv, 120, loc); got == nil || *got != "2030-01-07T12:00:00.000Z" {
 		t.Fatalf("got %v", got)
 	}
 	confirmed := inv

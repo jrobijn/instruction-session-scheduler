@@ -1,10 +1,11 @@
 package db
 
 import (
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/jmoiron/sqlx"
 )
 
 func openWithTable(t *testing.T) *DB {
@@ -16,50 +17,49 @@ func openWithTable(t *testing.T) *DB {
 	return d
 }
 
-func TestAllReturnsColumnMaps(t *testing.T) {
-	d := openWithTable(t)
-	if _, err := d.Exec("INSERT INTO things (id, name, score, data) VALUES (1, 'a', 1.5, x'6869'), (2, NULL, NULL, NULL)"); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := All(d, "SELECT id, name, score, data FROM things ORDER BY id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("rows = %v", rows)
-	}
-	first := rows[0]
-	if first["id"] != int64(1) || first["name"] != "a" || first["score"] != 1.5 || first["data"] != "hi" {
-		t.Fatalf("first row = %#v (blobs should become strings)", first)
-	}
-	for _, c := range []string{"name", "score", "data"} {
-		if rows[1][c] != nil {
-			t.Errorf("NULL %s = %#v", c, rows[1][c])
-		}
-	}
+type thing struct {
+	ID   int64   `db:"id"`
+	Name *string `db:"name"`
+	Rank int     `db:"-"` // not a column
+}
 
-	empty, err := All(d, "SELECT * FROM things WHERE id = ?", 99)
+func TestMany(t *testing.T) {
+	d := openWithTable(t)
+	d.Exec("INSERT INTO things (id, name) VALUES (1, 'a'), (2, NULL)")
+	// Columns are matched by name, in any order.
+	rows, err := Many[thing](d, "SELECT name, id FROM things ORDER BY id")
+	if err != nil || len(rows) != 2 || rows[0].ID != 1 || *rows[0].Name != "a" || rows[1].Name != nil {
+		t.Fatalf("Many = %+v, %v", rows, err)
+	}
+	empty, err := Many[thing](d, "SELECT id, name FROM things WHERE id = 99")
 	if err != nil || empty == nil || len(empty) != 0 {
 		t.Fatalf("empty result = %#v, %v; want a non-nil empty slice (JSON [])", empty, err)
 	}
-	if _, err := All(d, "SELECT * FROM missing"); err == nil {
+	ids, err := Many[int64](d, "SELECT id FROM things ORDER BY id")
+	if err != nil || len(ids) != 2 || ids[1] != 2 {
+		t.Fatalf("Many[int64] = %v, %v", ids, err)
+	}
+	if _, err := Many[thing](d, "SELECT * FROM missing"); err == nil {
 		t.Fatal("query error not returned")
+	}
+	if _, err := Many[thing](d, "SELECT id, name, score FROM things"); err == nil {
+		t.Fatal("column without a struct field not reported")
 	}
 }
 
-func TestGet(t *testing.T) {
+func TestOne(t *testing.T) {
 	d := openWithTable(t)
 	d.Exec("INSERT INTO things (id, name) VALUES (1, 'a'), (2, 'b')")
-	row, err := Get(d, "SELECT name FROM things ORDER BY id")
-	if err != nil || row["name"] != "a" {
-		t.Fatalf("Get = %v, %v", row, err)
+	th, found, err := One[thing](d, "SELECT id, name FROM things ORDER BY id")
+	if err != nil || !found || th.ID != 1 {
+		t.Fatalf("One = %+v, %v, %v", th, found, err)
 	}
-	row, err = Get(d, "SELECT name FROM things WHERE id = 3")
-	if err != nil || row != nil {
-		t.Fatalf("Get without rows = %v, %v", row, err)
+	_, found, err = One[thing](d, "SELECT id, name FROM things WHERE id = 3")
+	if err != nil || found {
+		t.Fatalf("One without rows: found %v, err %v", found, err)
 	}
-	if _, err := Get(d, "SELECT nope"); err == nil {
-		t.Fatal("query error not returned")
+	if _, found, err := One[thing](d, "SELECT nope"); err == nil || found {
+		t.Fatalf("query error: found %v, err %v", found, err)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestInTx(t *testing.T) {
 		return n
 	}
 
-	if err := d.InTx(func(tx *sql.Tx) error {
+	if err := d.InTx(func(tx *sqlx.Tx) error {
 		_, err := tx.Exec("INSERT INTO things (id) VALUES (1)")
 		return err
 	}); err != nil || count() != 1 {
@@ -93,7 +93,7 @@ func TestInTx(t *testing.T) {
 	}
 
 	boom := errors.New("boom")
-	if err := d.InTx(func(tx *sql.Tx) error {
+	if err := d.InTx(func(tx *sqlx.Tx) error {
 		tx.Exec("INSERT INTO things (id) VALUES (2)")
 		return boom
 	}); !errors.Is(err, boom) || count() != 1 {
@@ -106,7 +106,7 @@ func TestInTx(t *testing.T) {
 				t.Fatal("panic not re-raised")
 			}
 		}()
-		d.InTx(func(tx *sql.Tx) error {
+		d.InTx(func(tx *sqlx.Tx) error {
 			tx.Exec("INSERT INTO things (id) VALUES (3)")
 			panic("oops")
 		})

@@ -3,26 +3,23 @@ package server
 import (
 	"net/http"
 
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
 func (s *Server) settingsRoutes() {
 	s.adminRoute("GET /api/settings", func(w http.ResponseWriter, r *http.Request) error {
-		rows, err := s.db.Query("SELECT key, value FROM settings")
+		type setting struct {
+			Key   string `db:"key"`
+			Value string `db:"value"`
+		}
+		entries, err := db.Many[setting](s.db, "SELECT key, value FROM settings")
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		settings := map[string]string{}
-		for rows.Next() {
-			var k, v string
-			if err := rows.Scan(&k, &v); err != nil {
-				return err
-			}
-			settings[k] = v
-		}
-		if err := rows.Err(); err != nil {
-			return err
+		settings := make(map[string]string, len(entries))
+		for _, st := range entries {
+			settings[st.Key] = st.Value
 		}
 		httpx.OK(w, settings)
 		return nil

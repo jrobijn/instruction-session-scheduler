@@ -32,7 +32,7 @@ func migrations() fs.FS {
 // It refuses to run on a database from before the last TypeScript release, and on one that a
 // newer build of the server has migrated.
 func (d *DB) Migrate(ctx context.Context) error {
-	provider, err := goose.NewProvider(goose.DialectSQLite3, d.DB, migrations())
+	provider, err := goose.NewProvider(goose.DialectSQLite3, d.DB.DB, migrations())
 	if err != nil {
 		return err
 	}

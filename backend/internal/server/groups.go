@@ -6,34 +6,126 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
 )
 
+type Group struct {
+	ID                        int64  `db:"id" json:"id"`
+	Name                      string `db:"name" json:"name"`
+	Color                     string `db:"color" json:"color"`
+	IsDefault                 int64  `db:"is_default" json:"is_default"`
+	Active                    int64  `db:"active" json:"active"`
+	NewMemberPriority         string `db:"new_member_priority" json:"new_member_priority"`
+	ReactivatedMemberPriority string `db:"reactivated_member_priority" json:"reactivated_member_priority"`
+	CooldownMemberPriority    string `db:"cooldown_member_priority" json:"cooldown_member_priority"`
+}
+
+// getGroup loads a group by id; it must exist.
+func (s *Server) getGroup(id any) (Group, error) {
+	g, _, err := db.One[Group](s.db, `
+		SELECT id, name, color, is_default, active,
+			new_member_priority, reactivated_member_priority, cooldown_member_priority
+		FROM groups WHERE id = ?`, id)
+	return g, err
+}
+
+type GroupWithCounts struct {
+	Group
+	MemberCount     int64 `db:"member_count" json:"member_count"`
+	DisciplineCount int64 `db:"discipline_count" json:"discipline_count"`
+}
+
+func (s *Server) listGroups() ([]GroupWithCounts, error) {
+	return db.Many[GroupWithCounts](s.db, `
+		SELECT g.id, g.name, g.color, g.is_default, g.active,
+			g.new_member_priority, g.reactivated_member_priority, g.cooldown_member_priority,
+			(SELECT COUNT(*) FROM student_groups WHERE group_id = g.id) AS member_count,
+			(SELECT COUNT(*) FROM discipline_groups WHERE group_id = g.id) AS discipline_count
+		FROM groups g
+		ORDER BY g.name ASC`)
+}
+
+// GroupRef names a group, e.g. one a discipline is linked to.
+type GroupRef struct {
+	ID   int64  `db:"id" json:"id"`
+	Name string `db:"name" json:"name"`
+}
+
+// GroupSummary is a group as listed for a discipline.
+type GroupSummary struct {
+	ID        int64  `db:"id" json:"id"`
+	Name      string `db:"name" json:"name"`
+	IsDefault int64  `db:"is_default" json:"is_default"`
+	Active    int64  `db:"active" json:"active"`
+}
+
+// GroupMember is a member in a group's queue.
+type GroupMember struct {
+	ID                int64   `db:"id" json:"id"`
+	FirstName         string  `db:"first_name" json:"first_name"`
+	LastName          string  `db:"last_name" json:"last_name"`
+	Email             string  `db:"email" json:"email"`
+	Active            int64   `db:"active" json:"active"`
+	CooldownUntil     *string `db:"cooldown_until" json:"cooldown_until"`
+	PreferredDays     string  `db:"preferred_days" json:"preferred_days"`
+	ActiveInvitations int64   `db:"active_invitations" json:"active_invitations"`
+	queue.Columns
+
+	// Computed from the columns below.
+	QueuePosition *int64            `db:"-" json:"queue_position"` // nil for inactive members
+	InviteNext    bool              `db:"-" json:"invite_next"`
+	QueueOverride *QueueOverride    `db:"-" json:"queue_override"`
+	BuddyGroup    *MemberBuddyGroup `db:"-" json:"buddy_group"`
+
+	JoinedAt          *string `db:"joined_at" json:"-"`
+	ReactivatedAt     *string `db:"reactivated_at" json:"-"`
+	NewPolicy         string  `db:"new_member_priority" json:"-"`
+	ReactivatedPolicy string  `db:"reactivated_member_priority" json:"-"`
+	CooldownPolicy    string  `db:"cooldown_member_priority" json:"-"`
+	BuddyGroupID      *int64  `db:"buddy_group_id" json:"-"`
+}
+
+// QueueOverride says which event placed a member at the back of the queue.
+type QueueOverride struct {
+	Reason string `json:"reason"` // joined, reactivated or cooldown
+	At     string `json:"at"`
+}
+
+type MemberBuddyGroup struct {
+	ID      int64   `json:"id"`
+	Name    string  `json:"name"`
+	Buddies []Buddy `json:"buddies"` // the other members
+}
+
+type Buddy struct {
+	ID        int64   `db:"id" json:"id"`
+	FirstName string  `db:"first_name" json:"first_name"`
+	LastName  string  `db:"last_name" json:"last_name"`
+	GroupID   *int64  `db:"group_id" json:"group_id"`
+	GroupName *string `db:"group_name" json:"group_name"`
+}
+
 func (s *Server) groupRoutes() {
 	s.adminRoute("GET /api/groups", func(w http.ResponseWriter, r *http.Request) error {
-		rows, err := db.All(s.db, `
-			SELECT g.*,
-				(SELECT COUNT(*) FROM student_groups WHERE group_id = g.id) AS member_count,
-				(SELECT COUNT(*) FROM discipline_groups WHERE group_id = g.id) AS discipline_count
-			FROM groups g
-			ORDER BY g.name ASC`)
+		groups, err := s.listGroups()
 		if err != nil {
 			return err
 		}
-		httpx.OK(w, rows)
+		httpx.OK(w, groups)
 		return nil
 	})
 
 	s.adminRoute("GET /api/groups/export", func(w http.ResponseWriter, r *http.Request) error {
-		rows, err := db.All(s.db, "SELECT name, is_default, active FROM groups ORDER BY name ASC")
+		groups, err := s.listGroups()
 		if err != nil {
 			return err
 		}
-		lines := make([]string, len(rows))
-		for i, row := range rows {
-			lines[i] = csvRow(row["name"], row["is_default"], row["active"])
+		lines := make([]string, len(groups))
+		for i, g := range groups {
+			lines[i] = csvRow(g.Name, g.IsDefault, g.Active)
 		}
 		writeCSV(w, "groups.csv", "name,is_default,active", lines)
 		return nil
@@ -50,7 +142,7 @@ func (s *Server) groupRoutes() {
 			return nil
 		}
 		result := importResult{Errors: []string{}}
-		err := s.db.InTx(func(tx *sql.Tx) error {
+		err := s.db.InTx(func(tx *sqlx.Tx) error {
 			for i := 1; i < len(lines); i++ {
 				name := field(parseCSVLine(lines[i]), nameIdx)
 				if name == "" {
@@ -105,7 +197,7 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := db.Get(s.db, "SELECT * FROM groups WHERE id = ?", lastID(res))
+		row, err := s.getGroup(lastID(res))
 		if err != nil {
 			return err
 		}
@@ -147,7 +239,7 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := db.Get(s.db, "SELECT * FROM groups WHERE id = ?", id)
+		row, err := s.getGroup(id)
 		if err != nil {
 			return err
 		}
@@ -178,7 +270,7 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		err := s.db.InTx(func(tx *sql.Tx) error {
+		err := s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("UPDATE groups SET is_default = 0 WHERE is_default = 1"); err != nil {
 				return err
 			}
@@ -188,7 +280,7 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := db.Get(s.db, "SELECT * FROM groups WHERE id = ?", id)
+		row, err := s.getGroup(id)
 		if err != nil {
 			return err
 		}
@@ -205,7 +297,7 @@ func (s *Server) groupRoutes() {
 		if _, err := s.db.Exec("UPDATE groups SET is_default = 0 WHERE id = ?", id); err != nil {
 			return err
 		}
-		row, err := db.Get(s.db, "SELECT * FROM groups WHERE id = ?", id)
+		row, err := s.getGroup(id)
 		if err != nil {
 			return err
 		}
@@ -234,7 +326,7 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
-		err := s.db.InTx(func(tx *sql.Tx) error {
+		err := s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM student_groups WHERE student_id = ?", arg(studentID)); err != nil {
 				return err
 			}
@@ -301,7 +393,7 @@ func (s *Server) groupRoutes() {
 			return nil
 		}
 		like := "%" + q + "%"
-		rows, err := db.All(s.db, `
+		students, err := db.Many[StudentSearchResult](s.db, `
 			SELECT s.id, s.first_name, s.last_name, s.email,
 				(SELECT g.name FROM student_groups sg JOIN groups g ON g.id = sg.group_id WHERE sg.student_id = s.id) AS current_group_name
 			FROM students s
@@ -314,7 +406,7 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		httpx.OK(w, rows)
+		httpx.OK(w, students)
 		return nil
 	})
 
@@ -324,7 +416,7 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		rows, err := db.All(s.db, `
+		disciplines, err := db.Many[Discipline](s.db, `
 			SELECT d.id, d.name, d.abbreviation, d.active
 			FROM disciplines d
 			JOIN discipline_groups dg ON dg.discipline_id = d.id
@@ -333,7 +425,7 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		httpx.OK(w, rows)
+		httpx.OK(w, disciplines)
 		return nil
 	})
 
@@ -381,13 +473,12 @@ func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request) erro
 		httpx.Error(w, http.StatusNotFound, "Group not found")
 		return nil
 	}
-	members, err := db.All(s.db, `
+	members, err := db.Many[GroupMember](s.db, `
 		SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, s.preferred_days,
 			`+queue.ColumnsSQL+`,
 			sg.joined_at, sg.reactivated_at,
-			qg.new_member_priority AS new_policy, qg.reactivated_member_priority AS reactivated_policy,
-			qg.cooldown_member_priority AS cooldown_policy,
-			bgm.buddy_group_id AS buddy_group_id,
+			qg.new_member_priority, qg.reactivated_member_priority, qg.cooldown_member_priority,
+			bgm.buddy_group_id,
 			(SELECT COUNT(*) FROM invitations i
 				JOIN training_sessions ts ON ts.id = i.session_id
 				WHERE i.student_id = s.id AND i.status IN ('confirmed', 'invited', 'scheduled')
@@ -403,8 +494,12 @@ func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request) erro
 	}
 
 	// Buddy group names are built from member first names (matches the students list).
-	buddies, err := db.All(s.db, `
-		SELECT bgm.student_id, bgm.buddy_group_id, s.first_name, s.last_name, sg.group_id, g.name AS group_name
+	type buddyRow struct {
+		BuddyGroupID int64 `db:"buddy_group_id"`
+		Buddy
+	}
+	buddies, err := db.Many[buddyRow](s.db, `
+		SELECT bgm.student_id AS id, bgm.buddy_group_id, s.first_name, s.last_name, sg.group_id, g.name AS group_name
 		FROM buddy_group_members bgm
 		JOIN students s ON s.id = bgm.student_id AND s.deleted_at IS NULL
 		LEFT JOIN student_groups sg ON sg.student_id = s.id
@@ -412,59 +507,48 @@ func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	buddiesByGroup := map[int64][]map[string]any{}
+	buddiesByGroup := map[int64][]Buddy{}
 	for _, b := range buddies {
-		gid := toInt64(b["buddy_group_id"])
-		buddiesByGroup[gid] = append(buddiesByGroup[gid], b)
+		buddiesByGroup[b.BuddyGroupID] = append(buddiesByGroup[b.BuddyGroupID], b.Buddy)
 	}
 
 	position := int64(0)
-	for _, m := range members {
-		queueAt, _ := m["queue_at"].(string)
-		lastTurn, _ := m["last_turn_at"].(string)
+	for i := range members {
+		m := &members[i]
+		lastTurn := deref(m.LastTurnAt)
 		// A 'back' policy only matters when its moment is what places the member (later than their last turn).
-		var override any
-		for _, o := range []struct{ reason, atKey, policyKey string }{
-			{"joined", "joined_at", "new_policy"},
-			{"reactivated", "reactivated_at", "reactivated_policy"},
-			{"cooldown", "cooldown_until", "cooldown_policy"},
+		for _, o := range []struct {
+			reason, policy string
+			at             *string
+		}{
+			{"joined", m.NewPolicy, m.JoinedAt},
+			{"reactivated", m.ReactivatedPolicy, m.ReactivatedAt},
+			{"cooldown", m.CooldownPolicy, m.CooldownUntil},
 		} {
-			at, _ := m[o.atKey].(string)
-			if m[o.policyKey] == "back" && at != "" && at == queueAt && at > lastTurn {
-				override = map[string]any{"reason": o.reason, "at": at}
+			if at := deref(o.at); o.policy == "back" && at != "" && at == m.QueueAt && at > lastTurn {
+				m.QueueOverride = &QueueOverride{Reason: o.reason, At: at}
 				break
 			}
 		}
 
-		var queuePosition any
-		if truthy(m["active"]) {
+		if m.Active != 0 {
 			position++
-			queuePosition = position
+			p := position
+			m.QueuePosition = &p
 		}
+		m.InviteNext = m.InviteNextSince != nil
 
-		var buddyGroup any
-		if bgID := m["buddy_group_id"]; truthy(bgID) {
-			group := buddiesByGroup[toInt64(bgID)]
+		if m.BuddyGroupID != nil {
+			group := buddiesByGroup[*m.BuddyGroupID]
 			names := make([]string, len(group))
-			others := []map[string]any{}
-			for i, b := range group {
-				names[i], _ = b["first_name"].(string)
-				if toInt64(b["student_id"]) != toInt64(m["id"]) {
-					others = append(others, map[string]any{
-						"id": b["student_id"], "first_name": b["first_name"], "last_name": b["last_name"],
-						"group_id": b["group_id"], "group_name": b["group_name"],
-					})
+			others := []Buddy{}
+			for j, b := range group {
+				names[j] = b.FirstName
+				if b.ID != m.ID {
+					others = append(others, b)
 				}
 			}
-			buddyGroup = map[string]any{"id": bgID, "name": strings.Join(names, " & "), "buddies": others}
-		}
-
-		m["queue_position"] = queuePosition
-		m["invite_next"] = m["invite_next_since"] != nil
-		m["queue_override"] = override
-		m["buddy_group"] = buddyGroup
-		for _, k := range []string{"buddy_group_id", "queue_at", "invite_next_since", "joined_at", "reactivated_at", "new_policy", "reactivated_policy", "cooldown_policy"} {
-			delete(m, k)
+			m.BuddyGroup = &MemberBuddyGroup{ID: *m.BuddyGroupID, Name: strings.Join(names, " & "), Buddies: others}
 		}
 	}
 	httpx.OK(w, members)

@@ -10,7 +10,7 @@ func TestNotifications(t *testing.T) {
 	e := newTestEnv(t)
 	sid := e.session(sessionDate, 0)
 	for i := range 25 {
-		e.srv.CreateNotification(Notification{Type: "invitation_declined", SessionID: sid, StudentName: fmt.Sprintf("S%d", i), SessionDate: sessionDate})
+		e.srv.CreateNotification(NewNotification{Type: "invitation_declined", SessionID: sid, StudentName: fmt.Sprintf("S%d", i), SessionDate: sessionDate})
 	}
 
 	page := e.admin(http.MethodGet, "/api/notifications", nil).status(http.StatusOK).object()
@@ -50,7 +50,7 @@ func TestNotifications(t *testing.T) {
 // 0, which the foreign key rejected, so the notification was silently dropped).
 func TestCreateNotificationWithoutSession(t *testing.T) {
 	e := newTestEnv(t)
-	e.srv.CreateNotification(Notification{Type: "session_full", SessionDate: sessionDate})
+	e.srv.CreateNotification(NewNotification{Type: "session_full", SessionDate: sessionDate})
 	n := e.row("SELECT * FROM notifications")
 	if n == nil || n["session_id"] != nil || n["invitation_id"] != nil {
 		t.Fatalf("notification = %v, want one with NULL session_id", n)
@@ -60,13 +60,13 @@ func TestCreateNotificationWithoutSession(t *testing.T) {
 func TestCreateNotificationStoresNulls(t *testing.T) {
 	e := newTestEnv(t)
 	sid := e.session(sessionDate, 0)
-	e.srv.CreateNotification(Notification{Type: "session_full", SessionID: sid, SessionDate: sessionDate})
+	e.srv.CreateNotification(NewNotification{Type: "session_full", SessionID: sid, SessionDate: sessionDate})
 	n := e.row("SELECT * FROM notifications")
 	if n == nil || n["invitation_id"] != nil || n["timeslot_start_time"] != nil || n["student_name"] != "" {
 		t.Fatalf("notification = %v", n)
 	}
 	// An invalid type is logged, not raised.
-	e.srv.CreateNotification(Notification{Type: "nonsense", SessionID: sid, SessionDate: sessionDate})
+	e.srv.CreateNotification(NewNotification{Type: "nonsense", SessionID: sid, SessionDate: sessionDate})
 	if len(e.rows("SELECT 1 FROM notifications")) != 1 {
 		t.Fatal("invalid notification stored")
 	}

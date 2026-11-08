@@ -5,48 +5,79 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
+type Discipline struct {
+	ID           int64  `db:"id" json:"id"`
+	Name         string `db:"name" json:"name"`
+	Abbreviation string `db:"abbreviation" json:"abbreviation"`
+	Active       int64  `db:"active" json:"active"`
+}
+
+func (s *Server) listDisciplines() ([]Discipline, error) {
+	return db.Many[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines ORDER BY name ASC")
+}
+
+func (s *Server) getDiscipline(id any) (Discipline, bool, error) {
+	return db.One[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines WHERE id = ?", id)
+}
+
+type DisciplineWithGroups struct {
+	Discipline
+	Groups []GroupRef `json:"groups"`
+}
+
+// DisciplineOption is a discipline as offered to an invited student.
+type DisciplineOption struct {
+	ID   int64  `db:"id" json:"id"`
+	Name string `db:"name" json:"name"`
+}
+
 func (s *Server) disciplineRoutes() {
 	s.adminRoute("GET /api/disciplines", func(w http.ResponseWriter, r *http.Request) error {
-		disciplines, err := db.All(s.db, "SELECT * FROM disciplines ORDER BY name ASC")
+		disciplines, err := s.listDisciplines()
 		if err != nil {
 			return err
 		}
-		links, err := db.All(s.db, `
-			SELECT dg.discipline_id, dg.group_id, g.name AS group_name
+		type link struct {
+			DisciplineID int64 `db:"discipline_id"`
+			GroupRef
+		}
+		links, err := db.Many[link](s.db, `
+			SELECT dg.discipline_id, g.id, g.name
 			FROM discipline_groups dg
 			JOIN groups g ON g.id = dg.group_id
 			ORDER BY g.name ASC`)
 		if err != nil {
 			return err
 		}
-		byDiscipline := map[int64][]map[string]any{}
+		byDiscipline := map[int64][]GroupRef{}
 		for _, l := range links {
-			id := toInt64(l["discipline_id"])
-			byDiscipline[id] = append(byDiscipline[id], map[string]any{"id": l["group_id"], "name": l["group_name"]})
+			byDiscipline[l.DisciplineID] = append(byDiscipline[l.DisciplineID], l.GroupRef)
 		}
-		for _, d := range disciplines {
-			groups := byDiscipline[toInt64(d["id"])]
+		out := make([]DisciplineWithGroups, len(disciplines))
+		for i, d := range disciplines {
+			groups := byDiscipline[d.ID]
 			if groups == nil {
-				groups = []map[string]any{}
+				groups = []GroupRef{}
 			}
-			d["groups"] = groups
+			out[i] = DisciplineWithGroups{Discipline: d, Groups: groups}
 		}
-		httpx.OK(w, disciplines)
+		httpx.OK(w, out)
 		return nil
 	})
 
 	s.adminRoute("GET /api/disciplines/export", func(w http.ResponseWriter, r *http.Request) error {
-		rows, err := db.All(s.db, "SELECT name, abbreviation, active FROM disciplines ORDER BY name ASC")
+		disciplines, err := s.listDisciplines()
 		if err != nil {
 			return err
 		}
-		lines := make([]string, len(rows))
-		for i, row := range rows {
-			lines[i] = csvRow(row["name"], row["abbreviation"], row["active"])
+		lines := make([]string, len(disciplines))
+		for i, d := range disciplines {
+			lines[i] = csvRow(d.Name, d.Abbreviation, d.Active)
 		}
 		writeCSV(w, "disciplines.csv", "name,abbreviation,active", lines)
 		return nil
@@ -65,7 +96,7 @@ func (s *Server) disciplineRoutes() {
 		}
 
 		result := importResult{Errors: []string{}}
-		err := s.db.InTx(func(tx *sql.Tx) error {
+		err := s.db.InTx(func(tx *sqlx.Tx) error {
 			for i := 1; i < len(lines); i++ {
 				fields := parseCSVLine(lines[i])
 				name, abbr := field(fields, nameIdx), field(fields, abbrIdx)
@@ -106,11 +137,11 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("GET /api/disciplines/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		row, err := db.Get(s.db, "SELECT * FROM disciplines WHERE id = ?", r.PathValue("id"))
+		row, found, err := s.getDiscipline(r.PathValue("id"))
 		if err != nil {
 			return err
 		}
-		if row == nil {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
@@ -139,7 +170,7 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := db.Get(s.db, "SELECT * FROM disciplines WHERE id = ?", lastID(res))
+		row, _, err := s.getDiscipline(lastID(res))
 		if err != nil {
 			return err
 		}
@@ -171,7 +202,7 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := db.Get(s.db, "SELECT * FROM disciplines WHERE id = ?", id)
+		row, _, err := s.getDiscipline(id)
 		if err != nil {
 			return err
 		}
@@ -194,7 +225,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		err := s.db.InTx(func(tx *sql.Tx) error {
+		err := s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM discipline_groups WHERE discipline_id = ?", id); err != nil {
 				return err
 			}
@@ -218,7 +249,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		rows, err := db.All(s.db, `
+		groups, err := db.Many[GroupSummary](s.db, `
 			SELECT g.id, g.name, g.is_default, g.active
 			FROM groups g
 			JOIN discipline_groups dg ON dg.group_id = g.id
@@ -227,7 +258,7 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
-		httpx.OK(w, rows)
+		httpx.OK(w, groups)
 		return nil
 	})
 
@@ -273,4 +304,54 @@ func (s *Server) disciplineRoutes() {
 		httpx.Success(w)
 		return nil
 	})
+}
+
+const activeDisciplinesSQL = "SELECT id, name FROM disciplines WHERE active = 1 ORDER BY name ASC"
+
+func (s *Server) handlePublicDisciplines(w http.ResponseWriter, _ *http.Request) {
+	disciplines, err := db.Many[DisciplineOption](s.db, activeDisciplinesSQL)
+	if err != nil {
+		s.internalError(w, err)
+		return
+	}
+	httpx.OK(w, disciplines)
+}
+
+// handlePublicDisciplinesForToken returns the disciplines available to the invited student.
+func (s *Server) handlePublicDisciplinesForToken(w http.ResponseWriter, r *http.Request) {
+	type tokenInvitation struct {
+		StudentID int64  `db:"student_id"`
+		GroupID   *int64 `db:"group_id"`
+	}
+	inv, found, err := db.One[tokenInvitation](s.db, "SELECT student_id, group_id FROM invitations WHERE token = ?", r.PathValue("token"))
+	if err != nil {
+		s.internalError(w, err)
+		return
+	}
+
+	var disciplines []DisciplineOption
+	switch {
+	case !found:
+		disciplines, err = db.Many[DisciplineOption](s.db, activeDisciplinesSQL)
+	case inv.GroupID != nil:
+		// Auto-scheduled: disciplines linked to the invitation's specific group.
+		disciplines, err = db.Many[DisciplineOption](s.db, `
+			SELECT DISTINCT d.id, d.name FROM disciplines d
+			JOIN discipline_groups dg ON dg.discipline_id = d.id
+			WHERE d.active = 1 AND dg.group_id = ?
+			ORDER BY d.name ASC`, *inv.GroupID)
+	default:
+		// Manually assigned (no group): disciplines from all the student's groups.
+		disciplines, err = db.Many[DisciplineOption](s.db, `
+			SELECT DISTINCT d.id, d.name FROM disciplines d
+			JOIN discipline_groups dg ON dg.discipline_id = d.id
+			JOIN student_groups sg ON sg.group_id = dg.group_id
+			WHERE d.active = 1 AND sg.student_id = ?
+			ORDER BY d.name ASC`, inv.StudentID)
+	}
+	if err != nil {
+		s.internalError(w, err)
+		return
+	}
+	httpx.OK(w, disciplines)
 }

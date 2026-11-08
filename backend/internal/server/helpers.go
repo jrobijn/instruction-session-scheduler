@@ -150,19 +150,12 @@ func jsParseInt(s string) (int, bool) {
 	return n, err == nil
 }
 
-func toInt64(v any) int64 {
-	switch x := v.(type) {
-	case int64:
-		return x
-	case float64:
-		return int64(x)
-	case int:
-		return int64(x)
-	case string:
-		n, _ := strconv.ParseInt(x, 10, 64)
-		return n
+// deref returns *p, or "" for a NULL column.
+func deref(p *string) string {
+	if p == nil {
+		return ""
 	}
-	return 0
+	return *p
 }
 
 func isUniqueErr(err error) bool {

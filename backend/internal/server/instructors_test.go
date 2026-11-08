@@ -2,7 +2,9 @@ package server
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"testing"
 )
 
@@ -26,6 +28,15 @@ func TestInstructorCRUD(t *testing.T) {
 	list := e.admin(http.MethodGet, "/api/instructors", nil).status(http.StatusOK).array()
 	if len(list) != 2 || toInt64(list[0]["id"]) != other {
 		t.Fatalf("instructors = %v, want sorted by last name", list)
+	}
+
+	// Only the API fields are exposed, not every column (created_at, deleted_at).
+	one := e.admin(http.MethodGet, fmt.Sprintf("/api/instructors/%d", id), nil).status(http.StatusOK).object()
+	if keys := slices.Sorted(maps.Keys(one)); !slices.Equal(keys, []string{"active", "email", "first_name", "id", "last_name"}) {
+		t.Fatalf("instructor fields = %v", keys)
+	}
+	if one["active"] != float64(1) || one["email"] != "ida@example.test" {
+		t.Fatalf("instructor = %v", one)
 	}
 
 	e.admin(http.MethodDelete, fmt.Sprintf("/api/instructors/%d", id), nil).status(http.StatusOK)
