@@ -117,16 +117,21 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("POST /api/instructors", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			FirstName string `json:"first_name"`
+			LastName  string `json:"last_name"`
+			Email     string `json:"email"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		if !truthy(b["first_name"]) || !truthy(b["last_name"]) || !truthy(b["email"]) {
+		if in.FirstName == "" || in.LastName == "" || in.Email == "" {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
 			return nil
 		}
 		res, err := s.db.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)",
-			arg(b["first_name"]), arg(b["last_name"]), arg(b["email"]))
+			in.FirstName, in.LastName, in.Email)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
 			return nil
@@ -143,7 +148,13 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("PUT /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			FirstName *string `json:"first_name"`
+			LastName  *string `json:"last_name"`
+			Email     *string `json:"email"`
+			Active    *int64  `json:"active"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
@@ -159,7 +170,7 @@ func (s *Server) instructorRoutes() {
 				email = COALESCE(?, email),
 				active = COALESCE(?, active)
 			WHERE id = ?`,
-			arg(b["first_name"]), arg(b["last_name"]), arg(b["email"]), arg(b["active"]), id)
+			in.FirstName, in.LastName, in.Email, in.Active, id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
 			return nil

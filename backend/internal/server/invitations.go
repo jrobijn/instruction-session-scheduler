@@ -156,20 +156,6 @@ func (s *Server) sessionFull(sessionID int64) (bool, error) {
 	return confirmed >= total, nil
 }
 
-// numberKey returns v as an integer id if it is a JSON/SQLite number with an integral value.
-// JS Set/Map lookups are strict, so strings never match numeric ids.
-func numberKey(v any) (int64, bool) {
-	switch x := v.(type) {
-	case int64:
-		return x, true
-	case float64:
-		if x == float64(int64(x)) {
-			return int64(x), true
-		}
-	}
-	return 0, false
-}
-
 // nonEmpty returns nil for "", so the value encodes as null (like `value || null`).
 func nonEmpty(s string) *string {
 	if s == "" {
@@ -587,27 +573,30 @@ func (s *Server) loadOpenInvitation(w http.ResponseWriter, r *http.Request, requ
 }
 
 func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request) error {
-	b, err := readBody(r)
-	if err != nil {
-		b = body{}
+	var in struct {
+		DisciplineID int64 `json:"discipline_id"` // 0 or null: none chosen
+	}
+	// Lenient: an unreadable body confirms without a discipline.
+	if httpx.Decode(r, &in) != nil {
+		in.DisciplineID = 0
 	}
 	inv, ok, err := s.loadOpenInvitation(w, r, "invited")
 	if !ok || err != nil {
 		return err
 	}
-	disciplineID := b["discipline_id"]
+	disciplineID := in.DisciplineID
 	invID, sessionID := inv.ID, inv.SessionID
 
 	// The discipline must belong to the invitation's group.
-	if truthy(disciplineID) && inv.GroupID != nil && *inv.GroupID != 0 &&
-		!s.exists("SELECT 1 FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", arg(disciplineID), *inv.GroupID) {
+	if disciplineID != 0 && inv.GroupID != nil && *inv.GroupID != 0 &&
+		!s.exists("SELECT 1 FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", disciplineID, *inv.GroupID) {
 		httpx.Error(w, http.StatusBadRequest, "Selected discipline is not available for your group")
 		return nil
 	}
 
-	var storedDiscipline any
-	if truthy(disciplineID) {
-		storedDiscipline = arg(disciplineID)
+	var storedDiscipline *int64
+	if disciplineID != 0 {
+		storedDiscipline = &disciplineID
 	}
 	if _, err := s.db.Exec("UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?", storedDiscipline, invID); err != nil {
 		return err
@@ -637,8 +626,8 @@ func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request)
 	}
 
 	var disciplineName string
-	if truthy(disciplineID) {
-		s.db.QueryRow("SELECT name FROM disciplines WHERE id = ?", arg(disciplineID)).Scan(&disciplineName)
+	if disciplineID != 0 {
+		s.db.QueryRow("SELECT name FROM disciplines WHERE id = ?", disciplineID).Scan(&disciplineName)
 	}
 	s.mailer.SendConfirmation(email.SessionParams{
 		To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,

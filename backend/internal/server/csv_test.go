@@ -75,7 +75,7 @@ func TestCSVImportValidation(t *testing.T) {
 	e := newTestEnv(t)
 	for _, path := range []string{"/api/students/import", "/api/instructors/import", "/api/groups/import", "/api/disciplines/import"} {
 		e.admin(http.MethodPost, path, map[string]any{}).wantError(http.StatusBadRequest, "CSV data is required")
-		e.admin(http.MethodPost, path, map[string]any{"csv": 5}).wantError(http.StatusBadRequest, "CSV data is required")
+		e.admin(http.MethodPost, path, map[string]any{"csv": 5}).wantError(http.StatusBadRequest, "Invalid value for csv")
 		e.admin(http.MethodPost, path, map[string]any{"csv": "name\n\n"}).
 			wantError(http.StatusBadRequest, "CSV must have a header row and at least one data row")
 	}

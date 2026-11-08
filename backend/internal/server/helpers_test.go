@@ -2,46 +2,10 @@ package server
 
 import (
 	"errors"
-	"math"
 	"testing"
 )
 
 // The helpers below mimic JavaScript semantics of the former TS backend; these tables pin them.
-
-func TestTruthy(t *testing.T) {
-	for _, tc := range []struct {
-		v    any
-		want bool
-	}{
-		{nil, false}, {false, false}, {true, true},
-		{0.0, false}, {math.NaN(), false}, {2.5, true},
-		{int64(0), false}, {int64(3), true}, {0, false}, {1, true},
-		{"", false}, {"0", true},
-		{map[string]any{}, true}, {[]any{}, true},
-	} {
-		if got := truthy(tc.v); got != tc.want {
-			t.Errorf("truthy(%#v) = %v", tc.v, got)
-		}
-	}
-}
-
-func TestArg(t *testing.T) {
-	for _, tc := range []struct {
-		in, want any
-	}{
-		{3.0, int64(3)}, {-2.0, int64(-2)}, {2.5, 2.5}, {1e300, 1e300},
-		{true, int64(1)}, {false, int64(0)},
-		{"x", "x"}, {nil, nil},
-		{map[string]any{"a": 1.0}, `{"a":1}`}, {[]any{1.0, "b"}, `[1,"b"]`},
-	} {
-		if got := arg(tc.in); got != tc.want {
-			t.Errorf("arg(%#v) = %#v, want %#v", tc.in, got, tc.want)
-		}
-	}
-	if got := args([]any{1.0, true}); got[0] != int64(1) || got[1] != int64(1) {
-		t.Errorf("args = %#v", got)
-	}
-}
 
 func TestJSString(t *testing.T) {
 	for _, tc := range []struct {
@@ -72,41 +36,22 @@ func TestJSParseInt(t *testing.T) {
 	}
 }
 
-func TestJSNumberAndStrictEqual(t *testing.T) {
-	for _, tc := range []struct {
-		in   any
-		want float64
-	}{
-		{3.0, 3}, {int64(2), 2}, {true, 1}, {false, 0}, {nil, 0}, {"", 0}, {" 5 ", 5}, {"1e2", 100},
-	} {
-		if got := jsNumber(tc.in); got != tc.want {
-			t.Errorf("jsNumber(%#v) = %v, want %v", tc.in, got, tc.want)
-		}
-	}
-	for _, in := range []any{"abc", map[string]any{}, []any{}} {
-		if got := jsNumber(in); !math.IsNaN(got) {
-			t.Errorf("jsNumber(%#v) = %v, want NaN", in, got)
-		}
-	}
-}
-
 func TestSessionSameTimetable(t *testing.T) {
-	three := int64(3)
+	zero, three, four := int64(0), int64(3), int64(4)
 	for _, tc := range []struct {
-		timetable *int64
-		v         any
-		want      bool
+		timetable, id *int64
+		want          bool
 	}{
-		{nil, nil, true}, {nil, 0.0, false}, {&three, nil, false},
-		{&three, 3.0, true}, {&three, 4.0, false}, {&three, "3", false},
+		{nil, nil, true}, {nil, &zero, false}, {&three, nil, false},
+		{&three, &three, true}, {&three, &four, false},
 	} {
-		if got := (Session{TimetableID: tc.timetable}).sameTimetable(tc.v); got != tc.want {
-			t.Errorf("sameTimetable(%v, %#v) = %v", tc.timetable, tc.v, got)
+		if got := (Session{TimetableID: tc.timetable}).sameTimetable(tc.id); got != tc.want {
+			t.Errorf("sameTimetable(%v, %v) = %v", tc.timetable, tc.id, got)
 		}
 	}
 }
 
-func TestToInt64AndNumberKey(t *testing.T) {
+func TestToInt64(t *testing.T) {
 	for _, tc := range []struct {
 		in   any
 		want int64
@@ -115,17 +60,6 @@ func TestToInt64AndNumberKey(t *testing.T) {
 	} {
 		if got := toInt64(tc.in); got != tc.want {
 			t.Errorf("toInt64(%#v) = %d", tc.in, got)
-		}
-	}
-	for _, tc := range []struct {
-		in   any
-		want int64
-		ok   bool
-	}{
-		{int64(4), 4, true}, {4.0, 4, true}, {4.5, 0, false}, {"4", 0, false}, {nil, 0, false},
-	} {
-		if got, ok := numberKey(tc.in); got != tc.want || ok != tc.ok {
-			t.Errorf("numberKey(%#v) = %d, %v", tc.in, got, ok)
 		}
 	}
 }

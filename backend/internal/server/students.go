@@ -168,20 +168,27 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("POST /api/students", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			FirstName     string `json:"first_name"`
+			LastName      string `json:"last_name"`
+			Email         string `json:"email"`
+			MembershipID  string `json:"membership_id"`
+			PreferredDays string `json:"preferred_days"` // "" for the column default (every day)
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		if !truthy(b["first_name"]) || !truthy(b["last_name"]) || !truthy(b["email"]) {
+		if in.FirstName == "" || in.LastName == "" || in.Email == "" {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
 			return nil
 		}
-		membershipID := any("")
-		if truthy(b["membership_id"]) {
-			membershipID = arg(b["membership_id"])
+		cols := []string{"first_name", "last_name", "email", "membership_id"}
+		vals := []any{in.FirstName, in.LastName, in.Email, in.MembershipID}
+		if in.PreferredDays != "" {
+			cols, vals = append(cols, "preferred_days"), append(vals, in.PreferredDays)
 		}
-		res, err := s.db.Exec("INSERT INTO students (first_name, last_name, email, membership_id) VALUES (?, ?, ?, ?)",
-			arg(b["first_name"]), arg(b["last_name"]), arg(b["email"]), membershipID)
+		res, err := s.db.Exec("INSERT INTO students ("+strings.Join(cols, ", ")+") VALUES ("+placeholders(len(cols))+")", vals...)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A student with this email already exists")
 			return nil
@@ -210,7 +217,16 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("PUT /api/students/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			FirstName        *string `json:"first_name"`
+			LastName         *string `json:"last_name"`
+			Email            *string `json:"email"`
+			MembershipID     *string `json:"membership_id"`
+			AttendedSessions *int64  `json:"attended_sessions"`
+			Active           *int64  `json:"active"`
+			PreferredDays    *string `json:"preferred_days"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
@@ -234,12 +250,12 @@ func (s *Server) studentRoutes() {
 					active = COALESCE(?, active),
 					preferred_days = COALESCE(?, preferred_days)
 				WHERE id = ?`,
-				arg(b["first_name"]), arg(b["last_name"]), arg(b["email"]), arg(b["membership_id"]),
-				arg(b["attended_sessions"]), arg(b["active"]), arg(b["preferred_days"]), id); err != nil {
+				in.FirstName, in.LastName, in.Email, in.MembershipID,
+				in.AttendedSessions, in.Active, in.PreferredDays, id); err != nil {
 				return err
 			}
-			// Reactivation (strictly active: 1 over a stored 0) moves the queue position.
-			if b["active"] == float64(1) && student.Active == 0 {
+			// Reactivation (active: 1 over a stored 0) moves the queue position.
+			if in.Active != nil && *in.Active == 1 && student.Active == 0 {
 				if _, err := tx.Exec("UPDATE student_groups SET reactivated_at = datetime('now') WHERE student_id = ?", id); err != nil {
 					return err
 				}
@@ -316,12 +332,14 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("PUT /api/students/{id}/preferred-timeslots/{timetableId}", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			TimeslotIDs []int64 `json:"timeslot_ids"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		timeslotIDs, isArray := b["timeslot_ids"].([]any)
-		if !isArray {
+		if in.TimeslotIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "timeslot_ids array is required")
 			return nil
 		}
@@ -337,18 +355,17 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
-		allIDs := make(map[float64]bool, len(all))
+		allIDs := make(map[int64]bool, len(all))
 		for _, id := range all {
-			allIDs[float64(id)] = true
+			allIDs[id] = true
 		}
-		// Keep only ids of this timetable's timeslots, once each, in the order sent. String ids
-		// never match (Set.has() in the TS version is strict).
-		var selected []float64
-		seen := map[float64]bool{}
-		for _, tsID := range timeslotIDs {
-			if n, isNum := tsID.(float64); isNum && allIDs[n] && !seen[n] {
-				seen[n] = true
-				selected = append(selected, n)
+		// Keep only ids of this timetable's timeslots, once each, in the order sent.
+		var selected []int64
+		seen := map[int64]bool{}
+		for _, tsID := range in.TimeslotIDs {
+			if allIDs[tsID] && !seen[tsID] {
+				seen[tsID] = true
+				selected = append(selected, tsID)
 			}
 		}
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
@@ -359,8 +376,8 @@ func (s *Server) studentRoutes() {
 			if len(selected) >= len(allIDs) {
 				return nil
 			}
-			for _, n := range selected {
-				if _, err := tx.Exec("INSERT INTO student_preferred_timeslots (student_id, timeslot_id, timetable_id) VALUES (?, ?, ?)", id, arg(n), timetableID); err != nil {
+			for _, tsID := range selected {
+				if _, err := tx.Exec("INSERT INTO student_preferred_timeslots (student_id, timeslot_id, timetable_id) VALUES (?, ?, ?)", id, tsID, timetableID); err != nil {
 					return err
 				}
 			}
@@ -398,7 +415,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("PUT /api/students/{id}/groups", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			GroupID int64 `json:"group_id"` // 0 or null: no group
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
@@ -410,8 +430,8 @@ func (s *Server) studentRoutes() {
 			if _, err := tx.Exec("DELETE FROM student_groups WHERE student_id = ?", id); err != nil {
 				return err
 			}
-			if truthy(b["group_id"]) {
-				_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", id, arg(b["group_id"]))
+			if in.GroupID != 0 {
+				_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", id, in.GroupID)
 				return err
 			}
 			return nil
@@ -424,12 +444,15 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("PUT /api/students/{id}/cooldown", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Days float64 `json:"days"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		days, isNum := b["days"].(float64)
-		if !isNum || days <= 0 {
+		days := in.Days
+		if days <= 0 {
 			httpx.Error(w, http.StatusBadRequest, "A positive number of days is required")
 			return nil
 		}

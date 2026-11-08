@@ -159,7 +159,7 @@ func TestExpirySettingChangeReschedulesTimers(t *testing.T) {
 	f.exec("UPDATE invitations SET invited_at = datetime('now', '-30 minutes') WHERE id = ?", id)
 
 	// With a 10 minute window the 30 minute old invitation is overdue and expires at once.
-	f.admin(http.MethodPut, "/api/settings/invitation_expiry_minutes", map[string]any{"value": 10}).status(http.StatusOK)
+	f.admin(http.MethodPut, "/api/settings/invitation_expiry_minutes", map[string]any{"value": "10"}).status(http.StatusOK)
 	deadline := time.Now().Add(5 * time.Second)
 	for f.statusOf("A") == "invited" {
 		if time.Now().After(deadline) {

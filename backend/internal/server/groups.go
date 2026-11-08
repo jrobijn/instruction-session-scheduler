@@ -176,20 +176,23 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("POST /api/groups", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Name  string `json:"name"`
+			Color string `json:"color"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		if !truthy(b["name"]) {
+		if in.Name == "" {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
-		color := any("#3b82f6")
-		if truthy(b["color"]) {
-			color = arg(b["color"])
+		if in.Color == "" {
+			in.Color = "#3b82f6"
 		}
 		res, err := s.db.Exec("INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority) VALUES (?, ?, 'back', 'back', 'back')",
-			arg(b["name"]), color)
+			in.Name, in.Color)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A group with this name already exists")
 			return nil
@@ -206,7 +209,15 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("PUT /api/groups/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Name                      *string `json:"name"`
+			Active                    *int64  `json:"active"`
+			Color                     *string `json:"color"`
+			NewMemberPriority         *string `json:"new_member_priority"`
+			ReactivatedMemberPriority *string `json:"reactivated_member_priority"`
+			CooldownMemberPriority    *string `json:"cooldown_member_priority"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
@@ -215,9 +226,16 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		for _, key := range []string{"new_member_priority", "reactivated_member_priority", "cooldown_member_priority"} {
-			if v := b[key]; v != nil && v != "front" && v != "back" {
-				httpx.Error(w, http.StatusBadRequest, key+" must be 'front' or 'back'")
+		for _, p := range []struct {
+			key   string
+			value *string
+		}{
+			{"new_member_priority", in.NewMemberPriority},
+			{"reactivated_member_priority", in.ReactivatedMemberPriority},
+			{"cooldown_member_priority", in.CooldownMemberPriority},
+		} {
+			if p.value != nil && *p.value != "front" && *p.value != "back" {
+				httpx.Error(w, http.StatusBadRequest, p.key+" must be 'front' or 'back'")
 				return nil
 			}
 		}
@@ -230,8 +248,8 @@ func (s *Server) groupRoutes() {
 				reactivated_member_priority = COALESCE(?, reactivated_member_priority),
 				cooldown_member_priority = COALESCE(?, cooldown_member_priority)
 			WHERE id = ?`,
-			arg(b["name"]), arg(b["active"]), arg(b["color"]),
-			arg(b["new_member_priority"]), arg(b["reactivated_member_priority"]), arg(b["cooldown_member_priority"]), id)
+			in.Name, in.Active, in.Color,
+			in.NewMemberPriority, in.ReactivatedMemberPriority, in.CooldownMemberPriority, id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A group with this name already exists")
 			return nil
@@ -308,12 +326,15 @@ func (s *Server) groupRoutes() {
 	s.adminRoute("GET /api/groups/{id}/members", s.handleGroupMembers)
 
 	s.adminRoute("POST /api/groups/{id}/members", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			StudentID int64 `json:"student_id"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		studentID := b["student_id"]
-		if !truthy(studentID) {
+		studentID := in.StudentID
+		if studentID == 0 {
 			httpx.Error(w, http.StatusBadRequest, "student_id is required")
 			return nil
 		}
@@ -322,15 +343,15 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", arg(studentID)) {
+		if !s.exists("SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", studentID) {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
 		err := s.db.InTx(func(tx *sqlx.Tx) error {
-			if _, err := tx.Exec("DELETE FROM student_groups WHERE student_id = ?", arg(studentID)); err != nil {
+			if _, err := tx.Exec("DELETE FROM student_groups WHERE student_id = ?", studentID); err != nil {
 				return err
 			}
-			_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", arg(studentID), id)
+			_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", studentID, id)
 			return err
 		})
 		if err != nil {
@@ -342,17 +363,19 @@ func (s *Server) groupRoutes() {
 
 	// Toggle "invite next": the member jumps the queue until they get a counted invitation.
 	s.adminRoute("PUT /api/groups/{id}/members/{studentId}/invite-next", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Enabled *bool `json:"enabled"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		enabled, isBool := b["enabled"].(bool)
-		if !isBool {
+		if in.Enabled == nil {
 			httpx.Error(w, http.StatusBadRequest, "enabled (boolean) is required")
 			return nil
 		}
 		value := "NULL"
-		if enabled {
+		if *in.Enabled {
 			value = "datetime('now')"
 		}
 		res, err := s.db.Exec("UPDATE student_groups SET invite_next_at = "+value+" WHERE group_id = ? AND student_id = ?",

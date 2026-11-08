@@ -89,7 +89,8 @@ func TestGroupMembersEndpoints(t *testing.T) {
 	}
 
 	path := groupPath(b, "members", fmt.Sprint(s), "invite-next")
-	e.admin(http.MethodPut, path, map[string]any{"enabled": "yes"}).wantError(http.StatusBadRequest, "enabled (boolean) is required")
+	e.admin(http.MethodPut, path, map[string]any{}).wantError(http.StatusBadRequest, "enabled (boolean) is required")
+	e.admin(http.MethodPut, path, map[string]any{"enabled": "yes"}).wantError(http.StatusBadRequest, "Invalid value for enabled")
 	e.admin(http.MethodPut, groupPath(a, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
 		wantError(http.StatusNotFound, "Member not found")
 	e.admin(http.MethodPut, path, map[string]any{"enabled": true}).status(http.StatusOK)

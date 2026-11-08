@@ -118,12 +118,15 @@ type importResult struct {
 // readCSVImport validates the {csv} body shared by all import endpoints. It returns the
 // non-blank lines, or writes a 400 and returns ok=false.
 func readCSVImport(w http.ResponseWriter, r *http.Request) ([]string, bool) {
-	b, ok := decodeBody(w, r)
+	type request struct {
+		CSV string `json:"csv"`
+	}
+	in, ok := decode[request](w, r)
 	if !ok {
 		return nil, false
 	}
-	csv, isString := b["csv"].(string)
-	if !isString || csv == "" {
+	csv := in.CSV
+	if csv == "" {
 		httpx.Error(w, http.StatusBadRequest, "CSV data is required")
 		return nil, false
 	}

@@ -3,8 +3,8 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
-	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -38,72 +38,46 @@ func (s *Server) publicRoute(pattern string, fn handlerFunc) {
 	s.mux.HandleFunc(pattern, s.wrap(fn))
 }
 
-// body is a decoded JSON request body, read the way Express handlers destructure req.body:
-// missing keys are nil and values keep their dynamic JSON type.
-type body map[string]any
-
-func readBody(r *http.Request) (body, error) {
-	var v any
+// decode reads a JSON request body into a T (usually a struct with json tags) and writes a
+// 400 if it is malformed or a field has the wrong type. Unknown fields are ignored and an
+// empty body leaves T at its zero value.
+//
+// Conventions for request structs: required values are plain types, validated with
+// == "" / == 0; values that may be left out of a partial update are pointers, which bind as
+// NULL so `col = COALESCE(?, col)` keeps the stored value.
+func decode[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
+	var v T
 	if err := httpx.Decode(r, &v); err != nil {
-		return nil, err
-	}
-	if m, ok := v.(map[string]any); ok {
-		return m, nil
-	}
-	return body{}, nil
-}
-
-// decodeBody reads the body and writes a 400 on malformed JSON (express.json() behaviour).
-func decodeBody(w http.ResponseWriter, r *http.Request) (body, bool) {
-	b, err := readBody(r)
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "Invalid JSON body")
-		return nil, false
-	}
-	return b, true
-}
-
-// truthy implements JavaScript truthiness for JSON and SQLite values.
-func truthy(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return false
-	case bool:
-		return x
-	case float64:
-		return x != 0 && !math.IsNaN(x)
-	case int64:
-		return x != 0
-	case int:
-		return x != 0
-	case string:
-		return x != ""
-	default:
-		return true
-	}
-}
-
-// arg converts a decoded JSON value into something the SQLite driver binds the way
-// better-sqlite3 does: integral numbers become integers.
-func arg(v any) any {
-	switch x := v.(type) {
-	case float64:
-		if x == math.Trunc(x) && math.Abs(x) < 1<<53 {
-			return int64(x)
+		var typeErr *json.UnmarshalTypeError
+		if errors.As(err, &typeErr) && typeErr.Field != "" {
+			httpx.Error(w, http.StatusBadRequest, "Invalid value for "+typeErr.Field)
+		} else {
+			httpx.Error(w, http.StatusBadRequest, "Invalid JSON body")
 		}
-		return x
-	case bool:
-		if x {
-			return int64(1)
-		}
-		return int64(0)
-	case map[string]any, []any:
-		// better-sqlite3 refuses to bind objects; store their JSON instead of failing.
-		b, _ := json.Marshal(x)
-		return string(b)
-	default:
-		return v
+		return v, false
 	}
+	return v, true
+}
+
+// optional is a request field that tells a missing key (Set false) from null (Set true,
+// Value nil). Use it only where null means something other than "leave unchanged".
+type optional[T any] struct {
+	Set   bool
+	Value *T
+}
+
+func (o *optional[T]) UnmarshalJSON(data []byte) error {
+	o.Set = true
+	if string(data) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var v T
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	o.Value = &v
+	return nil
 }
 
 // jsString mimics JavaScript's String(value) for JSON values.
@@ -191,14 +165,6 @@ func placeholders(n int) string {
 		return ""
 	}
 	return strings.Repeat("?,", n-1) + "?"
-}
-
-func args(values []any) []any {
-	out := make([]any, len(values))
-	for i, v := range values {
-		out[i] = arg(v)
-	}
-	return out
 }
 
 // isValidTimeZone matches the Intl.DateTimeFormat check in expiryTimers.ts.

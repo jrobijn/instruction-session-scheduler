@@ -1,7 +1,6 @@
 package server
 
 import (
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,14 +23,12 @@ func (s *Server) getSession(id any) (Session, bool, error) {
 	return db.One[Session](s.db, "SELECT id, date, status, timetable_id, notes FROM training_sessions WHERE id = ?", id)
 }
 
-// sameTimetable reports whether a timetable_id from a request body (a JSON value) is the
-// session's timetable. Only a number or null can match.
-func (t Session) sameTimetable(v any) bool {
-	if v == nil || t.TimetableID == nil {
-		return v == nil && t.TimetableID == nil
+// sameTimetable reports whether id (nil for none) is the session's timetable.
+func (t Session) sameTimetable(id *int64) bool {
+	if id == nil || t.TimetableID == nil {
+		return id == nil && t.TimetableID == nil
 	}
-	n, isNum := v.(float64)
-	return isNum && n == float64(*t.TimetableID)
+	return *id == *t.TimetableID
 }
 
 type SessionListItem struct {
@@ -162,33 +159,34 @@ func (s *Server) sessionRoutes() {
 	s.adminRoute("GET /api/sessions/{id}", s.handleGetSession)
 
 	s.adminRoute("POST /api/sessions", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Date        string `json:"date"` // YYYY-MM-DD
+			Notes       string `json:"notes"`
+			TimetableID int64  `json:"timetable_id"` // 0 or null: the default timetable, if any
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		if !truthy(b["date"]) {
+		if in.Date == "" {
 			httpx.Error(w, http.StatusBadRequest, "Date is required")
 			return nil
 		}
-		ttID := arg(b["timetable_id"])
-		if !truthy(b["timetable_id"]) {
-			ttID = nil
+		var ttID *int64
+		if in.TimetableID != 0 {
+			ttID = &in.TimetableID
+		} else {
 			var id int64
 			if s.db.QueryRow("SELECT id FROM timetables WHERE is_default = 1 AND active = 1 AND status = 'saved'").Scan(&id) == nil && id != 0 {
-				ttID = id
+				ttID = &id
 			}
 		}
-		date := jsString(b["date"])
-		dow, valid := dayOfWeek(date)
+		dow, valid := dayOfWeek(in.Date)
 		if !valid {
 			httpx.Error(w, http.StatusBadRequest, "Invalid date")
 			return nil
 		}
-		var notes any
-		if truthy(b["notes"]) {
-			notes = arg(b["notes"])
-		}
-		res, err := s.db.Exec("INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?)", arg(b["date"]), dow, notes, ttID)
+		res, err := s.db.Exec("INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?)", in.Date, dow, nonEmpty(in.Notes), ttID)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
@@ -205,7 +203,15 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("PUT /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Date   *string `json:"date"`
+			Notes  *string `json:"notes"`
+			Status *string `json:"status"`
+			// Missing: unchanged. Null: no timetable. A different timetable (or none) clears
+			// the schedule.
+			TimetableID optional[int64] `json:"timetable_id"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
@@ -215,15 +221,15 @@ func (s *Server) sessionRoutes() {
 		}
 		id := r.PathValue("id")
 		var dow any
-		if date := b["date"]; date != nil {
-			d, valid := dayOfWeek(jsString(date))
+		if in.Date != nil {
+			d, valid := dayOfWeek(*in.Date)
 			if !valid {
 				httpx.Error(w, http.StatusBadRequest, "Invalid date")
 				return nil
 			}
 			dow = d
 		}
-		if tt, present := b["timetable_id"]; present && !session.sameTimetable(tt) {
+		if in.TimetableID.Set && !session.sameTimetable(in.TimetableID.Value) {
 			switch session.Status {
 			case "invitations_sent", "completed":
 				httpx.Error(w, http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
@@ -244,9 +250,9 @@ func (s *Server) sessionRoutes() {
 				day_of_week = COALESCE(?, day_of_week),
 				notes = COALESCE(?, notes),
 				status = COALESCE(?, status),
-				timetable_id = COALESCE(?, timetable_id)
+				timetable_id = CASE WHEN ? THEN ? ELSE timetable_id END
 			WHERE id = ?`,
-			arg(b["date"]), dow, arg(b["notes"]), arg(b["status"]), arg(b["timetable_id"]), id)
+			in.Date, dow, in.Notes, in.Status, in.TimetableID.Set, in.TimetableID.Value, id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
@@ -463,32 +469,6 @@ func (s *Server) loadSession(w http.ResponseWriter, r *http.Request) (Session, b
 	return session, true, nil
 }
 
-// jsNumber mimics Number(v) for request values; NaN for anything unparsable.
-func jsNumber(v any) float64 {
-	switch x := v.(type) {
-	case float64:
-		return x
-	case int64:
-		return float64(x)
-	case bool:
-		if x {
-			return 1
-		}
-		return 0
-	case nil:
-		return 0
-	case string:
-		t := strings.TrimSpace(x)
-		if t == "" {
-			return 0
-		}
-		if n, err := strconv.ParseFloat(t, 64); err == nil {
-			return n
-		}
-	}
-	return math.NaN()
-}
-
 func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) error {
 	session, ok, err := s.loadSession(w, r)
 	if !ok || err != nil {
@@ -528,12 +508,15 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *Server) handleAssignInstructor(w http.ResponseWriter, r *http.Request) error {
-	b, ok := decodeBody(w, r)
+	type request struct {
+		InstructorID int64 `json:"instructor_id"`
+	}
+	in, ok := decode[request](w, r)
 	if !ok {
 		return nil
 	}
-	instructorID := b["instructor_id"]
-	if !truthy(instructorID) {
+	instructorID := in.InstructorID
+	if instructorID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "instructor_id is required")
 		return nil
 	}
@@ -543,14 +526,14 @@ func (s *Server) handleAssignInstructor(w http.ResponseWriter, r *http.Request) 
 	id := r.PathValue("id")
 	// Re-assigning a removed instructor revives their slot (and its invitation history).
 	var removedSlot int64
-	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, arg(instructorID)).Scan(&removedSlot) == nil {
+	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, instructorID).Scan(&removedSlot) == nil {
 		if _, err := s.db.Exec("UPDATE session_slots SET removed = 0 WHERE id = ?", removedSlot); err != nil {
 			return err
 		}
 		httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
 		return nil
 	}
-	_, err := s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", id, arg(instructorID))
+	_, err := s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", id, instructorID)
 	switch {
 	case isUniqueErr(err):
 		httpx.Error(w, http.StatusConflict, "Instructor already assigned to this session")
@@ -639,11 +622,15 @@ func (s *Server) removeSlot(sessionID int64, slotID int64) (int, error) {
 }
 
 func (s *Server) handleReplaceInstructor(w http.ResponseWriter, r *http.Request) error {
-	b, ok := decodeBody(w, r)
+	type request struct {
+		NewInstructorID int64 `json:"new_instructor_id"`
+	}
+	in, ok := decode[request](w, r)
 	if !ok {
 		return nil
 	}
-	if !truthy(b["new_instructor_id"]) {
+	newID := in.NewInstructorID
+	if newID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "new_instructor_id is required")
 		return nil
 	}
@@ -656,27 +643,27 @@ func (s *Server) handleReplaceInstructor(w http.ResponseWriter, r *http.Request)
 		return nil
 	}
 	id := r.PathValue("id")
-	oldID, newID := jsNumber(r.PathValue("instructorId")), jsNumber(b["new_instructor_id"])
-	if oldID == newID { // NaN never equals, as in JS
+	oldID, parseErr := strconv.ParseInt(r.PathValue("instructorId"), 10, 64)
+	if parseErr == nil && oldID == newID {
 		httpx.Error(w, http.StatusBadRequest, "New instructor must be different")
 		return nil
 	}
 	var oldSlot int64
-	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, arg(oldID)).Scan(&oldSlot) != nil {
+	if parseErr != nil || s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, oldID).Scan(&oldSlot) != nil {
 		httpx.Error(w, http.StatusNotFound, "Original instructor not assigned to this session")
 		return nil
 	}
-	if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", arg(newID)) {
+	if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", newID) {
 		httpx.Error(w, http.StatusBadRequest, "New instructor not found")
 		return nil
 	}
-	if s.exists("SELECT 1 FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, arg(newID)) {
+	if s.exists("SELECT 1 FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, newID) {
 		httpx.Error(w, http.StatusConflict, "New instructor is already assigned to this session")
 		return nil
 	}
 	// A removed slot of the new instructor is merged into the old slot.
 	var removedSlot int64
-	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, arg(newID)).Scan(&removedSlot) == nil {
+	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, newID).Scan(&removedSlot) == nil {
 		if _, err := s.db.Exec("UPDATE invitations SET slot_id = ? WHERE slot_id = ?", oldSlot, removedSlot); err != nil {
 			return err
 		}
@@ -685,7 +672,7 @@ func (s *Server) handleReplaceInstructor(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	// Re-pointing the slot moves all its invitations to the new instructor.
-	if _, err := s.db.Exec("UPDATE session_slots SET instructor_id = ? WHERE id = ?", arg(newID), oldSlot); err != nil {
+	if _, err := s.db.Exec("UPDATE session_slots SET instructor_id = ? WHERE id = ?", newID, oldSlot); err != nil {
 		return err
 	}
 	httpx.Success(w)
@@ -743,32 +730,37 @@ func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) err
 		httpx.Error(w, http.StatusBadRequest, "Can only add students before session is completed")
 		return nil
 	}
-	b, ok := decodeBody(w, r)
+	type request struct {
+		StudentID    int64 `json:"student_id"`
+		TimeslotID   int64 `json:"timeslot_id"`
+		InstructorID int64 `json:"instructor_id"`
+	}
+	in, ok := decode[request](w, r)
 	if !ok {
 		return nil
 	}
-	studentID, timeslotID, instructorID := b["student_id"], b["timeslot_id"], b["instructor_id"]
-	if !truthy(studentID) || !truthy(timeslotID) || !truthy(instructorID) {
+	studentID, timeslotID, instructorID := in.StudentID, in.TimeslotID, in.InstructorID
+	if studentID == 0 || timeslotID == 0 || instructorID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "student_id, timeslot_id, and instructor_id are required")
 		return nil
 	}
 	id := r.PathValue("id")
 	var slotID int64
-	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, arg(instructorID)).Scan(&slotID) != nil {
+	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID).Scan(&slotID) != nil {
 		httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
 		return nil
 	}
-	if s.exists("SELECT 1 FROM invitations WHERE session_id = ? AND student_id = ? AND status NOT IN "+terminalStatuses, id, arg(studentID)) {
+	if s.exists("SELECT 1 FROM invitations WHERE session_id = ? AND student_id = ? AND status NOT IN "+terminalStatuses, id, studentID) {
 		httpx.Error(w, http.StatusConflict, "Student already has an active invitation for this session")
 		return nil
 	}
-	if s.exists("SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN "+terminalStatuses, id, arg(timeslotID), slotID) {
+	if s.exists("SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN "+terminalStatuses, id, timeslotID, slotID) {
 		httpx.Error(w, http.StatusConflict, "This slot is already occupied")
 		return nil
 	}
 	token := newToken()
 	if _, err := s.db.Exec("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token) VALUES (?, ?, ?, ?, ?)",
-		id, arg(studentID), arg(timeslotID), slotID, token); err != nil {
+		id, studentID, timeslotID, slotID, token); err != nil {
 		return err
 	}
 	if status == "draft" {
@@ -779,7 +771,7 @@ func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) err
 	// After invitations went out, a manually added student is invited right away.
 	if status == "invitations_sent" {
 		var first, last, to string
-		if err := s.db.QueryRow("SELECT first_name, last_name, email FROM students WHERE id = ?", arg(studentID)).Scan(&first, &last, &to); err != nil {
+		if err := s.db.QueryRow("SELECT first_name, last_name, email FROM students WHERE id = ?", studentID).Scan(&first, &last, &to); err != nil {
 			logf("Failed to send invitation email for manually added student: %v", err)
 		} else {
 			s.mailer.SendInvitation(email.InvitationParams{
@@ -842,19 +834,22 @@ func (s *Server) handleAutoScheduleSlot(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusBadRequest, "Auto-scheduling is only available after invitations are sent")
 		return nil
 	}
-	b, ok := decodeBody(w, r)
+	type request struct {
+		TimeslotID   int64 `json:"timeslot_id"`
+		InstructorID int64 `json:"instructor_id"`
+	}
+	in, ok := decode[request](w, r)
 	if !ok {
 		return nil
 	}
-	timeslotID, isNumber := numberKey(b["timeslot_id"])
-	instructorID := b["instructor_id"]
-	if !isNumber || timeslotID == 0 || !truthy(instructorID) {
+	timeslotID, instructorID := in.TimeslotID, in.InstructorID
+	if timeslotID == 0 || instructorID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "timeslot_id and instructor_id are required")
 		return nil
 	}
 	id := r.PathValue("id")
 	var slotID int64
-	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, arg(instructorID)).Scan(&slotID) != nil {
+	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID).Scan(&slotID) != nil {
 		httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
 		return nil
 	}

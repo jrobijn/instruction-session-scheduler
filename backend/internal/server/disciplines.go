@@ -150,19 +150,19 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("POST /api/disciplines", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Name         string `json:"name"`
+			Abbreviation string `json:"abbreviation"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		if !truthy(b["name"]) {
+		if in.Name == "" {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
-		abbr := any("")
-		if truthy(b["abbreviation"]) {
-			abbr = arg(b["abbreviation"])
-		}
-		res, err := s.db.Exec("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)", arg(b["name"]), abbr)
+		res, err := s.db.Exec("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)", in.Name, in.Abbreviation)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A discipline with this name already exists")
 			return nil
@@ -179,7 +179,12 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("PUT /api/disciplines/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Name         *string `json:"name"`
+			Abbreviation *string `json:"abbreviation"`
+			Active       *int64  `json:"active"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
@@ -194,7 +199,7 @@ func (s *Server) disciplineRoutes() {
 				abbreviation = COALESCE(?, abbreviation),
 				active = COALESCE(?, active)
 			WHERE id = ?`,
-			arg(b["name"]), arg(b["abbreviation"]), arg(b["active"]), id)
+			in.Name, in.Abbreviation, in.Active, id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A discipline with this name already exists")
 			return nil
@@ -211,12 +216,14 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("PUT /api/disciplines/{id}/groups", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			GroupIDs []int64 `json:"group_ids"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		groupIDs, isArray := b["group_ids"].([]any)
-		if !isArray {
+		if in.GroupIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "group_ids array is required")
 			return nil
 		}
@@ -229,8 +236,8 @@ func (s *Server) disciplineRoutes() {
 			if _, err := tx.Exec("DELETE FROM discipline_groups WHERE discipline_id = ?", id); err != nil {
 				return err
 			}
-			for _, gid := range groupIDs {
-				if _, err := tx.Exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", id, arg(gid)); err != nil {
+			for _, gid := range in.GroupIDs {
+				if _, err := tx.Exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", id, gid); err != nil {
 					return err
 				}
 			}

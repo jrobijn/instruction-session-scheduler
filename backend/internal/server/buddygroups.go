@@ -11,20 +11,25 @@ import (
 
 func (s *Server) buddyGroupRoutes() {
 	s.adminRoute("POST /api/buddy-groups/quick-create", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			StudentIDs []int64 `json:"student_ids"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		ids, isArray := b["student_ids"].([]any)
-		if !isArray || len(ids) < 2 {
+		ids := in.StudentIDs
+		if len(ids) < 2 {
 			httpx.Error(w, http.StatusBadRequest, "At least 2 students are required")
 			return nil
 		}
 
+		query, queryArgs, err := sqlx.In("SELECT s.first_name, s.last_name FROM buddy_group_members bgm JOIN students s ON s.id = bgm.student_id WHERE bgm.student_id IN (?)", ids)
+		if err != nil {
+			return err
+		}
 		var first, last string
-		err := s.db.QueryRow(
-			"SELECT s.first_name, s.last_name FROM buddy_group_members bgm JOIN students s ON s.id = bgm.student_id WHERE bgm.student_id IN ("+placeholders(len(ids))+")",
-			args(ids)...).Scan(&first, &last)
+		err = s.db.QueryRow(query, queryArgs...).Scan(&first, &last)
 		if err == nil {
 			httpx.Error(w, http.StatusBadRequest, first+" "+last+" is already in a buddy group")
 			return nil
@@ -42,7 +47,7 @@ func (s *Server) buddyGroupRoutes() {
 			}
 			groupID = lastID(res)
 			for _, sid := range ids {
-				if _, err := tx.Exec("INSERT INTO buddy_group_members (buddy_group_id, student_id) VALUES (?, ?)", groupID, arg(sid)); err != nil {
+				if _, err := tx.Exec("INSERT INTO buddy_group_members (buddy_group_id, student_id) VALUES (?, ?)", groupID, sid); err != nil {
 					return err
 				}
 			}

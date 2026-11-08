@@ -26,6 +26,11 @@ func TestCreateStudent(t *testing.T) {
 	if got["membership_id"] != "" || got["active"] != 1.0 || got["preferred_days"] != "0|1|2|3|4|5|6" {
 		t.Fatalf("created = %v", got)
 	}
+	got = e.admin(http.MethodPost, "/api/students", map[string]any{"first_name": "Cy", "last_name": "Lee", "email": "cy@example.test", "preferred_days": "1|3"}).
+		status(http.StatusCreated).object()
+	if got["preferred_days"] != "1|3" {
+		t.Fatalf("preferred_days = %v, want 1|3", got["preferred_days"])
+	}
 	if n := len(e.rows("SELECT 1 FROM student_groups")); n != 0 {
 		t.Fatal("student added to a group without a default group")
 	}
@@ -256,7 +261,7 @@ func TestStudentPreferredTimeslotsIgnoresInvalidIDsWhenCounting(t *testing.T) {
 	}
 
 	for name, ids := range map[string][]any{
-		"invalid ids":   {slots[0], 9999, "x"},
+		"invalid ids":   {slots[0], 9999, -1},
 		"foreign id":    {slots[0], otherSlots[0], 9999},
 		"duplicate ids": {slots[0], slots[0], slots[0]},
 	} {
@@ -267,6 +272,10 @@ func TestStudentPreferredTimeslotsIgnoresInvalidIDsWhenCounting(t *testing.T) {
 			}
 		})
 	}
+
+	// Ids must be numbers.
+	e.admin(http.MethodPut, path, map[string]any{"timeslot_ids": []any{slots[0], "x"}}).
+		wantError(http.StatusBadRequest, "Invalid value for timeslot_ids")
 
 	// Two of three plus an invalid id is still a partial selection.
 	e.admin(http.MethodPut, path, map[string]any{"timeslot_ids": []any{slots[0], slots[2], 9999}}).status(http.StatusOK)
@@ -305,9 +314,10 @@ func TestStudentCooldown(t *testing.T) {
 	s := e.student("Ann", e.group("Juniors"))
 	path := studentPath(s, "cooldown")
 
-	for _, days := range []any{0, -1, "3", nil} {
+	for _, days := range []any{0, -1, nil} {
 		e.admin(http.MethodPut, path, map[string]any{"days": days}).wantError(http.StatusBadRequest, "A positive number of days is required")
 	}
+	e.admin(http.MethodPut, path, map[string]any{"days": "3"}).wantError(http.StatusBadRequest, "Invalid value for days")
 	before := time.Now().UTC()
 	got := e.admin(http.MethodPut, path, map[string]any{"days": 2}).status(http.StatusOK).object()
 	until, err := time.Parse(time.DateTime, got["cooldown_until"].(string))

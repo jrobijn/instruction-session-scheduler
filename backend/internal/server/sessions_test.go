@@ -66,9 +66,10 @@ func TestCreateSession(t *testing.T) {
 
 func TestSessionDateValidation(t *testing.T) {
 	e := newTestEnv(t)
-	for _, date := range []any{"next monday", "2030-02-30", "07-01-2030", 20300107} {
+	for _, date := range []string{"next monday", "2030-02-30", "07-01-2030"} {
 		e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": date}).wantError(http.StatusBadRequest, "Invalid date")
 	}
+	e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": 20300107}).wantError(http.StatusBadRequest, "Invalid value for date")
 	if n := len(e.rows("SELECT 1 FROM training_sessions")); n != 0 {
 		t.Fatalf("%d sessions created from invalid dates", n)
 	}
@@ -174,10 +175,23 @@ func TestUpdateSession(t *testing.T) {
 		t.Fatalf("after timetable change: %d invitations, status %s", n, f.sessionStatus(f.sessionID))
 	}
 
+	// Null removes the timetable; leaving the key out keeps the current one.
+	got = f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": nil}).status(http.StatusOK).object()
+	if got["timetable_id"] != nil {
+		t.Fatalf("timetable_id = %v after null, want none", got["timetable_id"])
+	}
+	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": other}).status(http.StatusOK)
+	got = f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"notes": "Kept"}).status(http.StatusOK).object()
+	if toInt64(got["timetable_id"]) != other {
+		t.Fatalf("timetable_id = %v without the key, want %d", got["timetable_id"], other)
+	}
+
 	// Same timetable again is not a change.
 	f.exec("UPDATE training_sessions SET status = 'invitations_sent'")
 	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": other}).status(http.StatusOK)
 	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": f.timetable}).
+		wantError(http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
+	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": nil}).
 		wantError(http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
 
 	f.admin(http.MethodPut, "/api/sessions/999", map[string]any{}).wantError(http.StatusNotFound, "Training session not found")

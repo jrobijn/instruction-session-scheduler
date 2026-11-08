@@ -92,15 +92,18 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("POST /api/timetables", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Name string `json:"name"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		if !truthy(b["name"]) {
+		if in.Name == "" {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
-		res, err := s.db.Exec("INSERT INTO timetables (name) VALUES (?)", arg(b["name"]))
+		res, err := s.db.Exec("INSERT INTO timetables (name) VALUES (?)", in.Name)
 		if err != nil {
 			return err
 		}
@@ -129,17 +132,20 @@ func (s *Server) timetableRoutes() {
 		if !ok || err != nil {
 			return err
 		}
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Name *string `json:"name"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
 		id := r.PathValue("id")
-		if name, present := b["name"]; present {
+		if in.Name != nil {
 			if t.Status != "draft" {
 				httpx.Error(w, http.StatusBadRequest, "Cannot edit a saved timetable")
 				return nil
 			}
-			if _, err := s.db.Exec("UPDATE timetables SET name = ? WHERE id = ?", arg(name), id); err != nil {
+			if _, err := s.db.Exec("UPDATE timetables SET name = ? WHERE id = ?", *in.Name, id); err != nil {
 				return err
 			}
 		}
@@ -290,12 +296,17 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("PUT /api/timetables/{id}/groups", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			Groups []struct {
+				GroupID    int64 `json:"group_id"`
+				Percentage int64 `json:"percentage"`
+			} `json:"groups"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		groups, isArray := b["groups"].([]any)
-		if !isArray {
+		if in.Groups == nil {
 			httpx.Error(w, http.StatusBadRequest, "groups array is required")
 			return nil
 		}
@@ -312,10 +323,9 @@ func (s *Server) timetableRoutes() {
 			if _, err := tx.Exec("DELETE FROM timetable_groups WHERE timetable_id = ?", id); err != nil {
 				return err
 			}
-			for i, g := range groups {
-				m, _ := g.(map[string]any)
+			for i, g := range in.Groups {
 				if _, err := tx.Exec("INSERT INTO timetable_groups (timetable_id, group_id, percentage, position) VALUES (?, ?, ?, ?)",
-					id, arg(m["group_id"]), arg(m["percentage"]), i); err != nil {
+					id, g.GroupID, g.Percentage, i); err != nil {
 					return err
 				}
 			}
@@ -329,12 +339,14 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("PUT /api/timetables/{id}/groups/reorder", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			GroupIDs []int64 `json:"group_ids"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		groupIDs, isArray := b["group_ids"].([]any)
-		if !isArray {
+		if in.GroupIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "group_ids array is required")
 			return nil
 		}
@@ -343,8 +355,8 @@ func (s *Server) timetableRoutes() {
 		}
 		id := r.PathValue("id")
 		err := s.db.InTx(func(tx *sqlx.Tx) error {
-			for i, gid := range groupIDs {
-				if _, err := tx.Exec("UPDATE timetable_groups SET position = ? WHERE timetable_id = ? AND group_id = ?", i, id, arg(gid)); err != nil {
+			for i, gid := range in.GroupIDs {
+				if _, err := tx.Exec("UPDATE timetable_groups SET position = ? WHERE timetable_id = ? AND group_id = ?", i, id, gid); err != nil {
 					return err
 				}
 			}
@@ -358,11 +370,14 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("POST /api/timetables/{id}/timeslots", func(w http.ResponseWriter, r *http.Request) error {
-		b, ok := decodeBody(w, r)
+		type request struct {
+			StartTime string `json:"start_time"`
+		}
+		in, ok := decode[request](w, r)
 		if !ok {
 			return nil
 		}
-		if !truthy(b["start_time"]) {
+		if in.StartTime == "" {
 			httpx.Error(w, http.StatusBadRequest, "start_time is required")
 			return nil
 		}
@@ -374,7 +389,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify timeslots of a saved timetable")
 			return nil
 		}
-		res, err := s.db.Exec("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?)", r.PathValue("id"), arg(b["start_time"]))
+		res, err := s.db.Exec("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?)", r.PathValue("id"), in.StartTime)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A timeslot with this start time already exists in this timetable")
 			return nil
