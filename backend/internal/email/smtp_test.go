@@ -181,6 +181,40 @@ func TestSend(t *testing.T) {
 	}
 }
 
+// Display names are quoted or RFC 2047-encoded in the headers.
+func TestSendEncodesDisplayNames(t *testing.T) {
+	srv, roots := clubLikeServer(t)
+	m := mailerFor(srv, roots)
+	m.cfg.From = "Schietclüb Zuid <club@example.test>"
+	if err := m.send("John Q. Doe <student@example.test>", "Uitnodiging", "text", "<p>html</p>"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	for _, want := range []string{
+		"From: =?utf-8?q?Schietcl=C3=BCb_Zuid?= <club@example.test>\r\n",
+		`To: "John Q. Doe" <student@example.test>` + "\r\n",
+	} {
+		if !strings.Contains(srv.data, want) {
+			t.Errorf("missing header %q in:\n%s", want, srv.data)
+		}
+	}
+}
+
+// An address carrying CR/LF must not reach the server, so it cannot inject headers.
+func TestSendRejectsHeaderInjection(t *testing.T) {
+	srv, roots := clubLikeServer(t)
+	err := mailerFor(srv, roots).send("student@example.test\r\nBcc: victim@example.test", "Hi", "text", "<p>html</p>")
+	if err == nil {
+		t.Fatal("expected an invalid recipient error")
+	}
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	if srv.messages != 0 {
+		t.Errorf("message was delivered: %q", srv.data)
+	}
+}
+
 // A burst of emails (e.g. a batch of invitations) must use one connection at a time.
 func TestDeliverSendsOneAtATime(t *testing.T) {
 	srv, roots := clubLikeServer(t)

@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
+	"net/mail"
 	"net/textproto"
 	"os"
 	"path/filepath"
@@ -88,10 +89,18 @@ func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []stri
 
 var nonAlnum = regexp.MustCompile(`(?i)[^a-z0-9]+`)
 
-func (m *Mailer) send(to, subject, text, htmlBody string) error {
-	from := m.cfg.From
-	if from == "" {
-		from = m.cfg.User
+func (m *Mailer) send(toRaw, subject, text, htmlBody string) error {
+	fromRaw := m.cfg.From
+	if fromRaw == "" {
+		fromRaw = m.cfg.User
+	}
+	from, err := mail.ParseAddress(fromRaw)
+	if err != nil {
+		return fmt.Errorf("invalid sender address %q: %w", fromRaw, err)
+	}
+	to, err := mail.ParseAddress(toRaw)
+	if err != nil {
+		return fmt.Errorf("invalid recipient address %q: %w", toRaw, err)
 	}
 	msg, err := buildMessage(from, to, subject, text, htmlBody)
 	if err != nil {
@@ -106,10 +115,10 @@ func (m *Mailer) send(to, subject, text, htmlBody string) error {
 	if err := m.authenticate(c); err != nil {
 		return err
 	}
-	if err := c.Mail(addressOnly(from)); err != nil {
+	if err := c.Mail(from.Address); err != nil {
 		return err
 	}
-	if err := c.Rcpt(addressOnly(to)); err != nil {
+	if err := c.Rcpt(to.Address); err != nil {
 		return err
 	}
 	wc, err := c.Data()
@@ -125,26 +134,21 @@ func (m *Mailer) send(to, subject, text, htmlBody string) error {
 	return c.Quit()
 }
 
-// addressOnly extracts "a@b" from "Name <a@b>".
-func addressOnly(s string) string {
-	if i, j := strings.LastIndex(s, "<"), strings.LastIndex(s, ">"); i >= 0 && j > i {
-		return s[i+1 : j]
-	}
-	return strings.TrimSpace(s)
-}
-
-func buildMessage(from, to, subject, text, htmlBody string) ([]byte, error) {
+// buildMessage takes parsed addresses so the From and To headers are always well-formed:
+// mail.Address.String() quotes or RFC 2047-encodes the display name as needed, and
+// ParseAddress has already rejected anything with CR/LF that could inject headers.
+func buildMessage(from, to *mail.Address, subject, text, htmlBody string) ([]byte, error) {
 	var b strings.Builder
 	mw := multipart.NewWriter(&b)
 	id := make([]byte, 12)
 	rand.Read(id)
 	domain := "localhost"
-	if at := strings.LastIndex(addressOnly(from), "@"); at >= 0 {
-		domain = addressOnly(from)[at+1:]
+	if at := strings.LastIndex(from.Address, "@"); at >= 0 {
+		domain = from.Address[at+1:]
 	}
 	headers := []string{
-		"From: " + from,
-		"To: " + to,
+		"From: " + from.String(),
+		"To: " + to.String(),
 		"Subject: " + mime.QEncoding.Encode("utf-8", subject),
 		"Date: " + time.Now().Format(time.RFC1123Z),
 		"Message-ID: <" + hex.EncodeToString(id) + "@" + domain + ">",
