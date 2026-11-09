@@ -7,6 +7,7 @@ import (
 	"fmt"
 	mrand "math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -262,104 +263,71 @@ type Replacement struct {
 func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, error) {
 	sessionID, sessionDate := vacated.SessionID, vacated.SessionDate
 
-	var timetableID *int64
-	s.db.QueryRow("SELECT timetable_id FROM training_sessions WHERE id = ?", sessionID).Scan(&timetableID)
-	hasTimetable := timetableID != nil && *timetableID != 0
+	// Without a timetable no group can be invited.
+	var timetableID int64
+	s.db.QueryRow("SELECT COALESCE(timetable_id, 0) FROM training_sessions WHERE id = ?", sessionID).Scan(&timetableID)
+	if timetableID == 0 {
+		return nil, nil
+	}
 
-	timetableGroups := map[int64]bool{}
+	groups, err := s.timetableGroups(timetableID)
+	if err != nil {
+		return nil, err
+	}
 	percentageByGroup := map[int64]float64{}
-	if hasTimetable {
-		groups, err := s.timetableGroups(*timetableID)
-		if err != nil {
-			return nil, err
-		}
-		for _, g := range groups {
-			timetableGroups[g.GroupID] = true
-			percentageByGroup[g.GroupID] = float64(g.Percentage)
-		}
+	for _, g := range groups {
+		percentageByGroup[g.GroupID] = float64(g.Percentage)
 	}
 
-	disciplineGroupIDs, err := db.Many[int64](s.db, "SELECT DISTINCT dg.group_id FROM discipline_groups dg JOIN disciplines d ON d.id = dg.discipline_id WHERE d.active = 1")
+	eligible, err := eligibleQueue(s.db, s.clubLocation(), sessionID, sessionDate, timetableID)
 	if err != nil {
 		return nil, err
 	}
-	discGroups := map[int64]bool{}
-	for _, gid := range disciplineGroupIDs {
-		discGroups[gid] = true
-	}
-
-	dow := "NaN"
-	if d, ok := dayOfWeek(sessionDate); ok {
-		dow = strconv.Itoa(d)
-	}
-	candidates, err := s.queueCandidates(`
-		WHERE s.active = 1
-			AND s.deleted_at IS NULL
-			AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
-			AND (s.cooldown_until IS NULL OR date(s.cooldown_until) <= ?)
-			AND s.id NOT IN (SELECT student_id FROM invitations WHERE session_id = ?)
-			AND s.id NOT IN (
-				SELECT inv.student_id FROM invitations inv
-				JOIN training_sessions ts ON ts.id = inv.session_id
-				WHERE ts.date = ? AND inv.status NOT IN `+terminalStatuses+`
-			)
-		ORDER BY `+queue.OrderSQL+`, RANDOM()`, dow, sessionDate, sessionID, sessionDate)
+	prefs, err := s.prefsByStudent(timetableID)
 	if err != nil {
 		return nil, err
 	}
-
-	prefs := map[int64]map[int64]bool{}
-	if hasTimetable {
-		if prefs, err = s.prefsByStudent(*timetableID); err != nil {
-			return nil, err
-		}
-	}
-	// eligible reports whether the candidate can take this spot: their group is in the
-	// timetable and has an active discipline, and they have no preference against the timeslot.
-	eligible := func(c candidate) bool {
+	// Only students without a preference against the vacated timeslot can take the spot.
+	candidates := slices.DeleteFunc(eligible, func(c queue.Member) bool {
 		p := prefs[c.ID]
-		prefersTimeslot := len(p) == 0 || p[vacated.TimeslotID]
-		return prefersTimeslot && c.GroupID != 0 && timetableGroups[c.GroupID] && discGroups[c.GroupID]
+		return len(p) > 0 && !p[vacated.TimeslotID]
+	})
+
+	var groupOrder []int64
+	byGroup := map[int64][]queue.Member{}
+	for _, c := range candidates {
+		if _, seen := byGroup[c.GroupID]; !seen {
+			groupOrder = append(groupOrder, c.GroupID)
+		}
+		byGroup[c.GroupID] = append(byGroup[c.GroupID], c)
 	}
 
+	// The replacement is the first candidate of a queue, so candidate_rank is always 1 and
+	// candidates_considered is the length of that queue (as in a generated schedule, where
+	// both are counted within the student's group).
 	hasOriginal := vacated.GroupID != nil && *vacated.GroupID != 0
-	var replacement *candidate
+	var replacement *queue.Member
 	replacementGroup := vacated.GroupID
 	sameGroupMatch := false
-	candidateRank, candidatesConsidered := 0, len(candidates)
+	candidatesConsidered := 0
 
-	// First pass: a replacement from the same group as the original invitation.
-	for i, c := range candidates {
-		if !eligible(c) {
-			continue
-		}
-		candidateRank++
-		if !hasOriginal || c.GroupID == *vacated.GroupID {
-			replacement, replacementGroup, sameGroupMatch = &candidates[i], &candidates[i].GroupID, true
-			break
-		}
+	// First pass: the queue of the original invitation's group; without one, the whole queue.
+	pool := candidates
+	if hasOriginal {
+		pool = byGroup[*vacated.GroupID]
+	}
+	if len(pool) > 0 {
+		replacement, replacementGroup, sameGroupMatch = &pool[0], &pool[0].GroupID, true
+		candidatesConsidered = len(pool)
 	}
 
 	// Second pass: any timetable group, picked at random weighted by its percentage; then
 	// the first candidate in that group's queue.
-	if replacement == nil && hasOriginal && len(timetableGroups) > 0 {
-		var groupOrder []int64
-		byGroup := map[int64][]candidate{}
-		for _, c := range candidates {
-			if !eligible(c) {
-				continue
-			}
-			if _, seen := byGroup[c.GroupID]; !seen {
-				groupOrder = append(groupOrder, c.GroupID)
-			}
-			byGroup[c.GroupID] = append(byGroup[c.GroupID], c)
-		}
-		if len(groupOrder) > 0 {
-			picked := queue.WeightedPickGroup(groupOrder, percentageByGroup, mrand.Float64)
-			q := byGroup[picked]
-			replacement, replacementGroup, sameGroupMatch = &q[0], &picked, false
-			candidateRank, candidatesConsidered = 1, len(q)
-		}
+	if replacement == nil && hasOriginal && len(groupOrder) > 0 {
+		picked := queue.WeightedPickGroup(groupOrder, percentageByGroup, mrand.Float64)
+		q := byGroup[picked]
+		replacement, replacementGroup, sameGroupMatch = &q[0], &picked, false
+		candidatesConsidered = len(q)
 	}
 
 	if replacement == nil {
@@ -373,8 +341,8 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 	}
 
 	var preferredTimeslots []string
-	if p := prefs[replacement.ID]; len(p) > 0 && hasTimetable {
-		slots, err := s.timetableTimeslots(*timetableID)
+	if p := prefs[replacement.ID]; len(p) > 0 {
+		slots, err := s.timetableTimeslots(timetableID)
 		if err != nil {
 			return nil, err
 		}
@@ -389,8 +357,8 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 	decisionLog := encodeJSON(replacementLog{
 		Trigger:              "replacement",
 		LastTurnAt:           replacement.LastTurnAt,
-		InviteNext:           replacement.InviteNextSince != nil,
-		CandidateRank:        candidateRank,
+		InviteNext:           replacement.InviteNextPendingSince != nil,
+		CandidateRank:        1,
 		CandidatesConsidered: candidatesConsidered,
 		GroupName:            nonEmpty(groupName),
 		GroupColor:           nonEmpty(groupColor),

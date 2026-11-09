@@ -271,10 +271,23 @@ func TestGenerateScheduleEligibility(t *testing.T) {
 	f.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", deleted)
 
 	cooling := f.student("CoolingDown", g)
-	f.exec("UPDATE students SET cooldown_until = '2030-01-08' WHERE id = ?", cooling)
+	f.exec("UPDATE students SET cooldown_until = '2030-01-08 09:00:00' WHERE id = ?", cooling)
 
 	cooled := f.student("CooldownOver", g)
-	f.exec("UPDATE students SET cooldown_until = '2030-01-07' WHERE id = ?", cooled)
+	f.exec("UPDATE students SET cooldown_until = '2030-01-06 12:00:00' WHERE id = ?", cooled)
+
+	// The cooldown endpoint stores a time; a cooldown ending during the session day is over.
+	coolingUntilAfternoon := f.student("CooldownEndsThatDay", g)
+	f.exec("UPDATE students SET cooldown_until = '2030-01-07 15:30:00' WHERE id = ?", coolingUntilAfternoon)
+
+	// Cooldowns are stored in UTC but end on a club-timezone day: 23:30 UTC on the session date
+	// is 00:30 the next day in Europe/Amsterdam (the default timezone), so not over yet.
+	coolingPastMidnight := f.student("CooldownEndsAfterMidnightLocally", g)
+	f.exec("UPDATE students SET cooldown_until = '2030-01-07 23:30:00' WHERE id = ?", coolingPastMidnight)
+
+	// A declined (manual) invitation to this session is kept, and its student is not invited again.
+	declined := f.student("DeclinedThisSession", g)
+	f.invitation(f.sessionID, declined, f.timeslots[0], f.slots[0], 0, "declined")
 
 	otherDays := f.student("OtherDays", g) // session is on day 1
 	f.exec("UPDATE students SET preferred_days = '0|2|3|4|5|6' WHERE id = ?", otherDays)
@@ -288,7 +301,8 @@ func TestGenerateScheduleEligibility(t *testing.T) {
 	f.student("OtherGroup", f.group("Elsewhere"))
 
 	f.generate().status(http.StatusOK)
-	wantInvited(t, f.placements(), "Eligible", "CooldownOver")
+	// DeclinedThisSession is listed for the kept declined invitation; placements fails on a second one.
+	wantInvited(t, f.placements(), "Eligible", "CooldownOver", "CooldownEndsThatDay", "DeclinedThisSession")
 }
 
 // --- group quotas and overflow ----------------------------------------------------------

@@ -353,6 +353,27 @@ func TestReplacementSkipsGroupsOutsideTimetable(t *testing.T) {
 	}
 }
 
+// candidate_rank and candidates_considered count within the replacement's group, and only
+// students who could take the spot: not other groups, nor groups outside the timetable.
+func TestReplacementLogCountsWithinGroup(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	a := f.groupIn("A", 100)
+	f.student("A1", a)
+	f.student("A2", a)
+	f.student("B1", f.groupIn("B", 0))
+	f.student("Outsider", f.group("NotInTimetable"))
+	f.sendInvitations()
+	invited := f.row("SELECT s.first_name FROM invitations i JOIN students s ON s.id = i.student_id")["first_name"].(string)
+	other := map[string]string{"A1": "A2", "A2": "A1"}[invited]
+
+	f.invitationAction(invited, "decline", nil).status(http.StatusOK)
+	var log map[string]any
+	json.Unmarshal([]byte(f.invitationOf(other)["decision_log"].(string)), &log)
+	if log["candidate_rank"] != float64(1) || log["candidates_considered"] != float64(1) {
+		t.Fatalf("decision_log = %v, want rank 1 of 1", log)
+	}
+}
+
 // --- cancelling a confirmed invitation --------------------------------------------------
 
 func TestCancelConfirmedInvitation(t *testing.T) {

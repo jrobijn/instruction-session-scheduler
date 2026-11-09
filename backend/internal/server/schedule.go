@@ -7,9 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
-	"strconv"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
@@ -17,30 +15,6 @@ import (
 
 // POST /api/sessions/:id/generate-schedule. Iteration orders (insertion order, stable sorts)
 // are kept deterministic on purpose: they decide who gets moved or placed.
-
-// candidate is a student in a group's invitation queue. Load it with queueCandidates.
-type candidate struct {
-	ID            int64  `db:"id"`
-	FirstName     string `db:"first_name"`
-	LastName      string `db:"last_name"`
-	Email         string `db:"email"`
-	PreferredDays string `db:"preferred_days"`
-	GroupID       int64  `db:"group_id"`
-	queue.Columns
-}
-
-func (c candidate) QueueID() int64 { return c.ID }
-
-// queueCandidates loads the students matching where, a WHERE clause (usually followed by
-// ORDER BY queue.OrderSQL) over s (students), sg (their student_groups row) and the queue joins.
-func (s *Server) queueCandidates(where string, args ...any) ([]candidate, error) {
-	return db.Many[candidate](s.db, `
-		SELECT s.id, s.first_name, s.last_name, s.email, s.preferred_days, sg.group_id, `+queue.ColumnsSQL+`
-		FROM students s
-		JOIN student_groups sg ON sg.student_id = s.id
-		`+queue.JoinSQL+`
-		`+where, args...)
-}
 
 // ScheduledInvitation is an invitation created by generating a schedule.
 type ScheduledInvitation struct {
@@ -190,64 +164,6 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		remainder--
 	}
 
-	// Students of the timetable's groups that have an active discipline.
-	sessionDate := session.Date
-	dow := "NaN"
-	if d, ok := dayOfWeek(sessionDate); ok {
-		dow = strconv.Itoa(d)
-	}
-	eligibleWhere := `
-		WHERE s.active = 1
-			AND s.deleted_at IS NULL
-			AND sg.group_id IN (SELECT group_id FROM timetable_groups WHERE timetable_id = ?)
-			AND EXISTS (
-				SELECT 1 FROM discipline_groups dg JOIN disciplines d ON d.id = dg.discipline_id
-				WHERE dg.group_id = sg.group_id AND d.active = 1
-			)
-			AND ('|' || s.preferred_days || '|') LIKE '%|' || ? || '|%'
-			AND (s.cooldown_until IS NULL OR date(s.cooldown_until) <= ?)
-			AND s.id NOT IN (SELECT student_id FROM invitations WHERE session_id = ? AND group_id IS NULL)
-			AND s.id NOT IN (
-				SELECT inv.student_id FROM invitations inv
-				JOIN training_sessions ts ON ts.id = inv.session_id
-				WHERE ts.date = ? AND inv.status NOT IN ` + terminalStatuses + `
-					AND NOT (inv.session_id = ? AND inv.group_id IS NOT NULL) -- auto-generated ones are redone
-			)`
-	eligibleArgs := []any{timetableID, dow, sessionDate, id, sessionDate, id}
-
-	// Every check that can fail runs before the current schedule is touched, so a failed
-	// regeneration leaves it in place.
-	if len(manual) == 0 {
-		var n int64
-		if err := s.db.QueryRow("SELECT COUNT(*) FROM students s JOIN student_groups sg ON sg.student_id = s.id"+eligibleWhere, eligibleArgs...).Scan(&n); err != nil {
-			return err
-		}
-		if n == 0 {
-			httpx.Error(w, http.StatusBadRequest, "No eligible students found. Ensure students have group memberships with access to disciplines.")
-			return nil
-		}
-	}
-
-	// The auto-generated invitations go before the queue is read: as counted invitations they
-	// would otherwise make everyone in the current schedule look like they just had a turn.
-	if _, err := s.db.Exec("DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL", id); err != nil {
-		return err
-	}
-	eligible, err := s.queueCandidates(eligibleWhere+`
-		ORDER BY `+queue.OrderSQL, eligibleArgs...)
-	if err != nil {
-		return err
-	}
-	eligible = queue.BreakTies(eligible, sessionID)
-
-	studentsByGroup := map[int64][]candidate{}
-	for _, g := range groupSlotCounts {
-		studentsByGroup[g.groupID] = []candidate{}
-	}
-	for _, st := range eligible {
-		studentsByGroup[st.GroupID] = append(studentsByGroup[st.GroupID], st)
-	}
-
 	type assignedInstructor struct {
 		ID     int64 `db:"id"`
 		SlotID int64 `db:"slot_id"`
@@ -317,6 +233,39 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 				}
 			}
 		}
+	}
+
+	clubDays := db.Setting(s.db, "club_days", "0|1|2|3|4|5|6")
+	loc := s.clubLocation()
+
+	// From here on everything runs in one transaction, so a failed regeneration leaves the
+	// current schedule in place. No queries on s.db until it is committed (see db.Open).
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // no-op after Commit
+
+	// The auto-generated invitations go before the queue is read: as counted invitations they
+	// would otherwise make everyone in the current schedule look like they just had a turn.
+	if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL", id); err != nil {
+		return err
+	}
+	eligible, err := eligibleQueue(tx, loc, sessionID, session.Date, timetableID)
+	if err != nil {
+		return err
+	}
+	if len(eligible) == 0 && len(manual) == 0 {
+		httpx.Error(w, http.StatusBadRequest, "No eligible students found. Ensure students have group memberships with access to disciplines.")
+		return nil
+	}
+
+	studentsByGroup := map[int64][]queue.Member{}
+	for _, g := range groupSlotCounts {
+		studentsByGroup[g.groupID] = []queue.Member{}
+	}
+	for _, st := range eligible {
+		studentsByGroup[st.GroupID] = append(studentsByGroup[st.GroupID], st)
 	}
 
 	// ----- Timeslot matching -----
@@ -419,18 +368,18 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	for _, g := range groupSlotCounts {
 		quotaLabel[g.groupID] = fmt.Sprintf("%d slots (%d%%)", g.slots, int64(percentage[g.groupID]))
 	}
-	groupContext := func(st candidate, gid int64, buddyOf string) *placementContext {
+	groupContext := func(st queue.Member, gid int64, buddyOf string) *placementContext {
 		list := studentsByGroup[gid]
-		rank := slices.IndexFunc(list, func(x candidate) bool { return x.ID == st.ID }) + 1
+		rank := slices.IndexFunc(list, func(x queue.Member) bool { return x.ID == st.ID }) + 1
 		return &placementContext{groupID: gid, candidateRank: rank, candidatesConsidered: len(list), groupQuota: quotaLabel[gid], buddyOf: buddyOf}
 	}
 
-	var selected []candidate
-	remainingByGroup := map[int64][]candidate{}
+	var selected []queue.Member
+	remainingByGroup := map[int64][]queue.Member{}
 	for _, g := range groupSlotCounts {
 		list := studentsByGroup[g.groupID]
 		taken := map[int64]bool{}
-		sel := func(st candidate, buddyOf string) {
+		sel := func(st queue.Member, buddyOf string) {
 			taken[st.ID] = true
 			selected = append(selected, st)
 			contexts[st.ID] = groupContext(st, g.groupID, buddyOf)
@@ -456,7 +405,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 				}
 			}
 		}
-		rest := []candidate{}
+		rest := []queue.Member{}
 		for _, st := range list {
 			if !taken[st.ID] {
 				rest = append(rest, st)
@@ -470,10 +419,10 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	for i, st := range eligible {
 		queueIndex[st.ID] = i
 	}
-	byQueue := func(list []candidate) {
+	byQueue := func(list []queue.Member) {
 		sort.SliceStable(list, func(i, j int) bool { return queueIndex[list[i].ID] < queueIndex[list[j].ID] })
 	}
-	var withPreference, withoutPreference []candidate
+	var withPreference, withoutPreference []queue.Member
 	for _, st := range selected {
 		if hasTimeslotPreference(st.ID) {
 			withPreference = append(withPreference, st)
@@ -483,7 +432,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	}
 	byQueue(withPreference)
 	byQueue(withoutPreference)
-	var placed []candidate
+	var placed []queue.Member
 	// Placing more students never frees room, so a student who failed once can't be placed later.
 	unplaceable := map[int64]bool{}
 
@@ -528,14 +477,14 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	for _, c := range capacity {
 		totalCapacity += c
 	}
-	var overflowCandidates []candidate
+	var overflowCandidates []queue.Member
 	for _, st := range eligible {
 		if _, isPlaced := placedTimeslot[st.ID]; !isPlaced && !unplaceable[st.ID] {
 			overflowCandidates = append(overflowCandidates, st)
 		}
 	}
 	var overflowOrder []int64
-	overflowQueues := map[int64][]candidate{}
+	overflowQueues := map[int64][]queue.Member{}
 	for _, st := range overflowCandidates {
 		if _, ok := overflowQueues[st.GroupID]; !ok {
 			overflowOrder = append(overflowOrder, st.GroupID)
@@ -563,56 +512,51 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		contexts[st.ID] = &placementContext{groupID: picked, candidateRank: overflowRank, candidatesConsidered: len(overflowCandidates), overflow: true}
 	}
 
-	clubDays := db.Setting(s.db, "club_days", "0|1|2|3|4|5|6")
-
 	// Each placed student gets the first free instructor spot of their matched timeslot.
 	invited := []ScheduledInvitation{}
-	err = s.db.InTx(func(tx *sqlx.Tx) error {
-		for _, st := range placed {
-			ctx := contexts[st.ID]
-			ti := placedTimeslot[st.ID]
-			spotIdx := -1
-			for i, spot := range grid {
-				if available[i] && spot.timeslotIdx == ti {
-					spotIdx = i
-					break
-				}
+	for _, st := range placed {
+		ctx := contexts[st.ID]
+		ti := placedTimeslot[st.ID]
+		spotIdx := -1
+		for i, spot := range grid {
+			if available[i] && spot.timeslotIdx == ti {
+				spotIdx = i
+				break
 			}
-			available[spotIdx] = false
-			spot := grid[spotIdx]
-			token := newToken()
-
-			decisionLog := encodeJSON(batchLog{
-				Trigger:              "batch_schedule",
-				LastTurnAt:           st.LastTurnAt,
-				InviteNext:           st.InviteNextSince != nil,
-				CandidateRank:        ctx.candidateRank,
-				CandidatesConsidered: ctx.candidatesConsidered,
-				GroupName:            nonEmpty(groupName[ctx.groupID]),
-				GroupColor:           nonEmpty(groupColor[ctx.groupID]),
-				GroupQuota:           nonEmpty(ctx.groupQuota),
-				PreferredTimeslots:   preferredStartTimes(prefs[st.ID], timeslots),
-				PreferredDays:        preferredDays(st.PreferredDays, clubDays),
-				BuddyPlacedNear:      nonEmpty(ctx.buddyOf),
-				Overflow:             ctx.overflow,
-			})
-			if _, err := tx.Exec(`
-				INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, decision_log)
-				VALUES (?, ?, ?, ?, ?, ?, ?)`, id, st.ID, spot.timeslot.ID, spot.slotID, token, ctx.groupID, decisionLog); err != nil {
-				return err
-			}
-			invited = append(invited, ScheduledInvitation{
-				StudentID: st.ID, FirstName: st.FirstName, LastName: st.LastName, Token: token,
-				TimeslotID: spot.timeslot.ID, SlotID: spot.slotID, StartTime: spot.timeslot.StartTime, GroupID: ctx.groupID,
-			})
 		}
-		return nil
-	})
-	if err != nil {
-		return err
+		available[spotIdx] = false
+		spot := grid[spotIdx]
+		token := newToken()
+
+		decisionLog := encodeJSON(batchLog{
+			Trigger:              "batch_schedule",
+			LastTurnAt:           st.LastTurnAt,
+			InviteNext:           st.InviteNextPendingSince != nil,
+			CandidateRank:        ctx.candidateRank,
+			CandidatesConsidered: ctx.candidatesConsidered,
+			GroupName:            nonEmpty(groupName[ctx.groupID]),
+			GroupColor:           nonEmpty(groupColor[ctx.groupID]),
+			GroupQuota:           nonEmpty(ctx.groupQuota),
+			PreferredTimeslots:   preferredStartTimes(prefs[st.ID], timeslots),
+			PreferredDays:        preferredDays(st.PreferredDays, clubDays),
+			BuddyPlacedNear:      nonEmpty(ctx.buddyOf),
+			Overflow:             ctx.overflow,
+		})
+		if _, err := tx.Exec(`
+			INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, decision_log)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, id, st.ID, spot.timeslot.ID, spot.slotID, token, ctx.groupID, decisionLog); err != nil {
+			return err
+		}
+		invited = append(invited, ScheduledInvitation{
+			StudentID: st.ID, FirstName: st.FirstName, LastName: st.LastName, Token: token,
+			TimeslotID: spot.timeslot.ID, SlotID: spot.slotID, StartTime: spot.timeslot.StartTime, GroupID: ctx.groupID,
+		})
 	}
 
-	if _, err := s.db.Exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", id); err != nil {
+	if _, err := tx.Exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	s.hub.BroadcastSession(sessionID, "reload", map[string]any{})

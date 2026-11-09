@@ -1,11 +1,14 @@
 package server
 
 import (
+	"cmp"
 	"database/sql"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
@@ -63,30 +66,23 @@ type GroupSummary struct {
 	Active    int64  `db:"active" json:"active"`
 }
 
-// GroupMember is a member in a group's queue.
+// GroupMember is a member in a group's queue, with what only the group page shows.
 type GroupMember struct {
-	ID                int64   `db:"id" json:"id"`
-	FirstName         string  `db:"first_name" json:"first_name"`
-	LastName          string  `db:"last_name" json:"last_name"`
-	Email             string  `db:"email" json:"email"`
-	Active            int64   `db:"active" json:"active"`
-	CooldownUntil     *string `db:"cooldown_until" json:"cooldown_until"`
-	PreferredDays     string  `db:"preferred_days" json:"preferred_days"`
-	ActiveInvitations int64   `db:"active_invitations" json:"active_invitations"`
-	queue.Columns
+	queue.Member
+	groupMemberExtras
 
-	// Computed from the columns below.
-	QueuePosition *int64            `db:"-" json:"queue_position"` // nil for inactive members
-	InviteNext    bool              `db:"-" json:"invite_next"`
-	QueueOverride *QueueOverride    `db:"-" json:"queue_override"`
-	BuddyGroup    *MemberBuddyGroup `db:"-" json:"buddy_group"`
+	// Computed from the member and the extras.
+	Position      *int64            `json:"queue_position"` // 1-based among active members; nil for inactive ones
+	InviteNext    bool              `json:"invite_next"`
+	QueueOverride *QueueOverride    `json:"queue_override"`
+	BuddyGroup    *MemberBuddyGroup `json:"buddy_group"`
+}
 
-	JoinedAt          *string `db:"joined_at" json:"-"`
-	ReactivatedAt     *string `db:"reactivated_at" json:"-"`
-	NewPolicy         string  `db:"new_member_priority" json:"-"`
-	ReactivatedPolicy string  `db:"reactivated_member_priority" json:"-"`
-	CooldownPolicy    string  `db:"cooldown_member_priority" json:"-"`
-	BuddyGroupID      *int64  `db:"buddy_group_id" json:"-"`
+// groupMemberExtras is the per-student information only the group page needs.
+type groupMemberExtras struct {
+	StudentID         int64  `db:"student_id" json:"-"`
+	ActiveInvitations int64  `db:"active_invitations" json:"active_invitations"`
+	BuddyGroupID      *int64 `db:"buddy_group_id" json:"-"`
 }
 
 // QueueOverride says which event placed a member at the back of the queue.
@@ -495,30 +491,48 @@ func (s *Server) groupRoutes() {
 // handleGroupMembers lists a group's members in queue order, with queue position, override
 // reason and buddy group details.
 func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request) error {
-	id := r.PathValue("id")
-	if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
+	groupID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || !s.exists("SELECT 1 FROM groups WHERE id = ?", groupID) {
 		httpx.Error(w, http.StatusNotFound, "Group not found")
 		return nil
 	}
-	members, err := db.Many[GroupMember](s.db, `
-		SELECT s.id, s.first_name, s.last_name, s.email, s.active, s.cooldown_until, s.preferred_days,
-			`+queue.ColumnsSQL+`,
-			sg.joined_at, sg.reactivated_at,
-			qg.new_member_priority, qg.reactivated_member_priority, qg.cooldown_member_priority,
-			bgm.buddy_group_id,
-			(SELECT COUNT(*) FROM invitations i
-				JOIN training_sessions ts ON ts.id = i.session_id
-				WHERE i.student_id = s.id AND i.status IN ('confirmed', 'invited', 'scheduled')
-					AND ts.status != 'completed') AS active_invitations
-		FROM students s
-		JOIN student_groups sg ON sg.student_id = s.id
-		`+queue.JoinSQL+`
-		LEFT JOIN buddy_group_members bgm ON bgm.student_id = s.id
-		WHERE sg.group_id = ? AND s.deleted_at IS NULL
-		ORDER BY s.active DESC, `+queue.OrderSQL+`, s.last_name ASC, s.first_name ASC`, id)
+	queueMembers, err := queue.LoadMembers(s.db)
 	if err != nil {
 		return err
 	}
+	extras, err := db.Many[groupMemberExtras](s.db, `
+		SELECT sg.student_id, bgm.buddy_group_id,
+			(SELECT COUNT(*) FROM invitations i
+				JOIN training_sessions ts ON ts.id = i.session_id
+				WHERE i.student_id = sg.student_id AND i.status IN ('confirmed', 'invited', 'scheduled')
+					AND ts.status != 'completed') AS active_invitations
+		FROM student_groups sg
+		LEFT JOIN buddy_group_members bgm ON bgm.student_id = sg.student_id
+		WHERE sg.group_id = ?`, groupID)
+	if err != nil {
+		return err
+	}
+	extrasByID := map[int64]groupMemberExtras{}
+	for _, x := range extras {
+		extrasByID[x.StudentID] = x
+	}
+	// Active members first, in the order the scheduler uses: ties are broken with the next
+	// session still to be sent as the seed, so the overview shows that session's order (seed 0
+	// without one).
+	seed, _, err := db.One[int64](s.db, `
+		SELECT id FROM training_sessions
+		WHERE status IN ('draft', 'scheduled') AND date >= ?
+		ORDER BY date LIMIT 1`, nowFunc().In(s.clubLocation()).Format(time.DateOnly))
+	if err != nil {
+		return err
+	}
+	inGroup := slices.DeleteFunc(queueMembers, func(m queue.Member) bool { return m.GroupID != groupID })
+	queue.Sort(inGroup, seed)
+	members := make([]GroupMember, len(inGroup))
+	for i, m := range inGroup {
+		members[i] = GroupMember{Member: m, groupMemberExtras: extrasByID[m.ID]}
+	}
+	slices.SortStableFunc(members, func(a, b GroupMember) int { return cmp.Compare(b.Active, a.Active) })
 
 	// Buddy group names are built from member first names (matches the students list).
 	type buddyRow struct {
@@ -542,28 +556,16 @@ func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request) erro
 	position := int64(0)
 	for i := range members {
 		m := &members[i]
-		lastTurn := deref(m.LastTurnAt)
-		// A 'back' policy only matters when its moment is what places the member (later than their last turn).
-		for _, o := range []struct {
-			reason, policy string
-			at             *string
-		}{
-			{"joined", m.NewPolicy, m.JoinedAt},
-			{"reactivated", m.ReactivatedPolicy, m.ReactivatedAt},
-			{"cooldown", m.CooldownPolicy, m.CooldownUntil},
-		} {
-			if at := deref(o.at); o.policy == "back" && at != "" && at == m.QueueAt && at > lastTurn {
-				m.QueueOverride = &QueueOverride{Reason: o.reason, At: at}
-				break
-			}
+		if m.QueueReason != nil {
+			m.QueueOverride = &QueueOverride{Reason: *m.QueueReason, At: m.QueueAt}
 		}
 
 		if m.Active != 0 {
 			position++
 			p := position
-			m.QueuePosition = &p
+			m.Position = &p
 		}
-		m.InviteNext = m.InviteNextSince != nil
+		m.InviteNext = m.InviteNextPendingSince != nil
 
 		if m.BuddyGroupID != nil {
 			group := buddiesByGroup[*m.BuddyGroupID]

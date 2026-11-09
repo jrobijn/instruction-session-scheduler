@@ -1,103 +1,72 @@
-// Package queue holds the invite queue SQL and the tie-breaking and weighted-pick
-// helpers used when generating schedules.
+// Package queue defines the invite queue: the order in which students get a turn.
+//
+// LoadMembers loads every student in the queue with what all queue users need: who they are,
+// what eligibility looks at, their group and their standing (queue state and position). The
+// standing is computed in SQL (queue.sql); only breaking ties between equal positions is done
+// in Go (Sort), with a seeded hash SQLite can't compute.
 package queue
 
 import (
+	"cmp"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/binary"
 	"math"
-	"sort"
+	"slices"
 	"strconv"
+
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 )
 
-// countedStatuses are the invitation statuses that count as having had a turn.
-const countedStatuses = "('scheduled','invited','confirmed')"
+//go:embed queue.sql
+var membersQuery string
 
-// JoinSQL is for queries aliasing students as `s` and student_groups as `sg`.
-const JoinSQL = `
-  LEFT JOIN groups qg ON qg.id = sg.group_id
-  LEFT JOIN (
-    SELECT i.student_id, MAX(datetime(ts.date)) AS last_turn_at
-    FROM invitations i JOIN training_sessions ts ON ts.id = i.session_id
-    WHERE i.status IN ` + countedStatuses + `
-    GROUP BY i.student_id
-  ) lt ON lt.student_id = s.id`
+// Member is a student in the queue: a row of queue.sql. The JSON tags are those of API
+// responses that embed it.
+type Member struct {
+	ID            int64   `db:"id" json:"id"`
+	FirstName     string  `db:"first_name" json:"first_name"`
+	LastName      string  `db:"last_name" json:"last_name"`
+	Email         string  `db:"email" json:"email"`
+	Active        int64   `db:"active" json:"active"`
+	PreferredDays string  `db:"preferred_days" json:"preferred_days"`
+	CooldownUntil *string `db:"cooldown_until" json:"cooldown_until"` // as stored
+	GroupID       int64   `db:"group_id" json:"-"`
 
-// ColumnsSQL selects last_turn_at, queue_at and invite_next_since.
-//
-// invite_next_since is set while an "invite next" override is pending (no counted invitation since).
-// queue_at is the latest of the last turn and each event time whose group policy is 'back'
-// (join, reactivation, cooldown end). Policies apply at query time. An empty string sorts first (front of the queue).
-const ColumnsSQL = `
-  lt.last_turn_at AS last_turn_at,
-  MAX(
-    COALESCE(lt.last_turn_at, ''),
-    CASE WHEN qg.new_member_priority = 'back' THEN COALESCE(sg.joined_at, '') ELSE '' END,
-    CASE WHEN qg.reactivated_member_priority = 'back' THEN COALESCE(sg.reactivated_at, '') ELSE '' END,
-    CASE WHEN qg.cooldown_member_priority = 'back' THEN COALESCE(s.cooldown_until, '') ELSE '' END
-  ) AS queue_at,
-  CASE WHEN sg.invite_next_at IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM invitations i2
-    WHERE i2.student_id = s.id AND i2.status IN ` + countedStatuses + ` AND i2.invited_at >= sg.invite_next_at
-  ) THEN sg.invite_next_at END AS invite_next_since`
-
-const OrderSQL = "invite_next_since IS NULL, invite_next_since ASC, queue_at ASC"
-
-// Columns holds the values selected by ColumnsSQL; embed it in a row struct. Only
-// last_turn_at is part of API responses.
-type Columns struct {
-	LastTurnAt      *string `db:"last_turn_at" json:"last_turn_at"`
-	QueueAt         string  `db:"queue_at" json:"-"`
-	InviteNextSince *string `db:"invite_next_since" json:"-"`
+	// Queue standing; see queue.sql for each column.
+	LastTurnAt             *string `db:"last_turn_at" json:"last_turn_at"`
+	QueueAt                string  `db:"queue_at" json:"-"`
+	QueueReason            *string `db:"queue_reason" json:"-"`
+	InviteNextPendingSince *string `db:"invite_next_pending_since" json:"-"`
+	QueuePosition          int64   `db:"queue_position" json:"-"`
 }
 
-// QueueTieKey implements part of Entry.
-func (c Columns) QueueTieKey() string { return TieKey(c.InviteNextSince, c.QueueAt) }
-
-// Entry is the part of a queue row that tie-breaking looks at.
-type Entry interface {
-	QueueID() int64
-	QueueTieKey() string // invite_next_since + "|" + queue_at
+// LoadMembers returns every student in the queue (non-deleted and in a group), in no
+// particular order. It is the only way to load queue data, so every caller gets every column.
+// A column of queue.sql without a field in Member fails the scan.
+func LoadMembers(q db.Querier) ([]Member, error) {
+	return db.Many[Member](q, membersQuery)
 }
 
-// TieKey builds the tie key from nullable invite_next_since and queue_at values.
-func TieKey(inviteNextSince *string, queueAt string) string {
-	s := ""
-	if inviteNextSince != nil {
-		s = *inviteNextSince
+// Sort puts members in queue order (by queue_position). Ties are shuffled by seed: the order
+// is stable per (seed, student) but different for each seed.
+func Sort(members []Member, seed int64) {
+	hashes := make(map[int64]uint32, len(members))
+	for _, m := range members {
+		hashes[m.ID] = tieHash(seed, m.ID)
 	}
-	return s + "|" + queueAt
+	slices.SortFunc(members, func(a, b Member) int {
+		return cmp.Or(
+			cmp.Compare(a.QueuePosition, b.QueuePosition),
+			cmp.Compare(hashes[a.ID], hashes[b.ID]),
+			cmp.Compare(a.ID, b.ID),
+		)
+	})
 }
 
-// BreakTies reorders runs of equal queue position (rows must already be sorted by OrderSQL).
-// The order is stable per (seed, student) but shuffled differently for each seed.
-func BreakTies[T Entry](rows []T, seed int64) []T {
-	hash := func(r T) uint32 {
-		sum := sha256.Sum256([]byte(strconv.FormatInt(seed, 10) + ":" + strconv.FormatInt(r.QueueID(), 10)))
-		return binary.BigEndian.Uint32(sum[:4])
-	}
-	out := make([]T, 0, len(rows))
-	for start := 0; start < len(rows); {
-		end := start + 1
-		for end < len(rows) && rows[end].QueueTieKey() == rows[start].QueueTieKey() {
-			end++
-		}
-		run := append([]T(nil), rows[start:end]...)
-		hashes := make(map[int64]uint32, len(run))
-		for _, r := range run {
-			hashes[r.QueueID()] = hash(r)
-		}
-		sort.SliceStable(run, func(i, j int) bool {
-			hi, hj := hashes[run[i].QueueID()], hashes[run[j].QueueID()]
-			if hi != hj {
-				return hi < hj
-			}
-			return run[i].QueueID() < run[j].QueueID()
-		})
-		out = append(out, run...)
-		start = end
-	}
-	return out
+func tieHash(seed, id int64) uint32 {
+	sum := sha256.Sum256([]byte(strconv.FormatInt(seed, 10) + ":" + strconv.FormatInt(id, 10)))
+	return binary.BigEndian.Uint32(sum[:4])
 }
 
 // WeightedPickGroup picks a group id weighted by weightByGroup. When all weights are
