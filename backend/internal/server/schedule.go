@@ -2,19 +2,16 @@ package server
 
 import (
 	"fmt"
-	"math"
-	mrand "math/rand/v2"
 	"net/http"
-	"slices"
-	"sort"
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
-	"github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/scheduling"
 )
 
-// POST /api/sessions/:id/generate-schedule. Iteration orders (insertion order, stable sorts)
-// are kept deterministic on purpose: they decide who gets moved or placed.
+// POST /api/sessions/:id/generate-schedule. Who is invited where is decided by
+// scheduling.Generate; this handler loads its input, assigns instructor spots and writes the
+// invitations.
 
 // ScheduledInvitation is an invitation created by generating a schedule.
 type ScheduledInvitation struct {
@@ -28,60 +25,10 @@ type ScheduledInvitation struct {
 	GroupID    int64  `json:"group_id"`
 }
 
-// orderedSet is a set of ids that remembers insertion order.
-type orderedSet struct {
-	items []int64
-	index map[int64]bool
-}
-
-func newOrderedSet() *orderedSet { return &orderedSet{index: map[int64]bool{}} }
-
-func (o *orderedSet) add(id int64) {
-	if !o.index[id] {
-		o.index[id] = true
-		o.items = append(o.items, id)
-	}
-}
-
-func (o *orderedSet) delete(id int64) {
-	if o.index[id] {
-		delete(o.index, id)
-		o.items = slices.DeleteFunc(o.items, func(x int64) bool { return x == id })
-	}
-}
-
-func (o *orderedSet) has(id int64) bool { return o.index[id] }
-func (o *orderedSet) size() int         { return len(o.items) }
-
-type placementContext struct {
-	groupID              int64
-	candidateRank        int
-	candidatesConsidered int
-	groupQuota           string
-	buddyOf              string
-	overflow             bool
-}
-
-type batchLog struct {
-	Trigger              string   `json:"trigger"`
-	LastTurnAt           *string  `json:"last_turn_at"`
-	InviteNext           bool     `json:"invite_next"`
-	CandidateRank        int      `json:"candidate_rank"`
-	CandidatesConsidered int      `json:"candidates_considered"`
-	GroupName            *string  `json:"group_name"`
-	GroupColor           *string  `json:"group_color"`
-	GroupQuota           *string  `json:"group_quota"`
-	PreferredTimeslots   []string `json:"preferred_timeslots"`
-	PreferredDays        []int    `json:"preferred_days"`
-	BuddyPlacedNear      *string  `json:"buddy_placed_near"`
-	Overflow             bool     `json:"overflow"`
-}
-
 type gridSpot struct {
-	timeslot     Timeslot
-	slotID       int64
-	timeslotIdx  int
-	instructorID int64
+	timeslot    Timeslot
+	slotID      int64
+	timeslotIdx int
 }
 
 func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) error {
@@ -127,7 +74,6 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return err
 	}
-	availableSlots := totalSlots - len(manual)
 
 	timetableGroups, err := s.timetableGroups(timetableID)
 	if err != nil {
@@ -137,31 +83,14 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusBadRequest, "No groups assigned to this timetable")
 		return nil
 	}
-
-	// Slots per group from percentages; the remainder goes one each to the first groups.
-	type groupSlots struct {
-		groupID int64
-		slots   int
-	}
-	var groupSlotCounts []*groupSlots
-	allocated := 0
-	percentage := map[int64]float64{}
 	groupName, groupColor := map[int64]string{}, map[int64]string{}
 	for _, tg := range timetableGroups {
-		gid, pct := tg.GroupID, tg.Percentage
-		n := int(math.Floor(float64(availableSlots) * float64(pct) / 100))
-		groupSlotCounts = append(groupSlotCounts, &groupSlots{gid, n})
-		allocated += n
-		percentage[gid] = float64(pct)
-		groupName[gid], groupColor[gid] = tg.GroupName, tg.GroupColor
+		groupName[tg.GroupID], groupColor[tg.GroupID] = tg.GroupName, tg.GroupColor
 	}
-	remainder := availableSlots - allocated
-	for _, g := range groupSlotCounts {
-		if remainder <= 0 {
-			break
-		}
-		g.slots++
-		remainder--
+	groups := scheduling.AllocateSlots(totalSlots-len(manual), schedulingGroups(timetableGroups))
+	quotaLabel := map[int64]string{}
+	for _, g := range groups {
+		quotaLabel[g.ID] = fmt.Sprintf("%d slots (%d%%)", g.Slots, int64(g.Percentage))
 	}
 
 	type assignedInstructor struct {
@@ -177,11 +106,12 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	// Grid of spots: every timeslot has one spot per instructor.
+	// Grid of spots: every timeslot has one spot per instructor. Spots of manual invitations
+	// are taken.
 	var grid []gridSpot
 	for ti, ts := range timeslots {
 		for _, in := range instructors {
-			grid = append(grid, gridSpot{timeslot: ts, slotID: in.SlotID, timeslotIdx: ti, instructorID: in.ID})
+			grid = append(grid, gridSpot{timeslot: ts, slotID: in.SlotID, timeslotIdx: ti})
 		}
 	}
 	available := make([]bool, len(grid))
@@ -196,45 +126,24 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-
-	prefs, err := s.prefsByStudent(timetableID)
-	if err != nil {
-		return err
+	timeslotCapacity := make([]scheduling.Timeslot, len(timeslots))
+	for i, ts := range timeslots {
+		timeslotCapacity[i].ID = ts.ID
 	}
-
-	// Buddies: for each student the other members of their buddy group, in insertion order.
-	type buddyMembership struct {
-		BuddyGroupID int64 `db:"buddy_group_id"`
-		StudentID    int64 `db:"student_id"`
-	}
-	buddyMemberships, err := db.Many[buddyMembership](s.db, "SELECT bgm.buddy_group_id, bgm.student_id FROM buddy_group_members bgm")
-	if err != nil {
-		return err
-	}
-	var buddyGroupOrder []int64
-	buddyGroups := map[int64]*orderedSet{}
-	for _, m := range buddyMemberships {
-		if buddyGroups[m.BuddyGroupID] == nil {
-			buddyGroups[m.BuddyGroupID] = newOrderedSet()
-			buddyGroupOrder = append(buddyGroupOrder, m.BuddyGroupID)
-		}
-		buddyGroups[m.BuddyGroupID].add(m.StudentID)
-	}
-	buddiesOf := map[int64]*orderedSet{}
-	for _, bg := range buddyGroupOrder {
-		members := buddyGroups[bg]
-		for _, sid := range members.items {
-			if buddiesOf[sid] == nil {
-				buddiesOf[sid] = newOrderedSet()
-			}
-			for _, other := range members.items {
-				if other != sid {
-					buddiesOf[sid].add(other)
-				}
-			}
+	for i, spot := range grid {
+		if available[i] {
+			timeslotCapacity[spot.timeslotIdx].Capacity++
 		}
 	}
 
+	prefs, err := s.timeslotPrefs(timetableID)
+	if err != nil {
+		return err
+	}
+	buddies, err := s.loadBuddies()
+	if err != nil {
+		return err
+	}
 	clubDays := db.Setting(s.db, "club_days", "0|1|2|3|4|5|6")
 	loc := s.clubLocation()
 
@@ -260,266 +169,22 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		return nil
 	}
 
-	studentsByGroup := map[int64][]queue.Member{}
-	for _, g := range groupSlotCounts {
-		studentsByGroup[g.groupID] = []queue.Member{}
-	}
-	for _, st := range eligible {
-		studentsByGroup[st.GroupID] = append(studentsByGroup[st.GroupID], st)
-	}
+	placements := scheduling.Generate(scheduling.Input{
+		Queue:     eligible,
+		Groups:    groups,
+		Timeslots: timeslotCapacity,
+		Allows:    prefs.allows,
+		Buddies:   buddies,
+		Seed:      sessionID, // regenerating the same session yields the same overflow picks
+	})
 
-	// ----- Timeslot matching -----
-	// Students are matched to a timeslot first (capacity = free spots); spots are assigned afterwards.
-	capacity := make([]int, len(timeslots))
-	for i, spot := range grid {
-		if available[i] {
-			capacity[spot.timeslotIdx]++
-		}
-	}
-	occupants := make([]*orderedSet, len(timeslots))
-	for i := range occupants {
-		occupants[i] = newOrderedSet()
-	}
-	placedTimeslot := map[int64]int{}
-
-	allowedCache := map[int64][]int{}
-	allowedTimeslots := func(sid int64) []int {
-		if a, ok := allowedCache[sid]; ok {
-			return a
-		}
-		p := prefs[sid]
-		a := []int{}
-		for i, ts := range timeslots {
-			if len(p) == 0 || p[ts.ID] {
-				a = append(a, i)
-			}
-		}
-		allowedCache[sid] = a
-		return a
-	}
-	hasTimeslotPreference := func(sid int64) bool { return len(allowedTimeslots(sid)) < len(timeslots) }
-
-	putInTimeslot := func(sid int64, ti int) {
-		if prev, ok := placedTimeslot[sid]; ok {
-			occupants[prev].delete(sid)
-		}
-		occupants[ti].add(sid)
-		placedTimeslot[sid] = ti
-	}
-
-	// Allowed timeslots closest to the anchor first; earliest first without an anchor.
-	orderedTimeslots := func(sid int64, anchor int, hasAnchor bool) []int {
-		allowed := allowedTimeslots(sid)
-		if !hasAnchor {
-			return allowed
-		}
-		out := slices.Clone(allowed)
-		abs := func(x int) int { return max(x, -x) }
-		sort.SliceStable(out, func(i, j int) bool {
-			di, dj := abs(out[i]-anchor), abs(out[j]-anchor)
-			if di != dj {
-				return di < dj
-			}
-			return out[i] < out[j]
-		})
-		return out
-	}
-
-	// Augmenting path: may move already-placed students to another allowed timeslot, but never unplaces them.
-	var tryPlace func(sid int64, order []int, visited map[int]bool) bool
-	tryPlace = func(sid int64, order []int, visited map[int]bool) bool {
-		for _, ti := range order {
-			if !visited[ti] && occupants[ti].size() < capacity[ti] {
-				putInTimeslot(sid, ti)
-				return true
-			}
-		}
-		for _, ti := range order {
-			if visited[ti] {
-				continue
-			}
-			visited[ti] = true
-			for _, other := range slices.Clone(occupants[ti].items) {
-				if other != sid && tryPlace(other, orderedTimeslots(other, ti, true), visited) {
-					putInTimeslot(sid, ti)
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	placeStudent := func(sid int64) bool {
-		anchor, hasAnchor := 0, false
-		if b := buddiesOf[sid]; b != nil {
-			for _, buddy := range b.items {
-				if ti, ok := placedTimeslot[buddy]; ok {
-					anchor, hasAnchor = ti, true
-					break
-				}
-			}
-		}
-		return tryPlace(sid, orderedTimeslots(sid, anchor, hasAnchor), map[int]bool{})
-	}
-
-	// ----- Selection: top n per group (n = quota), buddies pulled up within the same group -----
-	contexts := map[int64]*placementContext{}
-	quotaLabel := map[int64]string{}
-	for _, g := range groupSlotCounts {
-		quotaLabel[g.groupID] = fmt.Sprintf("%d slots (%d%%)", g.slots, int64(percentage[g.groupID]))
-	}
-	groupContext := func(st queue.Member, gid int64, buddyOf string) *placementContext {
-		list := studentsByGroup[gid]
-		rank := slices.IndexFunc(list, func(x queue.Member) bool { return x.ID == st.ID }) + 1
-		return &placementContext{groupID: gid, candidateRank: rank, candidatesConsidered: len(list), groupQuota: quotaLabel[gid], buddyOf: buddyOf}
-	}
-
-	var selected []queue.Member
-	remainingByGroup := map[int64][]queue.Member{}
-	for _, g := range groupSlotCounts {
-		list := studentsByGroup[g.groupID]
-		taken := map[int64]bool{}
-		sel := func(st queue.Member, buddyOf string) {
-			taken[st.ID] = true
-			selected = append(selected, st)
-			contexts[st.ID] = groupContext(st, g.groupID, buddyOf)
-		}
-		for _, st := range list {
-			if len(taken) >= g.slots {
-				break
-			}
-			if taken[st.ID] {
-				continue
-			}
-			sel(st, "")
-			buddies := buddiesOf[st.ID]
-			if buddies == nil {
-				continue
-			}
-			for _, buddy := range list {
-				if len(taken) >= g.slots {
-					break
-				}
-				if buddies.has(buddy.ID) && !taken[buddy.ID] {
-					sel(buddy, st.FirstName+" "+st.LastName)
-				}
-			}
-		}
-		rest := []queue.Member{}
-		for _, st := range list {
-			if !taken[st.ID] {
-				rest = append(rest, st)
-			}
-		}
-		remainingByGroup[g.groupID] = rest
-	}
-
-	// ----- Placement -----
-	queueIndex := map[int64]int{}
-	for i, st := range eligible {
-		queueIndex[st.ID] = i
-	}
-	byQueue := func(list []queue.Member) {
-		sort.SliceStable(list, func(i, j int) bool { return queueIndex[list[i].ID] < queueIndex[list[j].ID] })
-	}
-	var withPreference, withoutPreference []queue.Member
-	for _, st := range selected {
-		if hasTimeslotPreference(st.ID) {
-			withPreference = append(withPreference, st)
-		} else {
-			withoutPreference = append(withoutPreference, st)
-		}
-	}
-	byQueue(withPreference)
-	byQueue(withoutPreference)
-	var placed []queue.Member
-	// Placing more students never frees room, so a student who failed once can't be placed later.
-	unplaceable := map[int64]bool{}
-
-	// Phase 1: students with timeslot preferences; an unplaceable one is replaced by the next candidate of its group.
-	for len(withPreference) > 0 {
-		st := withPreference[0]
-		withPreference = withPreference[1:]
-		if placeStudent(st.ID) {
-			placed = append(placed, st)
-			continue
-		}
-		unplaceable[st.ID] = true
-		gid := contexts[st.ID].groupID
-		delete(contexts, st.ID)
-		rest := remainingByGroup[gid]
-		if len(rest) == 0 {
-			continue
-		}
-		repl := rest[0]
-		remainingByGroup[gid] = rest[1:]
-		contexts[repl.ID] = groupContext(repl, gid, "")
-		if hasTimeslotPreference(repl.ID) {
-			withPreference = append(withPreference, repl)
-		} else {
-			withoutPreference = append(withoutPreference, repl)
-		}
-	}
-
-	// Phase 2: students without preferences fill the remaining spots.
-	for _, st := range withoutPreference {
-		if placeStudent(st.ID) {
-			placed = append(placed, st)
-		} else {
-			delete(contexts, st.ID)
-			unplaceable[st.ID] = true
-		}
-	}
-
-	// Phase 3 (overflow): remaining spots go to uninvited eligible students of any group. Each
-	// pick chooses a group at random (weighted by timetable percentage) and tries its first candidate.
-	totalCapacity := 0
-	for _, c := range capacity {
-		totalCapacity += c
-	}
-	var overflowCandidates []queue.Member
-	for _, st := range eligible {
-		if _, isPlaced := placedTimeslot[st.ID]; !isPlaced && !unplaceable[st.ID] {
-			overflowCandidates = append(overflowCandidates, st)
-		}
-	}
-	var overflowOrder []int64
-	overflowQueues := map[int64][]queue.Member{}
-	for _, st := range overflowCandidates {
-		if _, ok := overflowQueues[st.GroupID]; !ok {
-			overflowOrder = append(overflowOrder, st.GroupID)
-		}
-		overflowQueues[st.GroupID] = append(overflowQueues[st.GroupID], st)
-	}
-	// Seeded by session so regenerating the same session yields the same overflow picks.
-	random := mrand.New(mrand.NewPCG(uint64(sessionID), 0)).Float64
-	overflowRank := 0
-	for len(overflowOrder) > 0 && len(placedTimeslot) < totalCapacity {
-		picked := queue.WeightedPickGroup(overflowOrder, percentage, random)
-		q := overflowQueues[picked]
-		st := q[0]
-		if len(q) == 1 {
-			delete(overflowQueues, picked)
-			overflowOrder = slices.DeleteFunc(overflowOrder, func(g int64) bool { return g == picked })
-		} else {
-			overflowQueues[picked] = q[1:]
-		}
-		overflowRank++
-		if !placeStudent(st.ID) {
-			continue
-		}
-		placed = append(placed, st)
-		contexts[st.ID] = &placementContext{groupID: picked, candidateRank: overflowRank, candidatesConsidered: len(overflowCandidates), overflow: true}
-	}
-
-	// Each placed student gets the first free instructor spot of their matched timeslot.
+	// Each placed student gets the first free instructor spot of their timeslot.
 	invited := []ScheduledInvitation{}
-	for _, st := range placed {
-		ctx := contexts[st.ID]
-		ti := placedTimeslot[st.ID]
+	for _, p := range placements {
+		st := p.Member
 		spotIdx := -1
 		for i, spot := range grid {
-			if available[i] && spot.timeslotIdx == ti {
+			if available[i] && spot.timeslotIdx == p.Timeslot {
 				spotIdx = i
 				break
 			}
@@ -528,28 +193,33 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		spot := grid[spotIdx]
 		token := newToken()
 
+		var quota, buddyOf string
+		if !p.Overflow {
+			quota = quotaLabel[p.GroupID]
+		}
+		if p.PulledUpBy != nil {
+			buddyOf = p.PulledUpBy.FirstName + " " + p.PulledUpBy.LastName
+		}
 		decisionLog := encodeJSON(batchLog{
-			Trigger:              "batch_schedule",
-			LastTurnAt:           st.LastTurnAt,
-			InviteNext:           st.InviteNextPendingSince != nil,
-			CandidateRank:        ctx.candidateRank,
-			CandidatesConsidered: ctx.candidatesConsidered,
-			GroupName:            nonEmpty(groupName[ctx.groupID]),
-			GroupColor:           nonEmpty(groupColor[ctx.groupID]),
-			GroupQuota:           nonEmpty(ctx.groupQuota),
-			PreferredTimeslots:   preferredStartTimes(prefs[st.ID], timeslots),
-			PreferredDays:        preferredDays(st.PreferredDays, clubDays),
-			BuddyPlacedNear:      nonEmpty(ctx.buddyOf),
-			Overflow:             ctx.overflow,
+			candidateLog: candidateLog{
+				Trigger:              "batch_schedule",
+				CandidateRank:        p.Rank,
+				CandidatesConsidered: p.Considered,
+				GroupName:            nonEmpty(groupName[p.GroupID]),
+				GroupColor:           nonEmpty(groupColor[p.GroupID]),
+				BuddyPlacedNear:      nonEmpty(buddyOf),
+			}.withStudent(st, prefs.startTimes(st.ID, timeslots), clubDays),
+			GroupQuota: nonEmpty(quota),
+			Overflow:   p.Overflow,
 		})
 		if _, err := tx.Exec(`
 			INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, decision_log)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, id, st.ID, spot.timeslot.ID, spot.slotID, token, ctx.groupID, decisionLog); err != nil {
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, id, st.ID, spot.timeslot.ID, spot.slotID, token, p.GroupID, decisionLog); err != nil {
 			return err
 		}
 		invited = append(invited, ScheduledInvitation{
 			StudentID: st.ID, FirstName: st.FirstName, LastName: st.LastName, Token: token,
-			TimeslotID: spot.timeslot.ID, SlotID: spot.slotID, StartTime: spot.timeslot.StartTime, GroupID: ctx.groupID,
+			TimeslotID: spot.timeslot.ID, SlotID: spot.slotID, StartTime: spot.timeslot.StartTime, GroupID: p.GroupID,
 		})
 	}
 

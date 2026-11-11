@@ -251,7 +251,7 @@ func TestInvitationActionsRefusedWhenClosed(t *testing.T) {
 	}
 }
 
-// --- declining and replacements ---------------------------------------------------------
+// --- declining (which replacements are chosen: replacement_test.go) ----------------------
 
 func TestDeclineInvitesReplacement(t *testing.T) {
 	f, g := invitedPair(t)
@@ -304,73 +304,6 @@ func TestDeclineInvitesReplacement(t *testing.T) {
 	res = f.invitationAction("D", "decline", nil).status(http.StatusOK).object()
 	if res["replacement"] != nil {
 		t.Fatalf("replacement = %v, want none left", res["replacement"])
-	}
-}
-
-func TestReplacementSkipsStudentsPreferringOtherTimeslots(t *testing.T) {
-	f, _ := invitedPair(t)
-	c := f.row("SELECT id FROM students WHERE first_name = 'C'")["id"].(int64)
-	f.preferTimeslots(c, f.timetable, f.timeslots[1]) // A's spot is 18:00
-
-	res := f.invitationAction("A", "decline", nil).status(http.StatusOK).object()
-	if repl := res["replacement"].(map[string]any); repl["name"] != "D Test" {
-		t.Fatalf("replacement = %v, want D", repl)
-	}
-}
-
-func TestReplacementFallsBackToOtherGroup(t *testing.T) {
-	f := newScheduleFixture(t, []string{"18:00"}, 1)
-	a := f.groupIn("A", 100)
-	b := f.groupIn("B", 0)
-	f.student("A1", a)
-	f.student("B1", b)
-	f.sendInvitations()
-
-	res := f.invitationAction("A1", "decline", nil).status(http.StatusOK).object()
-	if repl, _ := res["replacement"].(map[string]any); repl == nil || repl["name"] != "B1 Test" {
-		t.Fatalf("replacement = %v, want B1", res["replacement"])
-	}
-	var log map[string]any
-	json.Unmarshal([]byte(f.invitationOf("B1")["decision_log"].(string)), &log)
-	if log["same_group_match"] != false || log["group_name"] != "B" {
-		t.Fatalf("decision_log = %v", log)
-	}
-	if toInt64(f.invitationOf("B1")["group_id"]) != b {
-		t.Fatal("replacement should be recorded in its own group")
-	}
-}
-
-func TestReplacementSkipsGroupsOutsideTimetable(t *testing.T) {
-	f := newScheduleFixture(t, []string{"18:00"}, 1)
-	a := f.groupIn("A", 100)
-	f.student("A1", a)
-	f.student("Outsider", f.group("NotInTimetable"))
-	f.sendInvitations()
-
-	res := f.invitationAction("A1", "decline", nil).status(http.StatusOK).object()
-	if res["replacement"] != nil {
-		t.Fatalf("replacement = %v, want none", res["replacement"])
-	}
-}
-
-// candidate_rank and candidates_considered count within the replacement's group, and only
-// students who could take the spot: not other groups, nor groups outside the timetable.
-func TestReplacementLogCountsWithinGroup(t *testing.T) {
-	f := newScheduleFixture(t, []string{"18:00"}, 1)
-	a := f.groupIn("A", 100)
-	f.student("A1", a)
-	f.student("A2", a)
-	f.student("B1", f.groupIn("B", 0))
-	f.student("Outsider", f.group("NotInTimetable"))
-	f.sendInvitations()
-	invited := f.row("SELECT s.first_name FROM invitations i JOIN students s ON s.id = i.student_id")["first_name"].(string)
-	other := map[string]string{"A1": "A2", "A2": "A1"}[invited]
-
-	f.invitationAction(invited, "decline", nil).status(http.StatusOK)
-	var log map[string]any
-	json.Unmarshal([]byte(f.invitationOf(other)["decision_log"].(string)), &log)
-	if log["candidate_rank"] != float64(1) || log["candidates_considered"] != float64(1) {
-		t.Fatalf("decision_log = %v, want rank 1 of 1", log)
 	}
 }
 

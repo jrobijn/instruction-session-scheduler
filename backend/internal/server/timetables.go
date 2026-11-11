@@ -8,6 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/scheduling"
 )
 
 type Timetable struct {
@@ -50,6 +51,16 @@ func (s *Server) timetableGroups(timetableID any) ([]TimetableGroup, error) {
 		JOIN groups g ON g.id = tg.group_id
 		WHERE tg.timetable_id = ?
 		ORDER BY tg.position ASC`, timetableID)
+}
+
+// schedulingGroups converts timetable groups to scheduling's input, keeping their order.
+// Slots are left 0 (see scheduling.AllocateSlots).
+func schedulingGroups(tgs []TimetableGroup) []scheduling.Group {
+	out := make([]scheduling.Group, len(tgs))
+	for i, tg := range tgs {
+		out[i] = scheduling.Group{ID: tg.GroupID, Percentage: float64(tg.Percentage)}
+	}
+	return out
 }
 
 func (s *Server) timetableRoutes() {
@@ -438,4 +449,49 @@ func (s *Server) loadTimetable(w http.ResponseWriter, r *http.Request) (Timetabl
 		return t, false, err
 	}
 	return t, true, nil
+}
+
+// timeslotPrefs holds, per student, the timeslots of one timetable they prefer. A student
+// without preferences may take any timeslot. Load it with Server.timeslotPrefs.
+type timeslotPrefs map[int64]map[int64]bool
+
+func (s *Server) timeslotPrefs(timetableID int64) (timeslotPrefs, error) {
+	type preference struct {
+		StudentID  int64 `db:"student_id"`
+		TimeslotID int64 `db:"timeslot_id"`
+	}
+	preferences, err := db.Many[preference](s.db, "SELECT student_id, timeslot_id FROM student_preferred_timeslots WHERE timetable_id = ?", timetableID)
+	if err != nil {
+		return nil, err
+	}
+	out := timeslotPrefs{}
+	for _, p := range preferences {
+		if out[p.StudentID] == nil {
+			out[p.StudentID] = map[int64]bool{}
+		}
+		out[p.StudentID][p.TimeslotID] = true
+	}
+	return out, nil
+}
+
+// allows reports whether the student may take the timeslot.
+func (p timeslotPrefs) allows(studentID, timeslotID int64) bool {
+	prefs := p[studentID]
+	return len(prefs) == 0 || prefs[timeslotID]
+}
+
+// startTimes lists the start times of the student's preferred timeslots, in timeslot order.
+// It is nil (null in a decision log) when they have no preferences.
+func (p timeslotPrefs) startTimes(studentID int64, timeslots []Timeslot) []string {
+	prefs := p[studentID]
+	if len(prefs) == 0 {
+		return nil
+	}
+	list := []string{}
+	for _, t := range timeslots {
+		if prefs[t.ID] {
+			list = append(list, t.StartTime)
+		}
+	}
+	return list
 }

@@ -857,13 +857,15 @@ func (s *Server) handleAutoScheduleSlot(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusConflict, "This slot is already occupied")
 		return nil
 	}
-	// Keep the group of the most recent vacated invitation for this spot.
+	// Keep the group of the most recent vacated invitation for this spot, if there is one.
+	var lastID int64
 	var lastGroup *int64
-	s.db.QueryRow("SELECT group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN "+terminalStatuses+" ORDER BY responded_at DESC LIMIT 1",
-		id, timeslotID, slotID).Scan(&lastGroup)
+	s.db.QueryRow("SELECT id, group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN "+terminalStatuses+" ORDER BY responded_at DESC LIMIT 1",
+		id, timeslotID, slotID).Scan(&lastID, &lastGroup)
 
 	replacement, err := s.findAndInviteReplacement(vacatedSpot{
-		SessionID: session.ID, SessionDate: session.Date, TimeslotID: timeslotID, SlotID: slotID, GroupID: lastGroup,
+		SessionID: session.ID, SessionDate: session.Date, TimeslotID: timeslotID, SlotID: slotID,
+		InvitationID: lastID, GroupID: lastGroup,
 	})
 	if err != nil {
 		return err
@@ -917,4 +919,46 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) err
 		s.broadcastInvitation(inv.Token, "admin_cancelled")
 	}
 	return nil
+}
+
+func (s *Server) sessionCounts(sessionID int64) (map[string]any, error) {
+	var total, confirmed int64
+	err := s.db.QueryRow(`
+		SELECT
+			(SELECT COUNT(*) FROM invitations WHERE session_id = ?),
+			(SELECT COUNT(*) FROM invitations WHERE session_id = ? AND status = 'confirmed')`,
+		sessionID, sessionID).Scan(&total, &confirmed)
+	return map[string]any{"session_id": sessionID, "invitation_count": total, "confirmed_count": confirmed}, err
+}
+
+func (s *Server) broadcastSessionCounts(sessionID int64) {
+	counts, err := s.sessionCounts(sessionID)
+	if err != nil {
+		logf("session counts %d: %v", sessionID, err)
+		return
+	}
+	s.hub.BroadcastSessionsList("session_counts_updated", counts)
+}
+
+// sessionFull reports whether every instructor x timeslot spot of the session is confirmed.
+func (s *Server) sessionFull(sessionID int64) (bool, error) {
+	var timetableID *int64
+	if err := s.db.QueryRow("SELECT timetable_id FROM training_sessions WHERE id = ?", sessionID).Scan(&timetableID); err != nil || timetableID == nil {
+		return false, nil
+	}
+	var instructors, timeslots, confirmed int64
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM session_slots WHERE session_id = ? AND removed = 0", sessionID).Scan(&instructors); err != nil {
+		return false, err
+	}
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM timeslots WHERE timetable_id = ?", *timetableID).Scan(&timeslots); err != nil {
+		return false, err
+	}
+	total := instructors * timeslots
+	if total == 0 {
+		return false, nil
+	}
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM invitations WHERE session_id = ? AND status = 'confirmed'", sessionID).Scan(&confirmed); err != nil {
+		return false, err
+	}
+	return confirmed >= total, nil
 }

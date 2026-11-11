@@ -158,7 +158,7 @@ func TestMemberMatchesQuery(t *testing.T) {
 	}
 }
 
-// --- Sort and WeightedPickGroup -----------------------------------------------------------
+// --- Sort ---------------------------------------------------------------------------------
 
 // member is a Member with only an id and a queue position.
 func member(id, position int64) Member {
@@ -186,43 +186,6 @@ func TestSort(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, expected) {
 			t.Errorf("seed %d: got %v, want %v", seed, got, expected)
-		}
-	}
-}
-
-// scripted returns a random source that yields the given values in order.
-func scripted(values ...float64) func() float64 {
-	return func() float64 {
-		v := values[0]
-		values = values[1:]
-		return v
-	}
-}
-
-func TestWeightedPickGroup(t *testing.T) {
-	weights := map[int64]float64{1: 70, 2: 30, 3: 0, 5: -10}
-
-	tests := []struct {
-		name   string
-		groups []int64
-		draw   float64
-		want   int64
-	}{
-		// Weighted: group 1 covers [0, 0.7), group 2 covers [0.7, 1); zero and negative weights are never picked.
-		{"weighted start", []int64{1, 2, 3}, 0, 1},
-		{"weighted just below boundary", []int64{1, 2, 3}, 0.6999, 1},
-		{"weighted at boundary", []int64{1, 2, 3}, 0.7, 2},
-		{"weighted end", []int64{1, 2, 3}, 0.9999, 2},
-		{"zero weight first", []int64{3, 1}, 0, 1},
-		{"negative weight first", []int64{5, 2}, 0, 2},
-		// Uniform: all weights zero or missing, so each group gets an equal share.
-		{"uniform first", []int64{3, 4}, 0.4999, 3},
-		{"uniform second", []int64{3, 4}, 0.5, 4},
-		{"uniform last", []int64{3, 4, 6}, 0.9999, 6},
-	}
-	for _, tc := range tests {
-		if got := WeightedPickGroup(tc.groups, weights, scripted(tc.draw)); got != tc.want {
-			t.Errorf("%s: draw %v picked %d, want %d", tc.name, tc.draw, got, tc.want)
 		}
 	}
 }

@@ -115,3 +115,39 @@ func (s *Server) rehydrateTimers() {
 	}
 	logf("Rehydrated %d invitation expiry timer(s)", len(pending))
 }
+
+// processExpiredInvitation runs when an invitation's expiry timer fires.
+func (s *Server) processExpiredInvitation(invitationID int64) error {
+	inv, found, err := s.findInvitation("WHERE inv.id = ? AND inv.status = 'invited'", invitationID)
+	if err != nil || !found {
+		return err // nil: already handled (confirmed, declined, ...)
+	}
+	if st := inv.SessionStatus; st == "completed" || st == "cancelled" {
+		return nil
+	}
+	sessionID := inv.SessionID
+	start, ok := slotStart(inv.SessionDate, inv.StartTime, s.clubLocation())
+	slotStarted := ok && !nowFunc().Before(start)
+	newStatus := "expired"
+	if slotStarted {
+		newStatus = "invalidated"
+	}
+	if _, err := s.db.Exec("UPDATE invitations SET status = ?, responded_at = datetime('now') WHERE id = ?", newStatus, invitationID); err != nil {
+		return err
+	}
+
+	s.hub.BroadcastSession(sessionID, "invitation_updated", map[string]any{"id": invitationID, "status": newStatus})
+	s.broadcastInvitation(inv.Token, newStatus)
+	s.broadcastSessionCounts(sessionID)
+	s.CreateNotification(NewNotification{
+		Type: "invitation_expired", InvitationID: invitationID, SessionID: sessionID,
+		StudentName: inv.StudentName, SessionDate: inv.SessionDate, TimeslotStartTime: inv.StartTime,
+	})
+
+	if !slotStarted {
+		// inv still carries status 'invited', which the decision log records as the reason.
+		_, err := s.findAndInviteReplacement(inv.vacated())
+		return err
+	}
+	return nil
+}

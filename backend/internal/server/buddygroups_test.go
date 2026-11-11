@@ -3,8 +3,38 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
+
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/scheduling"
 )
+
+// TestLoadBuddies pins that buddies are listed in the order they were added to their buddy
+// group (not by student id): the scheduler places a student near their first placed buddy.
+func TestLoadBuddies(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("G")
+	a, b, c := e.student("A", g), e.student("B", g), e.student("C", g)
+	d, f := e.student("D", g), e.student("F", g)
+	e.student("Alone", g)
+	e.buddies(c, a, b) // added out of id order
+	e.buddies(f, d)
+
+	got, err := e.srv.loadBuddies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := scheduling.Buddies{
+		a: {c, b},
+		b: {c, a},
+		c: {a, b},
+		d: {f},
+		f: {d},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("loadBuddies = %v, want %v (students without a buddy group absent)", got, want)
+	}
+}
 
 func TestBuddyGroups(t *testing.T) {
 	e := newTestEnv(t)

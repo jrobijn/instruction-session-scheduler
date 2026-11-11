@@ -4,6 +4,8 @@
 // what eligibility looks at, their group and their standing (queue state and position). The
 // standing is computed in SQL (queue.sql); only breaking ties between equal positions is done
 // in Go (Sort), with a seeded hash SQLite can't compute.
+//
+// Who gets which spot, given the queue, is decided by package scheduling.
 package queue
 
 import (
@@ -11,7 +13,6 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/binary"
-	"math"
 	"slices"
 	"strconv"
 
@@ -67,26 +68,4 @@ func Sort(members []Member, seed int64) {
 func tieHash(seed, id int64) uint32 {
 	sum := sha256.Sum256([]byte(strconv.FormatInt(seed, 10) + ":" + strconv.FormatInt(id, 10)))
 	return binary.BigEndian.Uint32(sum[:4])
-}
-
-// WeightedPickGroup picks a group id weighted by weightByGroup. When all weights are
-// zero or missing, the pick is uniform.
-func WeightedPickGroup(groupIDs []int64, weightByGroup map[int64]float64, random func() float64) int64 {
-	weights := make([]float64, len(groupIDs))
-	total := 0.0
-	for i, g := range groupIDs {
-		weights[i] = math.Max(0, weightByGroup[g])
-		total += weights[i]
-	}
-	if total <= 0 {
-		return groupIDs[int(math.Floor(random()*float64(len(groupIDs))))]
-	}
-	r := random() * total
-	for i, g := range groupIDs {
-		r -= weights[i]
-		if r < 0 {
-			return g
-		}
-	}
-	return groupIDs[len(groupIDs)-1]
 }

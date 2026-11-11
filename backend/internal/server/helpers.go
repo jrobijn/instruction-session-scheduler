@@ -1,14 +1,18 @@
 package server
 
 import (
+	"bytes"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
@@ -118,3 +122,32 @@ func isValidTimeZone(tz string) bool {
 }
 
 func logf(format string, a ...any) { log.Printf(format, a...) }
+
+// newToken returns a random UUID v4, like crypto.randomUUID().
+func newToken() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+func (s *Server) clubName() string    { return db.Setting(s.db, "club_name", "Sports Club") }
+func (s *Server) emailLocale() string { return db.Setting(s.db, "email_locale", "en") }
+
+// encodeJSON encodes v for storage (decision logs) without escaping <, > and &.
+func encodeJSON(v any) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.Encode(v)
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+// nonEmpty returns nil for "", so the value encodes as null (like `value || null`).
+func nonEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
