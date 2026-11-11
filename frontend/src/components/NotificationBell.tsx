@@ -38,7 +38,7 @@ export default function NotificationBell() {
 
   // SSE for real-time updates
   useEffect(() => {
-    const evtSource = new EventSource(`${API_BASE}/notifications/events`, { withCredentials: true });
+    const evtSource = new EventSource(`${API_BASE}/notifications/events`);
     evtSource.addEventListener('new_notification', (e) => {
       const data = JSON.parse(e.data);
       setUnreadCount(data.unread_count);

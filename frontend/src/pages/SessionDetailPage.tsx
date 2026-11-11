@@ -194,7 +194,7 @@ export default function SessionDetailPage() {
   // SSE: real-time updates
   useEffect(() => {
     if (!id) return;
-    const es = new EventSource(`${API_BASE}/sessions/${id}/events`, { withCredentials: true });
+    const es = new EventSource(`${API_BASE}/sessions/${id}/events`);
 
     es.addEventListener('invitation_updated', (e) => {
       const data = JSON.parse(e.data);

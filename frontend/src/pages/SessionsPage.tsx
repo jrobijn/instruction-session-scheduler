@@ -65,7 +65,7 @@ export default function SessionsPage() {
 
   // SSE: real-time session count updates
   useEffect(() => {
-    const es = new EventSource(`${API_BASE}/sessions/events`, { withCredentials: true });
+    const es = new EventSource(`${API_BASE}/sessions/events`);
     es.addEventListener('session_counts_updated', (e) => {
       const data = JSON.parse(e.data);
       setSessions(prev => prev.map(s =>
