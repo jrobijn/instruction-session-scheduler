@@ -18,10 +18,10 @@
 package scheduling
 
 import (
+	"cmp"
 	"math"
 	mrand "math/rand/v2"
 	"slices"
-	"sort"
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
 )
@@ -130,8 +130,10 @@ func Generate(in Input) []Placement {
 	for i, st := range in.Queue {
 		queueIndex[st.ID] = i
 	}
+	// Selection added students group by group, with pulled-up buddies right after the student
+	// who pulled them up; placement must go by queue position instead.
 	byQueue := func(list []queue.Member) {
-		sort.SliceStable(list, func(i, j int) bool { return queueIndex[list[i].ID] < queueIndex[list[j].ID] })
+		slices.SortFunc(list, func(a, b queue.Member) int { return cmp.Compare(queueIndex[a.ID], queueIndex[b.ID]) })
 	}
 	var withPreference, withoutPreference []queue.Member
 	for _, st := range selected {
@@ -166,6 +168,7 @@ func Generate(in Input) []Placement {
 		repl := rest[0]
 		remaining[gid] = rest[1:]
 		choose(repl, gid, nil)
+		// Appended, not sorted in: a replacement goes after everyone selected before them.
 		if m.restricted(repl.ID) {
 			withPreference = append(withPreference, repl)
 		} else {
