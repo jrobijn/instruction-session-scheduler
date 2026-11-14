@@ -95,7 +95,7 @@ func AllocateSlots(available int, groups []Group) []Group {
 // Generate places students in timeslots; see the package documentation. The placements are
 // in the order they were made.
 func Generate(in Input) []Placement {
-	m := newMatcher(in.Timeslots, in.Allows)
+	m := newMatcher(in.Timeslots, in.Allows, in.Buddies)
 	// A student goes in or near the timeslot of their first buddy who is placed already.
 	place := func(sid int64) bool {
 		for _, buddy := range in.Buddies[sid] {

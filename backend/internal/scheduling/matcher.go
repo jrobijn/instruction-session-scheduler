@@ -11,15 +11,17 @@ import (
 type matcher struct {
 	timeslots []Timeslot
 	allows    func(studentID, timeslotID int64) bool
+	buddies   Buddies
 	occupants [][]int64       // per timeslot index, its students in the order they came in
 	placed    map[int64]int   // student -> timeslot index
 	allowed   map[int64][]int // cache for allowedTimeslots
 }
 
-func newMatcher(timeslots []Timeslot, allows func(studentID, timeslotID int64) bool) *matcher {
+func newMatcher(timeslots []Timeslot, allows func(studentID, timeslotID int64) bool, buddies Buddies) *matcher {
 	return &matcher{
 		timeslots: timeslots,
 		allows:    allows,
+		buddies:   buddies,
 		occupants: make([][]int64, len(timeslots)),
 		placed:    map[int64]int{},
 		allowed:   map[int64][]int{},
@@ -71,12 +73,9 @@ func (m *matcher) orderedTimeslots(sid int64, near int) []int {
 	}
 	out := slices.Clone(allowed)
 	abs := func(x int) int { return max(x, -x) }
+	// allowed is ascending, so the stable sort keeps the earlier timeslot first on ties.
 	sort.SliceStable(out, func(i, j int) bool {
-		di, dj := abs(out[i]-near), abs(out[j]-near)
-		if di != dj {
-			return di < dj
-		}
-		return out[i] < out[j]
+		return abs(out[i]-near) < abs(out[j]-near)
 	})
 	return out
 }
@@ -96,7 +95,7 @@ func (m *matcher) tryPlace(sid int64, order []int, visited map[int]bool) bool {
 			continue
 		}
 		visited[ti] = true
-		for _, other := range slices.Clone(m.occupants[ti]) {
+		for _, other := range m.movable(sid, ti) {
 			if other != sid && m.tryPlace(other, m.orderedTimeslots(other, ti), visited) {
 				m.put(sid, ti)
 				return true
@@ -104,6 +103,16 @@ func (m *matcher) tryPlace(sid int64, order []int, visited map[int]bool) bool {
 		}
 	}
 	return false
+}
+
+// movable lists the occupants of timeslot ti to try moving out for the student, in the order
+// they came in but with the student's buddies last, so making room doesn't split them up
+// when moving someone else would do.
+func (m *matcher) movable(sid int64, ti int) []int64 {
+	out := slices.Clone(m.occupants[ti])
+	isBuddy := func(x int64) bool { return slices.Contains(m.buddies[sid], x) }
+	sort.SliceStable(out, func(i, j int) bool { return !isBuddy(out[i]) && isBuddy(out[j]) })
+	return out
 }
 
 func (m *matcher) put(sid int64, ti int) {
