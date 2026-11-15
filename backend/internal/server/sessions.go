@@ -320,7 +320,7 @@ func (s *Server) sessionRoutes() {
 		if _, err := s.db.Exec("UPDATE invitations SET no_show = ? WHERE id = ?", newValue, inv.ID); err != nil {
 			return err
 		}
-		s.hub.Broadcast(sessionChannel(session.ID), "invitation_updated", map[string]any{"id": inv.ID, "no_show": newValue})
+		s.broadcastSessionInvitation(session.ID, inv.ID, map[string]any{"no_show": newValue})
 		httpx.OK(w, map[string]any{"success": true, "no_show": newValue})
 		return nil
 	})
@@ -450,7 +450,7 @@ func (s *Server) sessionRoutes() {
 		}
 		httpx.OK(w, map[string]any{"success": true, "new_status": "draft"})
 		sessionID := session.ID
-		s.hub.Broadcast(sessionChannel(sessionID), "reload", map[string]any{})
+		s.broadcastSessionReload(sessionID)
 		s.broadcastSessionCounts(sessionID)
 		return nil
 	})
@@ -616,7 +616,7 @@ func (s *Server) removeSlot(sessionID int64, slotID int64) (int, error) {
 	if _, err := s.db.Exec("UPDATE session_slots SET removed = 1 WHERE id = ?", slotID); err != nil {
 		return 0, err
 	}
-	s.hub.Broadcast(sessionChannel(sessionID), "reload", map[string]any{})
+	s.broadcastSessionReload(sessionID)
 	s.broadcastSessionCounts(sessionID)
 	return cancelled, nil
 }
@@ -676,7 +676,7 @@ func (s *Server) handleReplaceInstructor(w http.ResponseWriter, r *http.Request)
 		return err
 	}
 	httpx.Success(w)
-	s.hub.Broadcast(sessionChannel(session.ID), "reload", map[string]any{})
+	s.broadcastSessionReload(session.ID)
 	return nil
 }
 
@@ -714,7 +714,7 @@ func (s *Server) handleSendInvitations(w http.ResponseWriter, r *http.Request) e
 			return err
 		}
 	}
-	s.hub.Broadcast(sessionChannel(session.ID), "reload", map[string]any{})
+	s.broadcastSessionReload(session.ID)
 	httpx.OK(w, map[string]any{"sent": sent, "errors": errs})
 	return nil
 }
@@ -787,7 +787,7 @@ func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) err
 	}
 	httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
 	sessionID := session.ID
-	s.hub.Broadcast(sessionChannel(sessionID), "reload", map[string]any{})
+	s.broadcastSessionReload(sessionID)
 	s.broadcastSessionCounts(sessionID)
 	return nil
 }
@@ -818,7 +818,7 @@ func (s *Server) handleAdminCancelInvitation(w http.ResponseWriter, r *http.Requ
 	if err := s.adminCancelInvitation(inv); err != nil {
 		return err
 	}
-	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", map[string]any{"id": invID, "status": "admin_cancelled"})
+	s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "admin_cancelled"})
 	s.broadcastSessionCounts(sessionID)
 	httpx.Success(w)
 	return nil
@@ -911,7 +911,7 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) err
 	}
 	httpx.OK(w, map[string]any{"success": true, "cancelled_invitations": len(active)})
 	sessionID := session.ID
-	s.hub.Broadcast(sessionChannel(sessionID), "reload", map[string]any{})
+	s.broadcastSessionReload(sessionID)
 	s.broadcastSessionCounts(sessionID)
 	for _, inv := range active {
 		s.broadcastInvitation(inv.Token, "admin_cancelled")
@@ -936,6 +936,18 @@ func (s *Server) broadcastSessionCounts(sessionID int64) {
 		return
 	}
 	s.hub.Broadcast(sessionsListChannel, "session_counts_updated", counts)
+}
+
+// broadcastSessionInvitation pushes a partial invitation update to the admin session channel.
+// fields holds the changed columns; the invitation id is added here.
+func (s *Server) broadcastSessionInvitation(sessionID, invID int64, fields map[string]any) {
+	fields["id"] = invID
+	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", fields)
+}
+
+// broadcastSessionReload tells admin session-channel subscribers to refetch the whole session.
+func (s *Server) broadcastSessionReload(sessionID int64) {
+	s.hub.Broadcast(sessionChannel(sessionID), "reload", map[string]any{})
 }
 
 // sessionFull reports whether every instructor x timeslot spot of the session is confirmed.

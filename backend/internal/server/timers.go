@@ -136,7 +136,7 @@ func (s *Server) processExpiredInvitation(invitationID int64) error {
 		return err
 	}
 
-	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", map[string]any{"id": invitationID, "status": newStatus})
+	s.broadcastSessionInvitation(sessionID, invitationID, map[string]any{"status": newStatus})
 	s.broadcastInvitation(inv.Token, newStatus)
 	s.broadcastSessionCounts(sessionID)
 	s.CreateNotification(NewNotification{

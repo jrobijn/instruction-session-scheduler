@@ -111,6 +111,7 @@ func (s *Server) invitationRoutes() {
 	s.publicRoute("POST /api/invitations/{token}/decline", s.handleDeclineInvitation)
 }
 
+// broadcastInvitation pushes a status change to the student-facing per-token invitation channel.
 func (s *Server) broadcastInvitation(token, status string) {
 	s.hub.Broadcast(invitationChannel(token), "invitation_updated", map[string]any{"status": status})
 }
@@ -235,8 +236,8 @@ func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request)
 	if storedID != nil && *storedID != 0 {
 		s.db.QueryRow("SELECT name, abbreviation FROM disciplines WHERE id = ?", *storedID).Scan(&discName, &discAbbr)
 	}
-	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", map[string]any{
-		"id": invID, "status": "confirmed", "discipline_name": discName, "discipline_abbreviation": discAbbr,
+	s.broadcastSessionInvitation(sessionID, invID, map[string]any{
+		"status": "confirmed", "discipline_name": discName, "discipline_abbreviation": discAbbr,
 	})
 	s.broadcastInvitation(r.PathValue("token"), "confirmed")
 	s.broadcastSessionCounts(sessionID)
@@ -278,7 +279,7 @@ func (s *Server) handleCancelInvitation(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", map[string]any{"id": invID, "status": "cancelled"})
+	s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "cancelled"})
 	s.broadcastInvitation(r.PathValue("token"), "cancelled")
 	s.broadcastSessionCounts(sessionID)
 	s.CreateNotification(NewNotification{
@@ -314,7 +315,7 @@ func (s *Server) handleDeclineInvitation(w http.ResponseWriter, r *http.Request)
 	}
 	s.cancelInvitationExpiry(invID)
 
-	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", map[string]any{"id": invID, "status": "declined"})
+	s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "declined"})
 	s.broadcastInvitation(r.PathValue("token"), "declined")
 	s.broadcastSessionCounts(sessionID)
 

@@ -303,7 +303,7 @@ func (s *Server) studentRoutes() {
 			return err
 		}
 		for _, sid := range sessions {
-			s.hub.Broadcast(sessionChannel(sid), "reload", map[string]any{})
+			s.broadcastSessionReload(sid)
 			s.broadcastSessionCounts(sid)
 		}
 		httpx.Success(w)

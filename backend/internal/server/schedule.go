@@ -209,7 +209,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.hub.Broadcast(sessionChannel(sessionID), "reload", map[string]any{})
+	s.broadcastSessionReload(sessionID)
 	s.broadcastSessionCounts(sessionID)
 
 	httpx.OK(w, map[string]any{
