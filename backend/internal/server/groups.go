@@ -2,7 +2,6 @@ package server
 
 import (
 	"cmp"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"slices"
@@ -147,23 +146,23 @@ func (s *Server) groupRoutes() {
 					result.Skipped++
 					continue
 				}
-				var id int64
-				switch err := tx.QueryRow("SELECT id FROM groups WHERE name = ?", name).Scan(&id); err {
-				case nil:
-					result.Skipped++
-				case sql.ErrNoRows:
-					_, err := tx.Exec("INSERT INTO groups (name) VALUES (?)", name)
-					switch {
-					case isUniqueErr(err):
-						result.Errors = append(result.Errors, fmt.Sprintf("Row %d: A group with this name already exists", i+1))
-						result.Skipped++
-					case err != nil:
-						return err
-					default:
-						result.Imported++
-					}
-				default:
+				_, found, err := db.One[int64](tx, "SELECT id FROM groups WHERE name = ?", name)
+				if err != nil {
 					return err
+				}
+				if found {
+					result.Skipped++
+					continue
+				}
+				_, err = tx.Exec("INSERT INTO groups (name) VALUES (?)", name)
+				switch {
+				case isUniqueErr(err):
+					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: A group with this name already exists", i+1))
+					result.Skipped++
+				case err != nil:
+					return err
+				default:
+					result.Imported++
 				}
 			}
 			return nil
@@ -191,8 +190,9 @@ func (s *Server) groupRoutes() {
 		if in.Color == "" {
 			in.Color = "#3b82f6"
 		}
-		res, err := s.db.Exec("INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority) VALUES (?, ?, 'back', 'back', 'back')",
-			in.Name, in.Color)
+		var id int64
+		err := s.db.QueryRow("INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority) VALUES (?, ?, 'back', 'back', 'back') RETURNING id",
+			in.Name, in.Color).Scan(&id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A group with this name already exists")
 			return nil
@@ -200,7 +200,7 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := s.getGroup(lastID(res))
+		row, err := s.getGroup(id)
 		if err != nil {
 			return err
 		}

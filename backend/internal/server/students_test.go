@@ -58,7 +58,7 @@ func TestListAndGetStudents(t *testing.T) {
 	zed := e.student("Zed", g)
 	amy := e.student("Amy", g)
 	e.exec("UPDATE students SET last_name = 'Alpha' WHERE id = ?", zed)
-	loner := e.exec("INSERT INTO students (first_name, last_name, email) VALUES ('Lo', 'Ner', 'lo@example.test')")
+	loner := e.insert("INSERT INTO students (first_name, last_name, email) VALUES ('Lo', 'Ner', 'lo@example.test') RETURNING id")
 	gone := e.student("Gone", g)
 	e.buddies(zed, amy, gone)
 	e.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", gone)

@@ -34,41 +34,48 @@ func newQueueDB(t *testing.T) *queueDB {
 		t.Fatal(err)
 	}
 	q := &queueDB{t: t, db: d, sessions: map[string]int64{}, slots: map[string]int64{}}
-	timetable := q.insert("INSERT INTO timetables (name) VALUES ('T')")
-	q.timeslot = q.insert("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, '18:00')", timetable)
-	instructor := q.insert("INSERT INTO instructors (first_name, last_name, email) VALUES ('I', 'I', 'i@test')")
+	timetable := q.insert("INSERT INTO timetables (name) VALUES ('T') RETURNING id")
+	q.timeslot = q.insert("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, '18:00') RETURNING id", timetable)
+	instructor := q.insert("INSERT INTO instructors (first_name, last_name, email) VALUES ('I', 'I', 'i@test') RETURNING id")
 	for _, date := range []string{"2026-01-05", "2026-03-05"} {
-		q.sessions[date] = q.insert("INSERT INTO training_sessions (date, timetable_id) VALUES (?, ?)", date, timetable)
-		q.slots[date] = q.insert("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", q.sessions[date], instructor)
+		q.sessions[date] = q.insert("INSERT INTO training_sessions (date, timetable_id) VALUES (?, ?) RETURNING id", date, timetable)
+		q.slots[date] = q.insert("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?) RETURNING id", q.sessions[date], instructor)
 	}
 	return q
 }
 
-func (q *queueDB) insert(query string, args ...any) int64 {
+func (q *queueDB) exec(query string, args ...any) {
 	q.t.Helper()
-	res, err := q.db.Exec(query, args...)
-	if err != nil {
+	if _, err := q.db.Exec(query, args...); err != nil {
 		q.t.Fatal(err)
 	}
-	id, _ := res.LastInsertId()
+}
+
+// insert runs an INSERT ... RETURNING id and returns the id.
+func (q *queueDB) insert(query string, args ...any) int64 {
+	q.t.Helper()
+	var id int64
+	if err := q.db.QueryRow(query, args...).Scan(&id); err != nil {
+		q.t.Fatal(err)
+	}
 	return id
 }
 
 func (q *queueDB) group(name, newMemberPriority string) int64 {
-	return q.insert("INSERT INTO groups (name, new_member_priority) VALUES (?, ?)", name, newMemberPriority)
+	return q.insert("INSERT INTO groups (name, new_member_priority) VALUES (?, ?) RETURNING id", name, newMemberPriority)
 }
 
 // member adds a student to group; joinedAt and inviteNextAt may be nil.
 func (q *queueDB) member(name string, group int64, joinedAt, inviteNextAt any) int64 {
-	id := q.insert("INSERT INTO students (first_name, last_name, email) VALUES (?, 'Test', ?)", name, name+"@test")
-	q.insert("INSERT INTO student_groups (student_id, group_id, joined_at, invite_next_at) VALUES (?, ?, ?, ?)",
+	id := q.insert("INSERT INTO students (first_name, last_name, email) VALUES (?, 'Test', ?) RETURNING id", name, name+"@test")
+	q.exec("INSERT INTO student_groups (student_id, group_id, joined_at, invite_next_at) VALUES (?, ?, ?, ?)",
 		id, group, joinedAt, inviteNextAt)
 	return id
 }
 
 func (q *queueDB) invitation(student int64, sessionDate, status, invitedAt string) {
 	q.tokens++
-	q.insert(`INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, status, invited_at)
+	q.exec(`INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, status, invited_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		q.sessions[sessionDate], student, q.timeslot, q.slots[sessionDate], "t"+strconv.Itoa(q.tokens), status, invitedAt)
 }

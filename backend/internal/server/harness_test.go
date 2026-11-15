@@ -194,14 +194,22 @@ func (r *response) wantError(status int, msg string) {
 
 // --- database ---------------------------------------------------------------------------
 
-// exec runs a statement and returns the last inserted id.
-func (e *testEnv) exec(query string, args ...any) int64 {
+// exec runs a statement.
+func (e *testEnv) exec(query string, args ...any) {
 	e.t.Helper()
-	res, err := e.db.Exec(query, args...)
-	if err != nil {
+	if _, err := e.db.Exec(query, args...); err != nil {
 		e.t.Fatalf("exec %q: %v", query, err)
 	}
-	return lastID(res)
+}
+
+// insert runs an INSERT ... RETURNING id and returns the id.
+func (e *testEnv) insert(query string, args ...any) int64 {
+	e.t.Helper()
+	var id int64
+	if err := e.db.QueryRow(query, args...).Scan(&id); err != nil {
+		e.t.Fatalf("insert %q: %v", query, err)
+	}
+	return id
 }
 
 // rows runs an ad-hoc query for assertions and returns each row as a column -> value map
@@ -279,7 +287,7 @@ func (e *testEnv) setSetting(key, value string) {
 func (e *testEnv) group(name string) int64 {
 	e.t.Helper()
 	e.groups++
-	gid := e.exec("INSERT INTO groups (name, color) VALUES (?, ?)", name, fmt.Sprintf("#00000%d", e.groups%10))
+	gid := e.insert("INSERT INTO groups (name, color) VALUES (?, ?) RETURNING id", name, fmt.Sprintf("#00000%d", e.groups%10))
 	e.discipline(name+" discipline", gid)
 	return gid
 }
@@ -288,7 +296,7 @@ func (e *testEnv) group(name string) int64 {
 func (e *testEnv) discipline(name string, groupIDs ...int64) int64 {
 	e.t.Helper()
 	e.disciplines++
-	did := e.exec("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)", name, fmt.Sprintf("D%d", e.disciplines))
+	did := e.insert("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?) RETURNING id", name, fmt.Sprintf("D%d", e.disciplines))
 	for _, gid := range groupIDs {
 		e.exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", did, gid)
 	}
@@ -300,7 +308,7 @@ func (e *testEnv) discipline(name string, groupIDs ...int64) int64 {
 func (e *testEnv) student(firstName string, groupID int64) int64 {
 	e.t.Helper()
 	e.students++
-	sid := e.exec("INSERT INTO students (first_name, last_name, email) VALUES (?, ?, ?)",
+	sid := e.insert("INSERT INTO students (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id",
 		firstName, "Test", fmt.Sprintf("%s.%d@example.test", strings.ToLower(firstName), e.students))
 	joined := time.Date(2029, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(e.students) * time.Minute)
 	e.exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, ?)", sid, groupID, joined.Format(time.DateTime))
@@ -315,7 +323,7 @@ func (e *testEnv) studentEmail(id int64) string {
 func (e *testEnv) instructor(lastName string) int64 {
 	e.t.Helper()
 	e.instructors++
-	return e.exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)",
+	return e.insert("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id",
 		"Instructor", lastName, fmt.Sprintf("instructor%d@example.test", e.instructors))
 }
 
@@ -323,10 +331,10 @@ func (e *testEnv) instructor(lastName string) int64 {
 // id and the timeslot ids in the order given.
 func (e *testEnv) timetable(startTimes ...string) (int64, []int64) {
 	e.t.Helper()
-	tt := e.exec("INSERT INTO timetables (name, status) VALUES ('Timetable', 'saved')")
+	tt := e.insert("INSERT INTO timetables (name, status) VALUES ('Timetable', 'saved') RETURNING id")
 	ids := make([]int64, len(startTimes))
 	for i, st := range startTimes {
-		ids[i] = e.exec("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?)", tt, st)
+		ids[i] = e.insert("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id", tt, st)
 	}
 	return tt, ids
 }
@@ -350,13 +358,13 @@ func (e *testEnv) session(date string, timetableID int64) int64 {
 	if timetableID != 0 {
 		tt = timetableID
 	}
-	return e.exec("INSERT INTO training_sessions (date, day_of_week, timetable_id) VALUES (?, ?, ?)", date, dow, tt)
+	return e.insert("INSERT INTO training_sessions (date, day_of_week, timetable_id) VALUES (?, ?, ?) RETURNING id", date, dow, tt)
 }
 
 // assign adds an instructor to a session and returns the slot id.
 func (e *testEnv) assign(sessionID, instructorID int64) int64 {
 	e.t.Helper()
-	return e.exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", sessionID, instructorID)
+	return e.insert("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?) RETURNING id", sessionID, instructorID)
 }
 
 // invitation inserts an invitation directly; groupID 0 makes it a manual one (group_id NULL).
@@ -366,8 +374,8 @@ func (e *testEnv) invitation(sessionID, studentID, timeslotID, slotID, groupID i
 	if groupID != 0 {
 		gid = groupID
 	}
-	return e.exec(`INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, sessionID, studentID, timeslotID, slotID, newToken(), gid, status)
+	return e.insert(`INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`, sessionID, studentID, timeslotID, slotID, newToken(), gid, status)
 }
 
 func (e *testEnv) preferTimeslots(studentID, timetableID int64, timeslotIDs ...int64) {
@@ -379,7 +387,7 @@ func (e *testEnv) preferTimeslots(studentID, timetableID int64, timeslotIDs ...i
 
 func (e *testEnv) buddies(studentIDs ...int64) int64 {
 	e.t.Helper()
-	bg := e.exec("INSERT INTO buddy_groups DEFAULT VALUES")
+	bg := e.insert("INSERT INTO buddy_groups DEFAULT VALUES RETURNING id")
 	for _, sid := range studentIDs {
 		e.exec("INSERT INTO buddy_group_members (buddy_group_id, student_id) VALUES (?, ?)", bg, sid)
 	}

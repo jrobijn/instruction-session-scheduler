@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
 
@@ -114,21 +113,19 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
-		res, err := s.db.Exec("INSERT INTO timetables (name) VALUES (?)", in.Name)
+		var id int64
+		if err := s.db.QueryRow("INSERT INTO timetables (name) VALUES (?) RETURNING id", in.Name).Scan(&id); err != nil {
+			return err
+		}
+		// Auto-assign the default group at 100%.
+		defaultGroup, found, err := db.One[int64](s.db, "SELECT id FROM groups WHERE is_default = 1")
 		if err != nil {
 			return err
 		}
-		id := lastID(res)
-		// Auto-assign the default group at 100%.
-		var defaultGroup int64
-		switch err := s.db.QueryRow("SELECT id FROM groups WHERE is_default = 1").Scan(&defaultGroup); err {
-		case nil:
+		if found {
 			if _, err := s.db.Exec("INSERT INTO timetable_groups (timetable_id, group_id, percentage, position) VALUES (?, ?, 100, 0)", id, defaultGroup); err != nil {
 				return err
 			}
-		case sql.ErrNoRows:
-		default:
-			return err
 		}
 		row, _, err := s.getTimetable(id)
 		if err != nil {
@@ -400,15 +397,11 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify timeslots of a saved timetable")
 			return nil
 		}
-		res, err := s.db.Exec("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?)", r.PathValue("id"), in.StartTime)
+		row, _, err := db.One[Timeslot](s.db, "INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id, timetable_id, start_time", r.PathValue("id"), in.StartTime)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A timeslot with this start time already exists in this timetable")
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		row, _, err := db.One[Timeslot](s.db, "SELECT id, timetable_id, start_time FROM timeslots WHERE id = ?", lastID(res))
 		if err != nil {
 			return err
 		}

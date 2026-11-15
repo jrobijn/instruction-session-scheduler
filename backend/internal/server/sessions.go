@@ -192,7 +192,8 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Invalid date")
 			return nil
 		}
-		res, err := s.db.Exec("INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?)", in.Date, dow, nonEmpty(in.Notes), ttID)
+		var id int64
+		err := s.db.QueryRow("INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?) RETURNING id", in.Date, dow, nonEmpty(in.Notes), ttID).Scan(&id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
@@ -200,7 +201,7 @@ func (s *Server) sessionRoutes() {
 		if err != nil {
 			return err
 		}
-		row, _, err := s.getSession(lastID(res))
+		row, _, err := s.getSession(id)
 		if err != nil {
 			return err
 		}

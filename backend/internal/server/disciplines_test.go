@@ -8,8 +8,8 @@ import (
 
 func TestDisciplineCRUD(t *testing.T) {
 	e := newTestEnv(t)
-	g := e.exec("INSERT INTO groups (name) VALUES ('G')")
-	h := e.exec("INSERT INTO groups (name) VALUES ('H')")
+	g := e.insert("INSERT INTO groups (name) VALUES ('G') RETURNING id")
+	h := e.insert("INSERT INTO groups (name) VALUES ('H') RETURNING id")
 
 	e.admin(http.MethodPost, "/api/disciplines", map[string]any{}).wantError(http.StatusBadRequest, "Name is required")
 	d := toInt64(e.admin(http.MethodPost, "/api/disciplines", map[string]any{"name": "Kayak", "abbreviation": "K"}).status(http.StatusCreated).object()["id"])

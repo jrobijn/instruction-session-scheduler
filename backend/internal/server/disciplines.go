@@ -165,7 +165,8 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
-		res, err := s.db.Exec("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)", in.Name, in.Abbreviation)
+		var id int64
+		err := s.db.QueryRow("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?) RETURNING id", in.Name, in.Abbreviation).Scan(&id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A discipline with this name already exists")
 			return nil
@@ -173,7 +174,7 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
-		row, _, err := s.getDiscipline(lastID(res))
+		row, _, err := s.getDiscipline(id)
 		if err != nil {
 			return err
 		}

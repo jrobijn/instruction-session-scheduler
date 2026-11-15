@@ -1,8 +1,6 @@
 package server
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
@@ -26,28 +24,24 @@ func (s *Server) buddyGroupRoutes() {
 			return nil
 		}
 
-		query, queryArgs, err := sqlx.In("SELECT s.first_name, s.last_name FROM buddy_group_members bgm JOIN students s ON s.id = bgm.student_id WHERE bgm.student_id IN (?)", ids)
+		query, queryArgs, err := sqlx.In("SELECT s.first_name || ' ' || s.last_name FROM buddy_group_members bgm JOIN students s ON s.id = bgm.student_id WHERE bgm.student_id IN (?)", ids)
 		if err != nil {
 			return err
 		}
-		var first, last string
-		err = s.db.QueryRow(query, queryArgs...).Scan(&first, &last)
-		if err == nil {
-			httpx.Error(w, http.StatusBadRequest, first+" "+last+" is already in a buddy group")
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		name, found, err := db.One[string](s.db, query, queryArgs...)
+		if err != nil {
 			return err
 		}
+		if found {
+			httpx.Error(w, http.StatusBadRequest, name+" is already in a buddy group")
+			return nil
+		}
 
-		// Unlike the TS version, the inserts are atomic: a bad student id leaves no half-made group.
 		var groupID int64
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
-			res, err := tx.Exec("INSERT INTO buddy_groups DEFAULT VALUES")
-			if err != nil {
+			if err := tx.QueryRow("INSERT INTO buddy_groups DEFAULT VALUES RETURNING id").Scan(&groupID); err != nil {
 				return err
 			}
-			groupID = lastID(res)
 			for _, sid := range ids {
 				if _, err := tx.Exec("INSERT INTO buddy_group_members (buddy_group_id, student_id) VALUES (?, ?)", groupID, sid); err != nil {
 					return err
@@ -81,14 +75,16 @@ func (s *Server) buddyGroupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Buddy group not found")
 			return nil
 		}
-		if _, err := s.db.Exec("DELETE FROM buddy_group_members WHERE buddy_group_id = ? AND student_id = ?", id, r.PathValue("studentId")); err != nil {
-			return err
-		}
-		// Delete the group if no members remain.
-		if !s.exists("SELECT 1 FROM buddy_group_members WHERE buddy_group_id = ?", id) {
-			if _, err := s.db.Exec("DELETE FROM buddy_groups WHERE id = ?", id); err != nil {
+		err := s.db.InTx(func(tx *sqlx.Tx) error {
+			if _, err := tx.Exec("DELETE FROM buddy_group_members WHERE buddy_group_id = ? AND student_id = ?", id, r.PathValue("studentId")); err != nil {
 				return err
 			}
+			// Delete the group if no members remain.
+			_, err := tx.Exec("DELETE FROM buddy_groups WHERE id = ? AND NOT EXISTS (SELECT 1 FROM buddy_group_members WHERE buddy_group_id = ?)", id, id)
+			return err
+		})
+		if err != nil {
+			return err
 		}
 		httpx.Success(w)
 		return nil
@@ -109,19 +105,17 @@ func (s *Server) loadBuddies() (scheduling.Buddies, error) {
 	for _, m := range memberships {
 		members[m.BuddyGroupID] = append(members[m.BuddyGroupID], m.StudentID)
 	}
+	// Map order doesn't matter: a student is in at most one group, so each student's
+	// buddies come from exactly one group, in that group's insertion order.
 	buddies := scheduling.Buddies{}
-	for _, m := range memberships {
-		for _, other := range members[m.BuddyGroupID] {
-			if other != m.StudentID {
-				buddies[m.StudentID] = append(buddies[m.StudentID], other)
+	for _, group := range members {
+		for _, student := range group {
+			for _, other := range group {
+				if other != student {
+					buddies[student] = append(buddies[student], other)
+				}
 			}
 		}
 	}
 	return buddies, nil
-}
-
-// exists reports whether query returns at least one row.
-func (s *Server) exists(query string, a ...any) bool {
-	var one any
-	return s.db.QueryRow(query, a...).Scan(&one) == nil
 }

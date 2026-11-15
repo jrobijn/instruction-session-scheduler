@@ -189,7 +189,8 @@ func (s *Server) studentRoutes() {
 		if in.PreferredDays != "" {
 			cols, vals = append(cols, "preferred_days"), append(vals, in.PreferredDays)
 		}
-		res, err := s.db.Exec("INSERT INTO students ("+strings.Join(cols, ", ")+") VALUES ("+placeholders(len(cols))+")", vals...)
+		var studentID int64
+		err := s.db.QueryRow("INSERT INTO students ("+strings.Join(cols, ", ")+") VALUES ("+placeholders(len(cols))+") RETURNING id", vals...).Scan(&studentID)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A student with this email already exists")
 			return nil
@@ -197,7 +198,6 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
-		studentID := lastID(res)
 		// Auto-add to the default group.
 		var defaultGroup int64
 		switch err := s.db.QueryRow("SELECT id FROM groups WHERE is_default = 1").Scan(&defaultGroup); err {
@@ -670,12 +670,12 @@ func importStudentRow(tx *sqlx.Tx, first, last, email, membershipID string, cols
 	case sql.ErrNoRows:
 		names := append([]string{"first_name", "last_name", "email", "membership_id"}, cols...)
 		a := append([]any{first, last, email, membershipID}, vals...)
-		res, err := tx.Exec("INSERT INTO students ("+strings.Join(names, ", ")+") VALUES ("+placeholders(len(names))+")", a...)
-		if err != nil {
+		var studentID int64
+		if err := tx.QueryRow("INSERT INTO students ("+strings.Join(names, ", ")+") VALUES ("+placeholders(len(names))+") RETURNING id", a...).Scan(&studentID); err != nil {
 			return err
 		}
 		if defaultGroup != 0 {
-			_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", lastID(res), defaultGroup)
+			_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", studentID, defaultGroup)
 			return err
 		}
 		return nil

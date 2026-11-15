@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -78,15 +77,14 @@ func (s *Server) instructorRoutes() {
 					result.Skipped++
 					continue
 				}
-				var id int64
-				var err error
-				switch scanErr := tx.QueryRow("SELECT id FROM instructors WHERE email = ? AND deleted_at IS NULL", email).Scan(&id); scanErr {
-				case nil:
+				id, found, err := db.One[int64](tx, "SELECT id FROM instructors WHERE email = ? AND deleted_at IS NULL", email)
+				if err != nil {
+					return err
+				}
+				if found {
 					_, err = tx.Exec("UPDATE instructors SET first_name = ?, last_name = ? WHERE id = ?", first, last, id)
-				case sql.ErrNoRows:
+				} else {
 					_, err = tx.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)", first, last, email)
-				default:
-					err = scanErr
 				}
 				if isUniqueErr(err) { // the email belongs to a deleted instructor
 					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: An instructor with this email already exists", i+1))
@@ -134,8 +132,9 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
 			return nil
 		}
-		res, err := s.db.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)",
-			in.FirstName, in.LastName, in.Email)
+		var id int64
+		err := s.db.QueryRow("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id",
+			in.FirstName, in.LastName, in.Email).Scan(&id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
 			return nil
@@ -143,7 +142,7 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
-		row, _, err := s.getInstructor(lastID(res))
+		row, _, err := s.getInstructor(id)
 		if err != nil {
 			return err
 		}

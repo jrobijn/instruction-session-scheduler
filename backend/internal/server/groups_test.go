@@ -214,7 +214,7 @@ func TestGroupNonMembers(t *testing.T) {
 
 func TestGroupDisciplines(t *testing.T) {
 	e := newTestEnv(t)
-	g := e.exec("INSERT INTO groups (name) VALUES ('Bare')")
+	g := e.insert("INSERT INTO groups (name) VALUES ('Bare') RETURNING id")
 	d := e.discipline("Kayak")
 	path := groupPath(g, "disciplines", fmt.Sprint(d))
 

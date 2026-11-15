@@ -94,14 +94,15 @@ func isUniqueErr(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
 }
 
-func lastID(res sql.Result) int64 {
-	id, _ := res.LastInsertId()
-	return id
-}
-
 func changes(res sql.Result) int64 {
 	n, _ := res.RowsAffected()
 	return n
+}
+
+// exists reports whether query returns at least one row.
+func (s *Server) exists(query string, a ...any) bool {
+	var one any
+	return s.db.QueryRow(query, a...).Scan(&one) == nil
 }
 
 // placeholders returns "?,?,?" for n values (n >= 1).
