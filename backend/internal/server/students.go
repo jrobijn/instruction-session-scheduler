@@ -38,7 +38,7 @@ func (s *Server) listStudents() ([]Student, error) {
 }
 
 // getStudent loads a (non-deleted) student; found is false if there is none.
-func (s *Server) getStudent(id any) (Student, bool, error) {
+func (s *Server) getStudent(id int64) (Student, bool, error) {
 	return db.One[Student](s.db, `
 		SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
 			preferred_days, active, cooldown_until
@@ -114,7 +114,11 @@ func (s *Server) studentRoutes() {
 	s.adminRoute("POST /api/students/import", s.handleImportStudents)
 
 	s.adminRoute("GET /api/students/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		row, found, err := s.getStudent(r.PathValue("id"))
+		id, err := pathID(r, "id", "Student not found")
+		if err != nil {
+			return err
+		}
+		row, found, err := s.getStudent(id)
 		if err != nil {
 			return err
 		}
@@ -127,8 +131,9 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/invitations", func(w http.ResponseWriter, r *http.Request) error {
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
 		invitations, err := db.Many[StudentInvitation](s.db, `
 			SELECT i.id, i.status, ts.date AS session_date, tsl.start_time
@@ -137,7 +142,7 @@ func (s *Server) studentRoutes() {
 			JOIN timeslots tsl ON tsl.id = i.timeslot_id
 			WHERE i.student_id = ? AND i.status IN ('confirmed', 'invited', 'scheduled')
 				AND ts.status != 'completed'
-			ORDER BY ts.date ASC, tsl.start_time ASC`, r.PathValue("id"))
+			ORDER BY ts.date ASC, tsl.start_time ASC`, id)
 		if err != nil {
 			return err
 		}
@@ -146,8 +151,9 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/invitation-history", func(w http.ResponseWriter, r *http.Request) error {
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
 		invitations, err := db.Many[InvitationHistoryEntry](s.db, `
 			SELECT i.id, i.status, i.invited_at, i.responded_at,
@@ -160,7 +166,7 @@ func (s *Server) studentRoutes() {
 			LEFT JOIN disciplines d ON d.id = i.discipline_id
 			LEFT JOIN groups g ON g.id = i.group_id
 			WHERE i.student_id = ?
-			ORDER BY i.invited_at DESC, ts.date DESC, tsl.start_time DESC`, r.PathValue("id"))
+			ORDER BY i.invited_at DESC, ts.date DESC, tsl.start_time DESC`, id)
 		if err != nil {
 			return err
 		}
@@ -176,9 +182,9 @@ func (s *Server) studentRoutes() {
 			MembershipID  string `json:"membership_id"`
 			PreferredDays string `json:"preferred_days"` // "" for the column default (every day)
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.FirstName == "" || in.LastName == "" || in.Email == "" {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
@@ -190,7 +196,7 @@ func (s *Server) studentRoutes() {
 			cols, vals = append(cols, "preferred_days"), append(vals, in.PreferredDays)
 		}
 		var studentID int64
-		err := s.db.QueryRow("INSERT INTO students ("+strings.Join(cols, ", ")+") VALUES ("+placeholders(len(cols))+") RETURNING id", vals...).Scan(&studentID)
+		err = s.db.QueryRow("INSERT INTO students ("+strings.Join(cols, ", ")+") VALUES ("+placeholders(len(cols))+") RETURNING id", vals...).Scan(&studentID)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A student with this email already exists")
 			return nil
@@ -227,11 +233,14 @@ func (s *Server) studentRoutes() {
 			Active           *int64  `json:"active"`
 			PreferredDays    *string `json:"preferred_days"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Student not found")
+		if err != nil {
+			return err
+		}
 		student, found, err := s.getStudent(id)
 		if err != nil {
 			return err
@@ -279,10 +288,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/students/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
 		// Open invitations for sessions that haven't taken place are admin-cancelled, as if
 		// the admin cancelled each one; completed sessions are history and stay as they are.
 		open, err := s.openStudentInvitations(id)
@@ -311,14 +320,15 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/preferred-timeslots", func(w http.ResponseWriter, r *http.Request) error {
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
 		type preference struct {
 			TimetableID int64 `db:"timetable_id"`
 			TimeslotID  int64 `db:"timeslot_id"`
 		}
-		preferences, err := db.Many[preference](s.db, "SELECT timetable_id, timeslot_id FROM student_preferred_timeslots WHERE student_id = ?", r.PathValue("id"))
+		preferences, err := db.Many[preference](s.db, "SELECT timetable_id, timeslot_id FROM student_preferred_timeslots WHERE student_id = ?", id)
 		if err != nil {
 			return err
 		}
@@ -335,18 +345,22 @@ func (s *Server) studentRoutes() {
 		type request struct {
 			TimeslotIDs []int64 `json:"timeslot_ids"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.TimeslotIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "timeslot_ids array is required")
 			return nil
 		}
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
-		id, timetableID := r.PathValue("id"), r.PathValue("timetableId")
+		timetableID, err := pathID(r, "timetableId", "Timetable not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM timetables WHERE id = ?", timetableID) {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
@@ -391,8 +405,9 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/groups", func(w http.ResponseWriter, r *http.Request) error {
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
 		type studentGroup struct {
 			ID        int64  `db:"id" json:"id"`
@@ -402,7 +417,7 @@ func (s *Server) studentRoutes() {
 		g, found, err := db.One[studentGroup](s.db, `
 			SELECT g.id, g.name, g.is_default FROM groups g
 			JOIN student_groups sg ON sg.group_id = g.id
-			WHERE sg.student_id = ?`, r.PathValue("id"))
+			WHERE sg.student_id = ?`, id)
 		if err != nil {
 			return err
 		}
@@ -418,15 +433,15 @@ func (s *Server) studentRoutes() {
 		type request struct {
 			GroupID int64 `json:"group_id"` // 0 or null: no group
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM student_groups WHERE student_id = ?", id); err != nil {
 				return err
 			}
@@ -447,19 +462,19 @@ func (s *Server) studentRoutes() {
 		type request struct {
 			Days float64 `json:"days"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		days := in.Days
 		if days <= 0 {
 			httpx.Error(w, http.StatusBadRequest, "A positive number of days is required")
 			return nil
 		}
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
 		// new Date(Date.now() + days * 864e5).toISOString() truncated to whole seconds, UTC.
 		ms := math.Trunc(float64(time.Now().UnixMilli()) + days*24*60*60*1000)
 		cooldownUntil := time.UnixMilli(int64(ms)).UTC().Format(time.DateTime)
@@ -475,10 +490,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/students/{id}/cooldown", func(w http.ResponseWriter, r *http.Request) error {
-		if !s.requireStudent(w, r) {
-			return nil
+		id, err := s.requireStudent(r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
 		// End the cooldown now rather than erasing it, so its end still counts for the queue position.
 		if _, err := s.db.Exec("UPDATE students SET cooldown_until = datetime('now') WHERE id = ? AND cooldown_until > datetime('now')", id); err != nil {
 			return err
@@ -492,13 +507,17 @@ func (s *Server) studentRoutes() {
 	})
 }
 
-// requireStudent writes a 404 unless the {id} path value names a non-deleted student.
-func (s *Server) requireStudent(w http.ResponseWriter, r *http.Request) bool {
-	if s.exists("SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", r.PathValue("id")) {
-		return true
+// requireStudent returns the id in the {id} path value, or a 404 error unless it names a
+// non-deleted student.
+func (s *Server) requireStudent(r *http.Request) (int64, error) {
+	id, err := pathID(r, "id", "Student not found")
+	if err != nil {
+		return 0, err
 	}
-	httpx.Error(w, http.StatusNotFound, "Student not found")
-	return false
+	if !s.exists("SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id) {
+		return 0, httpx.NotFound("Student not found")
+	}
+	return id, nil
 }
 
 func (s *Server) handleListStudents(w http.ResponseWriter, r *http.Request) error {
@@ -561,9 +580,9 @@ func (s *Server) handleListStudents(w http.ResponseWriter, r *http.Request) erro
 }
 
 func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) error {
-	in, ok := readCSVImport(w, r)
-	if !ok {
-		return nil
+	in, err := readCSVImport(r)
+	if err != nil {
+		return err
 	}
 	if !in.has("first_name", "last_name", "email") {
 		httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
@@ -571,7 +590,7 @@ func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) er
 	}
 
 	result := importResult{Errors: []string{}}
-	err := s.db.InTx(func(tx *sqlx.Tx) error {
+	err = s.db.InTx(func(tx *sqlx.Tx) error {
 		var defaultGroup int64
 		switch err := tx.QueryRow("SELECT id FROM groups WHERE is_default = 1").Scan(&defaultGroup); err {
 		case nil, sql.ErrNoRows:

@@ -26,7 +26,7 @@ type Group struct {
 }
 
 // getGroup loads a group by id; it must exist.
-func (s *Server) getGroup(id any) (Group, error) {
+func (s *Server) getGroup(id int64) (Group, error) {
 	g, _, err := db.One[Group](s.db, `
 		SELECT id, name, color, is_default, active,
 			new_member_priority, reactivated_member_priority, cooldown_member_priority
@@ -126,16 +126,16 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("POST /api/groups/import", func(w http.ResponseWriter, r *http.Request) error {
-		in, ok := readCSVImport(w, r)
-		if !ok {
-			return nil
+		in, err := readCSVImport(r)
+		if err != nil {
+			return err
 		}
 		if !in.has("name") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain a name column")
 			return nil
 		}
 		result := importResult{Errors: []string{}}
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			for _, row := range in.rows {
 				name := row.get("name")
 				if name == "" {
@@ -174,9 +174,9 @@ func (s *Server) groupRoutes() {
 			Name  string `json:"name"`
 			Color string `json:"color"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.Name == "" {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
@@ -186,7 +186,7 @@ func (s *Server) groupRoutes() {
 			in.Color = "#3b82f6"
 		}
 		var id int64
-		err := s.db.QueryRow("INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority) VALUES (?, ?, 'back', 'back', 'back') RETURNING id",
+		err = s.db.QueryRow("INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority) VALUES (?, ?, 'back', 'back', 'back') RETURNING id",
 			in.Name, in.Color).Scan(&id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A group with this name already exists")
@@ -212,11 +212,14 @@ func (s *Server) groupRoutes() {
 			ReactivatedMemberPriority *string `json:"reactivated_member_priority"`
 			CooldownMemberPriority    *string `json:"cooldown_member_priority"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
@@ -234,7 +237,7 @@ func (s *Server) groupRoutes() {
 				return nil
 			}
 		}
-		_, err := s.db.Exec(`
+		_, err = s.db.Exec(`
 			UPDATE groups SET
 				name = COALESCE(?, name),
 				active = COALESCE(?, active),
@@ -261,7 +264,10 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/groups/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
@@ -278,12 +284,15 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("POST /api/groups/{id}/set-default", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("UPDATE groups SET is_default = 0 WHERE is_default = 1"); err != nil {
 				return err
 			}
@@ -302,7 +311,10 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("POST /api/groups/{id}/unset-default", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
@@ -324,16 +336,19 @@ func (s *Server) groupRoutes() {
 		type request struct {
 			StudentID int64 `json:"student_id"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		studentID := in.StudentID
 		if studentID == 0 {
 			httpx.Error(w, http.StatusBadRequest, "student_id is required")
 			return nil
 		}
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
@@ -342,7 +357,7 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM student_groups WHERE student_id = ?", studentID); err != nil {
 				return err
 			}
@@ -361,20 +376,28 @@ func (s *Server) groupRoutes() {
 		type request struct {
 			Enabled *bool `json:"enabled"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.Enabled == nil {
 			httpx.Error(w, http.StatusBadRequest, "enabled (boolean) is required")
 			return nil
+		}
+		id, err := pathID(r, "id", "Member not found")
+		if err != nil {
+			return err
+		}
+		studentID, err := pathID(r, "studentId", "Member not found")
+		if err != nil {
+			return err
 		}
 		value := "NULL"
 		if *in.Enabled {
 			value = "datetime('now')"
 		}
 		res, err := s.db.Exec("UPDATE student_groups SET invite_next_at = "+value+" WHERE group_id = ? AND student_id = ?",
-			r.PathValue("id"), r.PathValue("studentId"))
+			id, studentID)
 		if err != nil {
 			return err
 		}
@@ -387,12 +410,19 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/groups/{id}/members/{studentId}", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, err := s.db.Exec("DELETE FROM student_groups WHERE student_id = ? AND group_id = ?", r.PathValue("studentId"), id); err != nil {
+		studentID, err := pathID(r, "studentId", "Student not found")
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.Exec("DELETE FROM student_groups WHERE student_id = ? AND group_id = ?", studentID, id); err != nil {
 			return err
 		}
 		httpx.Success(w)
@@ -400,7 +430,10 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("GET /api/groups/{id}/non-members", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
@@ -429,7 +462,10 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("GET /api/groups/{id}/disciplines", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
@@ -448,16 +484,23 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("POST /api/groups/{id}/disciplines/{disciplineId}", func(w http.ResponseWriter, r *http.Request) error {
-		id, disciplineID := r.PathValue("id"), r.PathValue("disciplineId")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
+		}
+		disciplineID, err := pathID(r, "disciplineId", "Discipline not found")
+		if err != nil {
+			return err
 		}
 		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", disciplineID) {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		_, err := s.db.Exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", disciplineID, id)
+		_, err = s.db.Exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", disciplineID, id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "Already assigned")
 			return nil
@@ -470,12 +513,19 @@ func (s *Server) groupRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/groups/{id}/disciplines/{disciplineId}", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, err := s.db.Exec("DELETE FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", r.PathValue("disciplineId"), id); err != nil {
+		disciplineID, err := pathID(r, "disciplineId", "Discipline not found")
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.Exec("DELETE FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", disciplineID, id); err != nil {
 			return err
 		}
 		httpx.Success(w)
@@ -486,8 +536,11 @@ func (s *Server) groupRoutes() {
 // handleGroupMembers lists a group's members in queue order, with queue position, override
 // reason and buddy group details.
 func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request) error {
-	groupID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || !s.exists("SELECT 1 FROM groups WHERE id = ?", groupID) {
+	groupID, err := pathID(r, "id", "Group not found")
+	if err != nil {
+		return err
+	}
+	if !s.exists("SELECT 1 FROM groups WHERE id = ?", groupID) {
 		httpx.Error(w, http.StatusNotFound, "Group not found")
 		return nil
 	}

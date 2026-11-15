@@ -25,7 +25,7 @@ func (s *Server) listInstructors() ([]Instructor, error) {
 }
 
 // getInstructor loads a (non-deleted) instructor; found is false if there is none.
-func (s *Server) getInstructor(id any) (Instructor, bool, error) {
+func (s *Server) getInstructor(id int64) (Instructor, bool, error) {
 	return db.One[Instructor](s.db, `
 		SELECT id, first_name, last_name, email, active FROM instructors
 		WHERE id = ? AND deleted_at IS NULL`, id)
@@ -54,9 +54,9 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("POST /api/instructors/import", func(w http.ResponseWriter, r *http.Request) error {
-		in, ok := readCSVImport(w, r)
-		if !ok {
-			return nil
+		in, err := readCSVImport(r)
+		if err != nil {
+			return err
 		}
 		if !in.has("first_name", "last_name", "email") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
@@ -64,7 +64,7 @@ func (s *Server) instructorRoutes() {
 		}
 
 		result := importResult{Errors: []string{}}
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			for _, row := range in.rows {
 				first, last, email := row.get("first_name"), row.get("last_name"), row.get("email")
 				if first == "" || last == "" || email == "" {
@@ -99,7 +99,11 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("GET /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		row, found, err := s.getInstructor(r.PathValue("id"))
+		id, err := pathID(r, "id", "Instructor not found")
+		if err != nil {
+			return err
+		}
+		row, found, err := s.getInstructor(id)
 		if err != nil {
 			return err
 		}
@@ -117,16 +121,16 @@ func (s *Server) instructorRoutes() {
 			LastName  string `json:"last_name"`
 			Email     string `json:"email"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.FirstName == "" || in.LastName == "" || in.Email == "" {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
 			return nil
 		}
 		var id int64
-		err := s.db.QueryRow("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id",
+		err = s.db.QueryRow("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id",
 			in.FirstName, in.LastName, in.Email).Scan(&id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
@@ -150,16 +154,19 @@ func (s *Server) instructorRoutes() {
 			Email     *string `json:"email"`
 			Active    *int64  `json:"active"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Instructor not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id) {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
-		_, err := s.db.Exec(`
+		_, err = s.db.Exec(`
 			UPDATE instructors SET
 				first_name = COALESCE(?, first_name),
 				last_name = COALESCE(?, last_name),
@@ -183,7 +190,10 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Instructor not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id) {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil

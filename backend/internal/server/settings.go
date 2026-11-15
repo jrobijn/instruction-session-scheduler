@@ -29,9 +29,9 @@ func (s *Server) settingsRoutes() {
 		type request struct {
 			Value *string `json:"value"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.Value == nil {
 			httpx.Error(w, http.StatusBadRequest, "Value is required")

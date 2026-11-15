@@ -95,28 +95,25 @@ func (res *importResult) skip(row csvRecord, format string, args ...any) {
 	res.Skipped++
 }
 
-// readCSVImport decodes and parses the {csv} body shared by all import endpoints, or
-// writes a 400 and returns ok=false.
-func readCSVImport(w http.ResponseWriter, r *http.Request) (csvImport, bool) {
+// readCSVImport decodes and parses the {csv} body shared by all import endpoints, returning
+// a 400 error if it is missing or malformed.
+func readCSVImport(r *http.Request) (csvImport, error) {
 	type request struct {
 		CSV string `json:"csv"`
 	}
-	body, ok := decode[request](w, r)
-	if !ok {
-		return csvImport{}, false
+	body, err := decode[request](r)
+	if err != nil {
+		return csvImport{}, err
 	}
 	if body.CSV == "" {
-		httpx.Error(w, http.StatusBadRequest, "CSV data is required")
-		return csvImport{}, false
+		return csvImport{}, httpx.BadRequest("CSV data is required")
 	}
 	in, err := parseCSVImport(body.CSV)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "Invalid CSV: "+err.Error())
-		return csvImport{}, false
+		return csvImport{}, httpx.BadRequest("Invalid CSV: " + err.Error())
 	}
 	if len(in.rows) == 0 {
-		httpx.Error(w, http.StatusBadRequest, "CSV must have a header row and at least one data row")
-		return csvImport{}, false
+		return csvImport{}, httpx.BadRequest("CSV must have a header row and at least one data row")
 	}
-	return in, true
+	return in, nil
 }

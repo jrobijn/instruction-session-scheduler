@@ -56,7 +56,7 @@ func (s *Server) invitationByToken(token string) (invitationDetails, bool, error
 }
 
 // sessionInvitation loads an invitation by id, provided it belongs to the session.
-func (s *Server) sessionInvitation(sessionID, invitationID string) (invitationDetails, bool, error) {
+func (s *Server) sessionInvitation(sessionID, invitationID int64) (invitationDetails, bool, error) {
 	return db.One[invitationDetails](s.db, selectInvitationDetails+`
 		WHERE inv.id = ? AND inv.session_id = ?`, invitationID, sessionID)
 }
@@ -74,20 +74,20 @@ func (s *Server) slotInvitations(slotID int64) ([]invitationDetails, error) {
 }
 
 // unsentSessionInvitations loads the session's scheduled invitations whose email hasn't gone out.
-func (s *Server) unsentSessionInvitations(sessionID string) ([]invitationDetails, error) {
+func (s *Server) unsentSessionInvitations(sessionID int64) ([]invitationDetails, error) {
 	return db.Many[invitationDetails](s.db, selectInvitationDetails+`
 		WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'`, sessionID)
 }
 
 // activeSessionInvitations loads the session's invited and confirmed invitations.
-func (s *Server) activeSessionInvitations(sessionID string) ([]invitationDetails, error) {
+func (s *Server) activeSessionInvitations(sessionID int64) ([]invitationDetails, error) {
 	return db.Many[invitationDetails](s.db, selectInvitationDetails+`
 		WHERE inv.session_id = ? AND inv.status IN ('invited', 'confirmed')`, sessionID)
 }
 
 // openStudentInvitations loads the student's scheduled, invited and confirmed invitations
 // for sessions that haven't been completed.
-func (s *Server) openStudentInvitations(studentID string) ([]invitationDetails, error) {
+func (s *Server) openStudentInvitations(studentID int64) ([]invitationDetails, error) {
 	return db.Many[invitationDetails](s.db, selectInvitationDetails+`
 		WHERE inv.student_id = ? AND inv.status IN ('scheduled', 'invited', 'confirmed') AND ts.status != 'completed'`, studentID)
 }
@@ -164,26 +164,24 @@ func (s *Server) handleGetInvitation(w http.ResponseWriter, r *http.Request) err
 }
 
 // loadOpenInvitation fetches the invitation by token and applies the checks shared by the
-// public actions. ok is false when a response was already written.
-func (s *Server) loadOpenInvitation(w http.ResponseWriter, r *http.Request, requiredStatus string) (invitationDetails, bool, error) {
+// public actions, returning a 404 or 400 error if one fails.
+func (s *Server) loadOpenInvitation(r *http.Request, requiredStatus string) (invitationDetails, error) {
 	inv, found, err := s.invitationByToken(r.PathValue("token"))
-	if err != nil || !found {
-		if err == nil {
-			httpx.Error(w, http.StatusNotFound, "Invitation not found")
-		}
-		return inv, false, err
+	if err != nil {
+		return inv, err
+	}
+	if !found {
+		return inv, httpx.NotFound("Invitation not found")
 	}
 	if inv.SessionStatus == "completed" {
-		httpx.Error(w, http.StatusBadRequest, "This session has already passed")
-		return inv, false, nil
+		return inv, httpx.BadRequest("This session has already passed")
 	}
 	if inv.Status != requiredStatus {
 		msg := fmt.Sprintf("Invitation already %s", inv.Status)
 		if requiredStatus == "confirmed" {
 			msg = fmt.Sprintf("Cannot cancel — invitation is %s", inv.Status)
 		}
-		httpx.Error(w, http.StatusBadRequest, msg)
-		return inv, false, nil
+		return inv, httpx.BadRequest(msg)
 	}
 	if requiredStatus == "invited" {
 		// The expiry timer may not have fired yet.
@@ -192,11 +190,10 @@ func (s *Server) loadOpenInvitation(w http.ResponseWriter, r *http.Request, requ
 			if st == "invalidated" {
 				msg = "This time slot has already started"
 			}
-			httpx.Error(w, http.StatusBadRequest, msg)
-			return inv, false, nil
+			return inv, httpx.BadRequest(msg)
 		}
 	}
-	return inv, true, nil
+	return inv, nil
 }
 
 func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request) error {
@@ -207,8 +204,8 @@ func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request)
 	if httpx.Decode(r, &in) != nil {
 		in.DisciplineID = 0
 	}
-	inv, ok, err := s.loadOpenInvitation(w, r, "invited")
-	if !ok || err != nil {
+	inv, err := s.loadOpenInvitation(r, "invited")
+	if err != nil {
 		return err
 	}
 	disciplineID := in.DisciplineID
@@ -266,8 +263,8 @@ func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleCancelInvitation(w http.ResponseWriter, r *http.Request) error {
-	inv, ok, err := s.loadOpenInvitation(w, r, "confirmed")
-	if !ok || err != nil {
+	inv, err := s.loadOpenInvitation(r, "confirmed")
+	if err != nil {
 		return err
 	}
 	invID, sessionID := inv.ID, inv.SessionID
@@ -305,8 +302,8 @@ func (s *Server) handleCancelInvitation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleDeclineInvitation(w http.ResponseWriter, r *http.Request) error {
-	inv, ok, err := s.loadOpenInvitation(w, r, "invited")
-	if !ok || err != nil {
+	inv, err := s.loadOpenInvitation(r, "invited")
+	if err != nil {
 		return err
 	}
 	invID, sessionID := inv.ID, inv.SessionID

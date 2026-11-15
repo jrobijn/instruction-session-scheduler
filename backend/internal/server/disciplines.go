@@ -20,7 +20,7 @@ func (s *Server) listDisciplines() ([]Discipline, error) {
 	return db.Many[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines ORDER BY name ASC")
 }
 
-func (s *Server) getDiscipline(id any) (Discipline, bool, error) {
+func (s *Server) getDiscipline(id int64) (Discipline, bool, error) {
 	return db.One[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines WHERE id = ?", id)
 }
 
@@ -82,9 +82,9 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("POST /api/disciplines/import", func(w http.ResponseWriter, r *http.Request) error {
-		in, ok := readCSVImport(w, r)
-		if !ok {
-			return nil
+		in, err := readCSVImport(r)
+		if err != nil {
+			return err
 		}
 		if !in.has("name") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain a name column")
@@ -92,7 +92,7 @@ func (s *Server) disciplineRoutes() {
 		}
 
 		result := importResult{Errors: []string{}}
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			for _, row := range in.rows {
 				name, abbr := row.get("name"), row.get("abbreviation")
 				if name == "" {
@@ -127,7 +127,11 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("GET /api/disciplines/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		row, found, err := s.getDiscipline(r.PathValue("id"))
+		id, err := pathID(r, "id", "Discipline not found")
+		if err != nil {
+			return err
+		}
+		row, found, err := s.getDiscipline(id)
 		if err != nil {
 			return err
 		}
@@ -144,16 +148,16 @@ func (s *Server) disciplineRoutes() {
 			Name         string `json:"name"`
 			Abbreviation string `json:"abbreviation"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.Name == "" {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
 		var id int64
-		err := s.db.QueryRow("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?) RETURNING id", in.Name, in.Abbreviation).Scan(&id)
+		err = s.db.QueryRow("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?) RETURNING id", in.Name, in.Abbreviation).Scan(&id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A discipline with this name already exists")
 			return nil
@@ -175,16 +179,19 @@ func (s *Server) disciplineRoutes() {
 			Abbreviation *string `json:"abbreviation"`
 			Active       *int64  `json:"active"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Discipline not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		_, err := s.db.Exec(`
+		_, err = s.db.Exec(`
 			UPDATE disciplines SET
 				name = COALESCE(?, name),
 				abbreviation = COALESCE(?, abbreviation),
@@ -210,20 +217,23 @@ func (s *Server) disciplineRoutes() {
 		type request struct {
 			GroupIDs []int64 `json:"group_ids"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.GroupIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "group_ids array is required")
 			return nil
 		}
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Discipline not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM discipline_groups WHERE discipline_id = ?", id); err != nil {
 				return err
 			}
@@ -242,7 +252,10 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("GET /api/disciplines/{id}/groups", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Discipline not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
@@ -261,10 +274,17 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("POST /api/disciplines/{id}/groups/{groupId}", func(w http.ResponseWriter, r *http.Request) error {
-		id, groupID := r.PathValue("id"), r.PathValue("groupId")
+		id, err := pathID(r, "id", "Discipline not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
+		}
+		groupID, err := pathID(r, "groupId", "Group not found")
+		if err != nil {
+			return err
 		}
 		if !s.exists("SELECT 1 FROM groups WHERE id = ?", groupID) {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
@@ -278,12 +298,19 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/disciplines/{id}/groups/{groupId}", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Discipline not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if _, err := s.db.Exec("DELETE FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", id, r.PathValue("groupId")); err != nil {
+		groupID, err := pathID(r, "groupId", "Group not found")
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.Exec("DELETE FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", id, groupID); err != nil {
 			return err
 		}
 		httpx.Success(w)
@@ -291,7 +318,11 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/disciplines/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		res, err := s.db.Exec("DELETE FROM disciplines WHERE id = ?", r.PathValue("id"))
+		id, err := pathID(r, "id", "Discipline not found")
+		if err != nil {
+			return err
+		}
+		res, err := s.db.Exec("DELETE FROM disciplines WHERE id = ?", id)
 		if err != nil {
 			return err
 		}

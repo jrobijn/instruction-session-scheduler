@@ -2,6 +2,8 @@ package server
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 )
 
@@ -63,5 +65,33 @@ func TestIsValidTimeZone(t *testing.T) {
 		if got := isValidTimeZone(tz); got != want {
 			t.Errorf("isValidTimeZone(%q) = %v", tz, got)
 		}
+	}
+}
+
+// An {id} that isn't an integer can't name a row, so it gets the resource's usual 404.
+func TestPathIDNotAnInteger(t *testing.T) {
+	e := newTestEnv(t)
+	group := e.group("A")
+	timetable, _ := e.timetable("09:00")
+	session := e.session("2030-01-01", timetable)
+	draft := e.insert("INSERT INTO timetables (name, status) VALUES ('Draft', 'draft') RETURNING id")
+	for _, tc := range []struct{ method, path, msg string }{
+		{http.MethodGet, "/api/disciplines/abc", "Discipline not found"},
+		{http.MethodPut, "/api/groups/1.0", "Group not found"},
+		{http.MethodGet, "/api/instructors/x", "Instructor not found"},
+		{http.MethodGet, "/api/students/abc", "Student not found"},
+		{http.MethodGet, "/api/students/abc/groups", "Student not found"},
+		{http.MethodGet, "/api/timetables/abc", "Timetable not found"},
+		{http.MethodGet, "/api/sessions/abc", "Training session not found"},
+		{http.MethodDelete, "/api/buddy-groups/abc", "Buddy group not found"},
+		{http.MethodGet, "/api/sessions/abc/events", "Not found"},
+		// Second path ids, behind an existing first one.
+		{http.MethodDelete, fmt.Sprintf("/api/groups/%d/members/abc", group), "Student not found"},
+		{http.MethodPost, fmt.Sprintf("/api/groups/%d/disciplines/abc", group), "Discipline not found"},
+		{http.MethodDelete, fmt.Sprintf("/api/sessions/%d/instructors/abc", session), "Assignment not found"},
+		{http.MethodPost, fmt.Sprintf("/api/sessions/%d/invitations/abc/admin-cancel", session), "Invitation not found"},
+		{http.MethodDelete, fmt.Sprintf("/api/timetables/%d/timeslots/abc", draft), "Timeslot not found"},
+	} {
+		e.admin(tc.method, tc.path, map[string]any{}).wantError(http.StatusNotFound, tc.msg)
 	}
 }

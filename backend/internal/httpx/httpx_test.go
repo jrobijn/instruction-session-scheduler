@@ -1,6 +1,8 @@
 package httpx
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,5 +41,20 @@ func TestDecode(t *testing.T) {
 	big := `{"a":"` + strings.Repeat("x", 1<<20) + `"}`
 	if err := Decode(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(big)), &v); err == nil {
 		t.Fatal("body over 1 MiB accepted")
+	}
+}
+
+func TestWriteError(t *testing.T) {
+	// A StatusError, also when wrapped, becomes its own response.
+	for _, err := range []error{NotFound("gone"), fmt.Errorf("load: %w", NotFound("gone"))} {
+		rec := httptest.NewRecorder()
+		if !WriteError(rec, err) || rec.Code != http.StatusNotFound || rec.Body.String() != "{\"error\":\"gone\"}\n" {
+			t.Fatalf("WriteError(%v) wrote %d %q", err, rec.Code, rec.Body)
+		}
+	}
+	// Any other error is left to the caller, with nothing written.
+	rec := httptest.NewRecorder()
+	if WriteError(rec, errors.New("boom")) || rec.Body.Len() != 0 {
+		t.Fatalf("plain error: wrote %q", rec.Body)
 	}
 }

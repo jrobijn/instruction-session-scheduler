@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -82,9 +81,9 @@ func (s *Server) routes() {
 		s.hub.Serve(w, r, sessionsListChannel)
 	}))
 	m.HandleFunc("GET /api/sessions/{id}/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		id, err := pathID(r, "id", "Not found")
 		if err != nil {
-			httpx.Error(w, http.StatusNotFound, "Not found")
+			s.writeError(w, err)
 			return
 		}
 		s.hub.Serve(w, r, sessionChannel(id))

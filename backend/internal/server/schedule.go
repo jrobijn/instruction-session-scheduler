@@ -26,15 +26,14 @@ type ScheduledInvitation struct {
 }
 
 func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) error {
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
 	if st := session.Status; st != "draft" && st != "scheduled" {
 		httpx.Error(w, http.StatusBadRequest, "A schedule can only be generated before invitations are sent")
 		return nil
 	}
-	id := r.PathValue("id")
 	sessionID := session.ID
 	if session.TimetableID == nil || *session.TimetableID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "No timetable attached to this session")
@@ -42,7 +41,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	}
 	timetableID := *session.TimetableID
 	var instructorCount int64
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM session_slots WHERE session_id = ? AND removed = 0", id).Scan(&instructorCount); err != nil {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM session_slots WHERE session_id = ? AND removed = 0", sessionID).Scan(&instructorCount); err != nil {
 		return err
 	}
 	if instructorCount == 0 {
@@ -64,7 +63,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		TimeslotID int64 `db:"timeslot_id"`
 		SlotID     int64 `db:"slot_id"`
 	}
-	manual, err := db.Many[manualInvitation](s.db, "SELECT timeslot_id, slot_id FROM invitations WHERE session_id = ? AND group_id IS NULL", id)
+	manual, err := db.Many[manualInvitation](s.db, "SELECT timeslot_id, slot_id FROM invitations WHERE session_id = ? AND group_id IS NULL", sessionID)
 	if err != nil {
 		return err
 	}
@@ -95,7 +94,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		SELECT i.id, ss.id AS slot_id FROM instructors i
 		JOIN session_slots ss ON ss.instructor_id = i.id
 		WHERE ss.session_id = ? AND ss.removed = 0
-		ORDER BY i.last_name ASC, i.first_name ASC`, id)
+		ORDER BY i.last_name ASC, i.first_name ASC`, sessionID)
 	if err != nil {
 		return err
 	}
@@ -139,7 +138,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 
 	// The auto-generated invitations go before the queue is read: as counted invitations they
 	// would otherwise make everyone in the current schedule look like they just had a turn.
-	if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL", id); err != nil {
+	if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL", sessionID); err != nil {
 		return err
 	}
 	eligible, err := eligibleQueue(tx, loc, sessionID, session.Date, timetableID)
@@ -194,7 +193,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		})
 		if _, err := tx.Exec(`
 			INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, decision_log)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, id, st.ID, ts.ID, slotID, token, p.GroupID, decisionLog); err != nil {
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, sessionID, st.ID, ts.ID, slotID, token, p.GroupID, decisionLog); err != nil {
 			return err
 		}
 		invited = append(invited, ScheduledInvitation{
@@ -203,7 +202,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
-	if _, err := tx.Exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", id); err != nil {
+	if _, err := tx.Exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", sessionID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -213,7 +212,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	s.broadcastSessionCounts(sessionID)
 
 	httpx.OK(w, map[string]any{
-		"session_id":       id,
+		"session_id":       sessionID,
 		"total_slots":      totalSlots,
 		"students_invited": len(invited) + len(manual),
 		"invitations":      invited,

@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -20,7 +19,7 @@ type Session struct {
 	Notes       *string `db:"notes" json:"notes"`
 }
 
-func (s *Server) getSession(id any) (Session, bool, error) {
+func (s *Server) getSession(id int64) (Session, bool, error) {
 	return db.One[Session](s.db, "SELECT id, date, status, timetable_id, notes FROM training_sessions WHERE id = ?", id)
 }
 
@@ -170,9 +169,9 @@ func (s *Server) sessionRoutes() {
 			Notes       string `json:"notes"`
 			TimetableID int64  `json:"timetable_id"` // 0 or null: the default timetable, if any
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.Date == "" {
 			httpx.Error(w, http.StatusBadRequest, "Date is required")
@@ -193,7 +192,7 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		var id int64
-		err := s.db.QueryRow("INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?) RETURNING id", in.Date, dow, nonEmpty(in.Notes), ttID).Scan(&id)
+		err = s.db.QueryRow("INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?) RETURNING id", in.Date, dow, nonEmpty(in.Notes), ttID).Scan(&id)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
@@ -218,15 +217,15 @@ func (s *Server) sessionRoutes() {
 			// the schedule.
 			TimetableID optional[int64] `json:"timetable_id"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
-		}
-		session, ok, err := s.loadSession(w, r)
-		if !ok || err != nil {
+		in, err := decode[request](r)
+		if err != nil {
 			return err
 		}
-		id := r.PathValue("id")
+		session, err := s.loadSession(r)
+		if err != nil {
+			return err
+		}
+		id := session.ID
 		var dow any
 		if in.Date != nil {
 			d, valid := dayOfWeek(*in.Date)
@@ -276,7 +275,11 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		res, err := s.db.Exec("DELETE FROM training_sessions WHERE id = ?", r.PathValue("id"))
+		id, err := pathID(r, "id", "Training session not found")
+		if err != nil {
+			return err
+		}
+		res, err := s.db.Exec("DELETE FROM training_sessions WHERE id = ?", id)
 		if err != nil {
 			return err
 		}
@@ -295,8 +298,8 @@ func (s *Server) sessionRoutes() {
 	s.adminRoute("POST /api/sessions/{id}/send-invitations", s.handleSendInvitations)
 
 	s.adminRoute("POST /api/sessions/{id}/invitations/{invitationId}/toggle-no-show", func(w http.ResponseWriter, r *http.Request) error {
-		session, ok, err := s.loadSession(w, r)
-		if !ok || err != nil {
+		session, err := s.loadSession(r)
+		if err != nil {
 			return err
 		}
 		if session.Status == "completed" {
@@ -308,7 +311,11 @@ func (s *Server) sessionRoutes() {
 			Status string `db:"status"`
 			NoShow int64  `db:"no_show"`
 		}
-		inv, found, err := db.One[noShowState](s.db, "SELECT id, status, no_show FROM invitations WHERE id = ? AND session_id = ?", r.PathValue("invitationId"), r.PathValue("id"))
+		invID, err := pathID(r, "invitationId", "Invitation not found")
+		if err != nil {
+			return err
+		}
+		inv, found, err := db.One[noShowState](s.db, "SELECT id, status, no_show FROM invitations WHERE id = ? AND session_id = ?", invID, session.ID)
 		if err != nil {
 			return err
 		}
@@ -333,15 +340,15 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/complete", func(w http.ResponseWriter, r *http.Request) error {
-		session, ok, err := s.loadSession(w, r)
-		if !ok || err != nil {
+		session, err := s.loadSession(r)
+		if err != nil {
 			return err
 		}
 		if session.Status == "completed" {
 			httpx.Error(w, http.StatusBadRequest, "Session already completed")
 			return nil
 		}
-		id := r.PathValue("id")
+		id := session.ID
 		type attendance struct {
 			StudentID int64 `db:"student_id"`
 			NoShow    int64 `db:"no_show"`
@@ -376,7 +383,8 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("GET /api/sessions/{id}/available-students", func(w http.ResponseWriter, r *http.Request) error {
-		if _, ok, err := s.loadSession(w, r); !ok || err != nil {
+		session, err := s.loadSession(r)
+		if err != nil {
 			return err
 		}
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -395,7 +403,7 @@ func (s *Server) sessionRoutes() {
 					SELECT student_id FROM invitations WHERE session_id = ? AND status NOT IN `+terminalStatuses+`
 				)
 			ORDER BY s.last_name ASC, s.first_name ASC
-			LIMIT 15`, like, like, r.PathValue("id"))
+			LIMIT 15`, like, like, session.ID)
 		if err != nil {
 			return err
 		}
@@ -406,15 +414,19 @@ func (s *Server) sessionRoutes() {
 	s.adminRoute("POST /api/sessions/{id}/invitations", s.handleAddInvitation)
 
 	s.adminRoute("DELETE /api/sessions/{id}/invitations/{invitationId}", func(w http.ResponseWriter, r *http.Request) error {
-		session, ok, err := s.loadSession(w, r)
-		if !ok || err != nil {
+		session, err := s.loadSession(r)
+		if err != nil {
 			return err
 		}
 		if st := session.Status; st != "draft" && st != "scheduled" {
 			httpx.Error(w, http.StatusBadRequest, "Can only remove students before invitations are sent")
 			return nil
 		}
-		id, invID := r.PathValue("id"), r.PathValue("invitationId")
+		invID, err := pathID(r, "invitationId", "Invitation not found")
+		if err != nil {
+			return err
+		}
+		id := session.ID
 		if !s.exists("SELECT 1 FROM invitations WHERE id = ? AND session_id = ?", invID, id) {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
@@ -437,15 +449,15 @@ func (s *Server) sessionRoutes() {
 	s.adminRoute("POST /api/sessions/{id}/cancel", s.handleCancelSession)
 
 	s.adminRoute("POST /api/sessions/{id}/reactivate", func(w http.ResponseWriter, r *http.Request) error {
-		session, ok, err := s.loadSession(w, r)
-		if !ok || err != nil {
+		session, err := s.loadSession(r)
+		if err != nil {
 			return err
 		}
 		if session.Status != "cancelled" {
 			httpx.Error(w, http.StatusBadRequest, "Only cancelled sessions can be reactivated")
 			return nil
 		}
-		id := r.PathValue("id")
+		id := session.ID
 		if err := s.cancelAllSessionTimers(id); err != nil {
 			return err
 		}
@@ -463,22 +475,23 @@ func (s *Server) sessionRoutes() {
 	})
 }
 
-// loadSession fetches the training session named by the {id} path value, writing a 404
-// if it does not exist. ok is false when the handler should stop.
-func (s *Server) loadSession(w http.ResponseWriter, r *http.Request) (Session, bool, error) {
-	session, found, err := s.getSession(r.PathValue("id"))
-	if err != nil || !found {
-		if err == nil {
-			httpx.Error(w, http.StatusNotFound, "Training session not found")
-		}
-		return session, false, err
+// loadSession fetches the training session named by the {id} path value, returning a 404 error
+// if there is none.
+func (s *Server) loadSession(r *http.Request) (Session, error) {
+	id, err := pathID(r, "id", "Training session not found")
+	if err != nil {
+		return Session{}, err
 	}
-	return session, true, nil
+	session, found, err := s.getSession(id)
+	if err == nil && !found {
+		err = httpx.NotFound("Training session not found")
+	}
+	return session, err
 }
 
 func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) error {
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
 	detail := SessionDetail{Session: session, Timeslots: []Timeslot{}, TimetableGroups: []TimetableGroup{}}
@@ -516,19 +529,20 @@ func (s *Server) handleAssignInstructor(w http.ResponseWriter, r *http.Request) 
 	type request struct {
 		InstructorID int64 `json:"instructor_id"`
 	}
-	in, ok := decode[request](w, r)
-	if !ok {
-		return nil
+	in, err := decode[request](r)
+	if err != nil {
+		return err
 	}
 	instructorID := in.InstructorID
 	if instructorID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "instructor_id is required")
 		return nil
 	}
-	if _, ok, err := s.loadSession(w, r); !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
-	id := r.PathValue("id")
+	id := session.ID
 	// Re-assigning a removed instructor revives their slot (and its invitation history).
 	var removedSlot int64
 	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, instructorID).Scan(&removedSlot) == nil {
@@ -538,7 +552,7 @@ func (s *Server) handleAssignInstructor(w http.ResponseWriter, r *http.Request) 
 		httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
 		return nil
 	}
-	_, err := s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", id, instructorID)
+	_, err = s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", id, instructorID)
 	switch {
 	case isUniqueErr(err):
 		httpx.Error(w, http.StatusConflict, "Instructor already assigned to this session")
@@ -553,16 +567,20 @@ func (s *Server) handleAssignInstructor(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleRemoveInstructor(w http.ResponseWriter, r *http.Request) error {
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
 	if session.Status == "completed" {
 		httpx.Error(w, http.StatusBadRequest, "Cannot modify a completed session")
 		return nil
 	}
+	instructorID, err := pathID(r, "instructorId", "Assignment not found")
+	if err != nil {
+		return err
+	}
 	var slotID int64
-	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", r.PathValue("id"), r.PathValue("instructorId")).Scan(&slotID) != nil {
+	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", session.ID, instructorID).Scan(&slotID) != nil {
 		httpx.Error(w, http.StatusNotFound, "Assignment not found")
 		return nil
 	}
@@ -630,31 +648,34 @@ func (s *Server) handleReplaceInstructor(w http.ResponseWriter, r *http.Request)
 	type request struct {
 		NewInstructorID int64 `json:"new_instructor_id"`
 	}
-	in, ok := decode[request](w, r)
-	if !ok {
-		return nil
+	in, err := decode[request](r)
+	if err != nil {
+		return err
 	}
 	newID := in.NewInstructorID
 	if newID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "new_instructor_id is required")
 		return nil
 	}
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
 	if session.Status == "completed" {
 		httpx.Error(w, http.StatusBadRequest, "Cannot modify a completed session")
 		return nil
 	}
-	id := r.PathValue("id")
-	oldID, parseErr := strconv.ParseInt(r.PathValue("instructorId"), 10, 64)
-	if parseErr == nil && oldID == newID {
+	id := session.ID
+	oldID, err := pathID(r, "instructorId", "Original instructor not assigned to this session")
+	if err != nil {
+		return err
+	}
+	if oldID == newID {
 		httpx.Error(w, http.StatusBadRequest, "New instructor must be different")
 		return nil
 	}
 	var oldSlot int64
-	if parseErr != nil || s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, oldID).Scan(&oldSlot) != nil {
+	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, oldID).Scan(&oldSlot) != nil {
 		httpx.Error(w, http.StatusNotFound, "Original instructor not assigned to this session")
 		return nil
 	}
@@ -686,11 +707,11 @@ func (s *Server) handleReplaceInstructor(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleSendInvitations(w http.ResponseWriter, r *http.Request) error {
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
-	id := r.PathValue("id")
+	id := session.ID
 	pending, err := s.unsentSessionInvitations(id)
 	if err != nil {
 		return err
@@ -725,8 +746,8 @@ func (s *Server) handleSendInvitations(w http.ResponseWriter, r *http.Request) e
 }
 
 func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) error {
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
 	status := session.Status
@@ -739,16 +760,16 @@ func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) err
 		TimeslotID   int64 `json:"timeslot_id"`
 		InstructorID int64 `json:"instructor_id"`
 	}
-	in, ok := decode[request](w, r)
-	if !ok {
-		return nil
+	in, err := decode[request](r)
+	if err != nil {
+		return err
 	}
 	studentID, timeslotID, instructorID := in.StudentID, in.TimeslotID, in.InstructorID
 	if studentID == 0 || timeslotID == 0 || instructorID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "student_id, timeslot_id, and instructor_id are required")
 		return nil
 	}
-	id := r.PathValue("id")
+	id := session.ID
 	var slotID int64
 	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID).Scan(&slotID) != nil {
 		httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
@@ -798,15 +819,19 @@ func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) handleAdminCancelInvitation(w http.ResponseWriter, r *http.Request) error {
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
 	if session.Status == "completed" {
 		httpx.Error(w, http.StatusBadRequest, "Session already completed")
 		return nil
 	}
-	inv, found, err := s.sessionInvitation(r.PathValue("id"), r.PathValue("invitationId"))
+	invID, err := pathID(r, "invitationId", "Invitation not found")
+	if err != nil {
+		return err
+	}
+	inv, found, err := s.sessionInvitation(session.ID, invID)
 	if err != nil {
 		return err
 	}
@@ -830,8 +855,8 @@ func (s *Server) handleAdminCancelInvitation(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleAutoScheduleSlot(w http.ResponseWriter, r *http.Request) error {
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
 	if session.Status != "invitations_sent" {
@@ -842,16 +867,16 @@ func (s *Server) handleAutoScheduleSlot(w http.ResponseWriter, r *http.Request) 
 		TimeslotID   int64 `json:"timeslot_id"`
 		InstructorID int64 `json:"instructor_id"`
 	}
-	in, ok := decode[request](w, r)
-	if !ok {
-		return nil
+	in, err := decode[request](r)
+	if err != nil {
+		return err
 	}
 	timeslotID, instructorID := in.TimeslotID, in.InstructorID
 	if timeslotID == 0 || instructorID == 0 {
 		httpx.Error(w, http.StatusBadRequest, "timeslot_id and instructor_id are required")
 		return nil
 	}
-	id := r.PathValue("id")
+	id := session.ID
 	var slotID int64
 	if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID).Scan(&slotID) != nil {
 		httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
@@ -879,8 +904,8 @@ func (s *Server) handleAutoScheduleSlot(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) error {
-	session, ok, err := s.loadSession(w, r)
-	if !ok || err != nil {
+	session, err := s.loadSession(r)
+	if err != nil {
 		return err
 	}
 	switch session.Status {
@@ -891,7 +916,7 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) err
 		httpx.Error(w, http.StatusBadRequest, "Session is already cancelled")
 		return nil
 	}
-	id := r.PathValue("id")
+	id := session.ID
 	if err := s.cancelAllSessionTimers(id); err != nil {
 		return err
 	}

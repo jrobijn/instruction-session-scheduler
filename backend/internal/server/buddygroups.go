@@ -14,9 +14,9 @@ func (s *Server) buddyGroupRoutes() {
 		type request struct {
 			StudentIDs []int64 `json:"student_ids"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		ids := in.StudentIDs
 		if len(ids) < 2 {
@@ -57,7 +57,11 @@ func (s *Server) buddyGroupRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/buddy-groups/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		res, err := s.db.Exec("DELETE FROM buddy_groups WHERE id = ?", r.PathValue("id"))
+		id, err := pathID(r, "id", "Buddy group not found")
+		if err != nil {
+			return err
+		}
+		res, err := s.db.Exec("DELETE FROM buddy_groups WHERE id = ?", id)
 		if err != nil {
 			return err
 		}
@@ -70,13 +74,20 @@ func (s *Server) buddyGroupRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/buddy-groups/{id}/members/{studentId}", func(w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
+		id, err := pathID(r, "id", "Buddy group not found")
+		if err != nil {
+			return err
+		}
 		if !s.exists("SELECT 1 FROM buddy_groups WHERE id = ?", id) {
 			httpx.Error(w, http.StatusNotFound, "Buddy group not found")
 			return nil
 		}
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
-			if _, err := tx.Exec("DELETE FROM buddy_group_members WHERE buddy_group_id = ? AND student_id = ?", id, r.PathValue("studentId")); err != nil {
+		studentID, err := pathID(r, "studentId", "Student not found")
+		if err != nil {
+			return err
+		}
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
+			if _, err := tx.Exec("DELETE FROM buddy_group_members WHERE buddy_group_id = ? AND student_id = ?", id, studentID); err != nil {
 				return err
 			}
 			// Delete the group if no members remain.

@@ -18,7 +18,7 @@ type Timetable struct {
 	Active    int64  `db:"active" json:"active"`
 }
 
-func (s *Server) getTimetable(id any) (Timetable, bool, error) {
+func (s *Server) getTimetable(id int64) (Timetable, bool, error) {
 	return db.One[Timetable](s.db, "SELECT id, name, status, is_default, active FROM timetables WHERE id = ?", id)
 }
 
@@ -29,7 +29,7 @@ type Timeslot struct {
 }
 
 // timetableTimeslots lists a timetable's timeslots, earliest first.
-func (s *Server) timetableTimeslots(timetableID any) ([]Timeslot, error) {
+func (s *Server) timetableTimeslots(timetableID int64) ([]Timeslot, error) {
 	return db.Many[Timeslot](s.db, "SELECT id, timetable_id, start_time FROM timeslots WHERE timetable_id = ? ORDER BY start_time ASC", timetableID)
 }
 
@@ -43,7 +43,7 @@ type TimetableGroup struct {
 }
 
 // timetableGroups lists a timetable's groups in their configured order.
-func (s *Server) timetableGroups(timetableID any) ([]TimetableGroup, error) {
+func (s *Server) timetableGroups(timetableID int64) ([]TimetableGroup, error) {
 	return db.Many[TimetableGroup](s.db, `
 		SELECT tg.group_id, tg.percentage, g.name AS group_name, g.color AS group_color, g.is_default
 		FROM timetable_groups tg
@@ -81,8 +81,8 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("GET /api/timetables/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		t, ok, err := s.loadTimetable(w, r)
-		if !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
 		timeslots, err := s.timetableTimeslots(t.ID)
@@ -105,9 +105,9 @@ func (s *Server) timetableRoutes() {
 		type request struct {
 			Name string `json:"name"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.Name == "" {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
@@ -136,18 +136,18 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("PUT /api/timetables/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		t, ok, err := s.loadTimetable(w, r)
-		if !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
 		type request struct {
 			Name *string `json:"name"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
-		id := r.PathValue("id")
+		id := t.ID
 		if in.Name != nil {
 			if t.Status != "draft" {
 				httpx.Error(w, http.StatusBadRequest, "Cannot edit a saved timetable")
@@ -166,11 +166,11 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("POST /api/timetables/{id}/save", func(w http.ResponseWriter, r *http.Request) error {
-		t, ok, err := s.loadTimetable(w, r)
-		if !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
-		id := r.PathValue("id")
+		id := t.ID
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Timetable is already saved")
 			return nil
@@ -211,8 +211,8 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("POST /api/timetables/{id}/set-default", func(w http.ResponseWriter, r *http.Request) error {
-		t, ok, err := s.loadTimetable(w, r)
-		if !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
 		if t.Active == 0 {
@@ -227,7 +227,7 @@ func (s *Server) timetableRoutes() {
 			if _, err := tx.Exec("UPDATE timetables SET is_default = 0 WHERE is_default = 1"); err != nil {
 				return err
 			}
-			_, err := tx.Exec("UPDATE timetables SET is_default = 1 WHERE id = ?", r.PathValue("id"))
+			_, err := tx.Exec("UPDATE timetables SET is_default = 1 WHERE id = ?", t.ID)
 			return err
 		})
 		if err != nil {
@@ -238,11 +238,11 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("POST /api/timetables/{id}/toggle-active", func(w http.ResponseWriter, r *http.Request) error {
-		t, ok, err := s.loadTimetable(w, r)
-		if !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
-		id := r.PathValue("id")
+		id := t.ID
 		newActive := int64(1)
 		if t.Active != 0 {
 			newActive = 0
@@ -261,10 +261,11 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/timetables/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		if _, ok, err := s.loadTimetable(w, r); !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
-		id := r.PathValue("id")
+		id := t.ID
 		var blocking int64
 		if err := s.db.QueryRow(`
 			SELECT COUNT(*) FROM training_sessions
@@ -275,7 +276,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Cannot delete: timetable is attached to sessions with sent invitations or completed sessions")
 			return nil
 		}
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			// Reset scheduled sessions that use this timetable back to draft.
 			scheduled, err := db.Many[int64](tx, "SELECT id FROM training_sessions WHERE timetable_id = ? AND status = 'scheduled'", id)
 			if err != nil {
@@ -310,23 +311,23 @@ func (s *Server) timetableRoutes() {
 				Percentage int64 `json:"percentage"`
 			} `json:"groups"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.Groups == nil {
 			httpx.Error(w, http.StatusBadRequest, "groups array is required")
 			return nil
 		}
-		t, ok, err := s.loadTimetable(w, r)
-		if !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify groups of a saved timetable")
 			return nil
 		}
-		id := r.PathValue("id")
+		id := t.ID
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM timetable_groups WHERE timetable_id = ?", id); err != nil {
 				return err
@@ -350,19 +351,20 @@ func (s *Server) timetableRoutes() {
 		type request struct {
 			GroupIDs []int64 `json:"group_ids"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.GroupIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "group_ids array is required")
 			return nil
 		}
-		if _, ok, err := s.loadTimetable(w, r); !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
-		id := r.PathValue("id")
-		err := s.db.InTx(func(tx *sqlx.Tx) error {
+		id := t.ID
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			for i, gid := range in.GroupIDs {
 				if _, err := tx.Exec("UPDATE timetable_groups SET position = ? WHERE timetable_id = ? AND group_id = ?", i, id, gid); err != nil {
 					return err
@@ -381,23 +383,23 @@ func (s *Server) timetableRoutes() {
 		type request struct {
 			StartTime string `json:"start_time"`
 		}
-		in, ok := decode[request](w, r)
-		if !ok {
-			return nil
+		in, err := decode[request](r)
+		if err != nil {
+			return err
 		}
 		if in.StartTime == "" {
 			httpx.Error(w, http.StatusBadRequest, "start_time is required")
 			return nil
 		}
-		t, ok, err := s.loadTimetable(w, r)
-		if !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify timeslots of a saved timetable")
 			return nil
 		}
-		row, _, err := db.One[Timeslot](s.db, "INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id, timetable_id, start_time", r.PathValue("id"), in.StartTime)
+		row, _, err := db.One[Timeslot](s.db, "INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id, timetable_id, start_time", t.ID, in.StartTime)
 		if isUniqueErr(err) {
 			httpx.Error(w, http.StatusConflict, "A timeslot with this start time already exists in this timetable")
 			return nil
@@ -410,15 +412,19 @@ func (s *Server) timetableRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/timetables/{id}/timeslots/{timeslotId}", func(w http.ResponseWriter, r *http.Request) error {
-		t, ok, err := s.loadTimetable(w, r)
-		if !ok || err != nil {
+		t, err := s.loadTimetable(r)
+		if err != nil {
 			return err
 		}
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify timeslots of a saved timetable")
 			return nil
 		}
-		res, err := s.db.Exec("DELETE FROM timeslots WHERE id = ? AND timetable_id = ?", r.PathValue("timeslotId"), r.PathValue("id"))
+		timeslotID, err := pathID(r, "timeslotId", "Timeslot not found")
+		if err != nil {
+			return err
+		}
+		res, err := s.db.Exec("DELETE FROM timeslots WHERE id = ? AND timetable_id = ?", timeslotID, t.ID)
 		if err != nil {
 			return err
 		}
@@ -431,17 +437,18 @@ func (s *Server) timetableRoutes() {
 	})
 }
 
-// loadTimetable fetches the timetable named by the {id} path value, writing a 404 if it
-// does not exist. ok is false when the handler should stop.
-func (s *Server) loadTimetable(w http.ResponseWriter, r *http.Request) (Timetable, bool, error) {
-	t, found, err := s.getTimetable(r.PathValue("id"))
-	if err != nil || !found {
-		if err == nil {
-			httpx.Error(w, http.StatusNotFound, "Timetable not found")
-		}
-		return t, false, err
+// loadTimetable fetches the timetable named by the {id} path value, returning a 404 error
+// if there is none.
+func (s *Server) loadTimetable(r *http.Request) (Timetable, error) {
+	id, err := pathID(r, "id", "Timetable not found")
+	if err != nil {
+		return Timetable{}, err
 	}
-	return t, true, nil
+	t, found, err := s.getTimetable(id)
+	if err == nil && !found {
+		err = httpx.NotFound("Timetable not found")
+	}
+	return t, err
 }
 
 // timeslotPrefs holds, per student, the timeslots of one timetable they prefer. A student
