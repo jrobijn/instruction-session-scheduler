@@ -25,12 +25,6 @@ type ScheduledInvitation struct {
 	GroupID    int64  `json:"group_id"`
 }
 
-type gridSpot struct {
-	timeslot    Timeslot
-	slotID      int64
-	timeslotIdx int
-}
-
 func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) error {
 	session, ok, err := s.loadSession(w, r)
 	if !ok || err != nil {
@@ -106,34 +100,22 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	// Grid of spots: every timeslot has one spot per instructor. Spots of manual invitations
-	// are taken.
-	var grid []gridSpot
+	// Free instructor slots per timeslot, in instructor order. Every timeslot has one spot per
+	// instructor; spots of manual invitations are taken.
+	type spotKey struct{ timeslotID, slotID int64 }
+	taken := map[spotKey]bool{}
+	for _, mi := range manual {
+		taken[spotKey{mi.TimeslotID, mi.SlotID}] = true
+	}
+	freeSlots := make([][]int64, len(timeslots))
+	timeslotCapacity := make([]scheduling.Timeslot, len(timeslots))
 	for ti, ts := range timeslots {
 		for _, in := range instructors {
-			grid = append(grid, gridSpot{timeslot: ts, slotID: in.SlotID, timeslotIdx: ti})
-		}
-	}
-	available := make([]bool, len(grid))
-	for i := range available {
-		available[i] = true
-	}
-	for _, mi := range manual {
-		for i, spot := range grid {
-			if spot.timeslot.ID == mi.TimeslotID && spot.slotID == mi.SlotID {
-				available[i] = false
-				break
+			if !taken[spotKey{ts.ID, in.SlotID}] {
+				freeSlots[ti] = append(freeSlots[ti], in.SlotID)
 			}
 		}
-	}
-	timeslotCapacity := make([]scheduling.Timeslot, len(timeslots))
-	for i, ts := range timeslots {
-		timeslotCapacity[i].ID = ts.ID
-	}
-	for i, spot := range grid {
-		if available[i] {
-			timeslotCapacity[spot.timeslotIdx].Capacity++
-		}
+		timeslotCapacity[ti] = scheduling.Timeslot{ID: ts.ID, Capacity: len(freeSlots[ti])}
 	}
 
 	prefs, err := s.timeslotPrefs(timetableID)
@@ -182,15 +164,9 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	invited := []ScheduledInvitation{}
 	for _, p := range placements {
 		st := p.Member
-		spotIdx := -1
-		for i, spot := range grid {
-			if available[i] && spot.timeslotIdx == p.Timeslot {
-				spotIdx = i
-				break
-			}
-		}
-		available[spotIdx] = false
-		spot := grid[spotIdx]
+		ts := timeslots[p.Timeslot]
+		slotID := freeSlots[p.Timeslot][0]
+		freeSlots[p.Timeslot] = freeSlots[p.Timeslot][1:]
 		token := newToken()
 
 		var quota, buddyOf string
@@ -218,12 +194,12 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		})
 		if _, err := tx.Exec(`
 			INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, decision_log)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, id, st.ID, spot.timeslot.ID, spot.slotID, token, p.GroupID, decisionLog); err != nil {
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, id, st.ID, ts.ID, slotID, token, p.GroupID, decisionLog); err != nil {
 			return err
 		}
 		invited = append(invited, ScheduledInvitation{
 			StudentID: st.ID, FirstName: st.FirstName, LastName: st.LastName, Token: token,
-			TimeslotID: spot.timeslot.ID, SlotID: spot.slotID, StartTime: spot.timeslot.StartTime, GroupID: p.GroupID,
+			TimeslotID: ts.ID, SlotID: slotID, StartTime: ts.StartTime, GroupID: p.GroupID,
 		})
 	}
 
