@@ -203,12 +203,16 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		decisionLog := encodeJSON(batchLog{
 			candidateLog: candidateLog{
 				Trigger:              "batch_schedule",
+				LastTurnAt:           st.LastTurnAt,
+				InviteNext:           st.InviteNextPendingSince != nil,
 				CandidateRank:        p.Rank,
 				CandidatesConsidered: p.Considered,
 				GroupName:            nonEmpty(groupName[p.GroupID]),
 				GroupColor:           nonEmpty(groupColor[p.GroupID]),
+				PreferredTimeslots:   prefs.startTimes(st.ID, timeslots),
+				PreferredDays:        preferredDays(st.PreferredDays, clubDays),
 				BuddyPlacedNear:      nonEmpty(buddyOf),
-			}.withStudent(st, prefs.startTimes(st.ID, timeslots), clubDays),
+			},
 			GroupQuota: nonEmpty(quota),
 			Overflow:   p.Overflow,
 		})

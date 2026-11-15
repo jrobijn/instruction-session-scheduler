@@ -3,8 +3,6 @@ package server
 import (
 	"strconv"
 	"strings"
-
-	"github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
 )
 
 // Decision logs: the JSON stored with each generated invitation (invitations.decision_log)
@@ -24,16 +22,6 @@ type candidateLog struct {
 	PreferredDays        []int    `json:"preferred_days"`
 	// BuddyPlacedNear is the name of the buddy who pulled the student up, if any.
 	BuddyPlacedNear *string `json:"buddy_placed_near"`
-}
-
-// withStudent returns l with the fields that describe the invited student m filled in.
-// preferredTimeslots is from timeslotPrefs.startTimes; clubDays is the club_days setting.
-func (l candidateLog) withStudent(m queue.Member, preferredTimeslots []string, clubDays string) candidateLog {
-	l.LastTurnAt = m.LastTurnAt
-	l.InviteNext = m.InviteNextPendingSince != nil
-	l.PreferredTimeslots = preferredTimeslots
-	l.PreferredDays = preferredDays(m.PreferredDays, clubDays)
-	return l
 }
 
 // batchLog is the decision log of an invitation made by generating a schedule.

@@ -116,12 +116,16 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 	decisionLog := encodeJSON(replacementLog{
 		candidateLog: candidateLog{
 			Trigger:              "replacement",
+			LastTurnAt:           replacement.LastTurnAt,
+			InviteNext:           replacement.InviteNextPendingSince != nil,
 			CandidateRank:        pick.Rank,
 			CandidatesConsidered: pick.Considered,
 			GroupName:            nonEmpty(groupName),
 			GroupColor:           nonEmpty(groupColor),
+			PreferredTimeslots:   preferredTimeslots,
+			PreferredDays:        preferredDays(replacement.PreferredDays, db.Setting(s.db, "club_days", "0|1|2|3|4|5|6")),
 			BuddyPlacedNear:      nonEmpty(buddyName),
-		}.withStudent(replacement, preferredTimeslots, db.Setting(s.db, "club_days", "0|1|2|3|4|5|6")),
+		},
 		ReplacedStudent:   nonEmpty(replacedName),
 		ReplacementReason: reason,
 		SameGroupMatch:    pick.SameGroup,
