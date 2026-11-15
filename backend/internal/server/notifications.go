@@ -81,7 +81,7 @@ func (s *Server) notificationRoutes() {
 		if err != nil {
 			return err
 		}
-		s.hub.Broadcast("notifications", "unread_count_updated", map[string]int64{"unread_count": count})
+		s.hub.Broadcast(notificationsChannel, "unread_count_updated", map[string]int64{"unread_count": count})
 		httpx.Success(w)
 		return nil
 	})
@@ -90,7 +90,7 @@ func (s *Server) notificationRoutes() {
 		if _, err := s.db.Exec("UPDATE notifications SET read = 1 WHERE read = 0"); err != nil {
 			return err
 		}
-		s.hub.Broadcast("notifications", "unread_count_updated", map[string]int64{"unread_count": 0})
+		s.hub.Broadcast(notificationsChannel, "unread_count_updated", map[string]int64{"unread_count": 0})
 		httpx.Success(w)
 		return nil
 	})
@@ -139,5 +139,5 @@ func (s *Server) CreateNotification(n NewNotification) {
 		logf("count unread notifications: %v", err)
 		return
 	}
-	s.hub.Broadcast("notifications", "new_notification", map[string]any{"notification": notification, "unread_count": count})
+	s.hub.Broadcast(notificationsChannel, "new_notification", map[string]any{"notification": notification, "unread_count": count})
 }

@@ -57,7 +57,7 @@ func TestHubDeliversToChannelSubscribers(t *testing.T) {
 	waitFor(t, func() bool { return h.subscribers("a") == 1 && h.subscribers("b") == 1 })
 
 	h.Broadcast("a", "hello", map[string]int{"n": 1})
-	h.BroadcastSession(7, "ignored", nil) // other channel
+	h.Broadcast("c", "ignored", nil) // other channel
 	h.Broadcast("b", "bye", "x")
 
 	read := func(sc *bufio.Scanner) []string {
@@ -93,7 +93,7 @@ func TestBroadcastWithoutSubscribersOrToSlowClient(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for range 10 {
-			h.BroadcastSessionsList("x", 1)
+			h.Broadcast("nobody", "x", 1)
 			h.Broadcast("slow", "x", 1)
 		}
 		close(done)

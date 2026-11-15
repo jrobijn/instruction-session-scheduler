@@ -154,7 +154,7 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 		return nil, err
 	}
 	if len(added) > 0 {
-		s.hub.BroadcastSession(sessionID, "invitation_added", added[0])
+		s.hub.Broadcast(sessionChannel(sessionID), "invitation_added", added[0])
 	}
 	s.broadcastSessionCounts(sessionID)
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
 )
 
@@ -93,12 +92,4 @@ func (h *Hub) Broadcast(channel, event string, data any) {
 		default: // slow client: drop the event rather than block every broadcaster
 		}
 	}
-}
-
-func (h *Hub) BroadcastSession(sessionID int64, event string, data any) {
-	h.Broadcast("session:"+strconv.FormatInt(sessionID, 10), event, data)
-}
-
-func (h *Hub) BroadcastSessionsList(event string, data any) {
-	h.Broadcast("sessions-list", event, data)
 }

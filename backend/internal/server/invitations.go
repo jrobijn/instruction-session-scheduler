@@ -112,7 +112,7 @@ func (s *Server) invitationRoutes() {
 }
 
 func (s *Server) broadcastInvitation(token, status string) {
-	s.hub.Broadcast("invitation:"+token, "invitation_updated", map[string]any{"status": status})
+	s.hub.Broadcast(invitationChannel(token), "invitation_updated", map[string]any{"status": status})
 }
 
 // --- public routes -----------------------------------------------------------------------
@@ -235,7 +235,7 @@ func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request)
 	if storedID != nil && *storedID != 0 {
 		s.db.QueryRow("SELECT name, abbreviation FROM disciplines WHERE id = ?", *storedID).Scan(&discName, &discAbbr)
 	}
-	s.hub.BroadcastSession(sessionID, "invitation_updated", map[string]any{
+	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", map[string]any{
 		"id": invID, "status": "confirmed", "discipline_name": discName, "discipline_abbreviation": discAbbr,
 	})
 	s.broadcastInvitation(r.PathValue("token"), "confirmed")
@@ -278,7 +278,7 @@ func (s *Server) handleCancelInvitation(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	s.hub.BroadcastSession(sessionID, "invitation_updated", map[string]any{"id": invID, "status": "cancelled"})
+	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", map[string]any{"id": invID, "status": "cancelled"})
 	s.broadcastInvitation(r.PathValue("token"), "cancelled")
 	s.broadcastSessionCounts(sessionID)
 	s.CreateNotification(NewNotification{
@@ -314,7 +314,7 @@ func (s *Server) handleDeclineInvitation(w http.ResponseWriter, r *http.Request)
 	}
 	s.cancelInvitationExpiry(invID)
 
-	s.hub.BroadcastSession(sessionID, "invitation_updated", map[string]any{"id": invID, "status": "declined"})
+	s.hub.Broadcast(sessionChannel(sessionID), "invitation_updated", map[string]any{"id": invID, "status": "declined"})
 	s.broadcastInvitation(r.PathValue("token"), "declined")
 	s.broadcastSessionCounts(sessionID)
 

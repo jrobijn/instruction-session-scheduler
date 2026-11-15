@@ -212,6 +212,8 @@ func TestSessionEventsStream(t *testing.T) {
 	ts := httptest.NewServer(f.handler)
 	defer ts.Close()
 
+	f.admin(http.MethodGet, "/api/sessions/abc/events", nil).wantError(http.StatusNotFound, "Not found")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+sessionPath(f.sessionID, "events"), nil)

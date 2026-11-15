@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -78,13 +79,18 @@ func (s *Server) routes() {
 
 	// SSE streams authenticate via cookie themselves (same as the TS backend).
 	m.HandleFunc("GET /api/sessions/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
-		s.hub.Serve(w, r, "sessions-list")
+		s.hub.Serve(w, r, sessionsListChannel)
 	}))
 	m.HandleFunc("GET /api/sessions/{id}/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
-		s.hub.Serve(w, r, "session:"+r.PathValue("id"))
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			httpx.Error(w, http.StatusNotFound, "Not found")
+			return
+		}
+		s.hub.Serve(w, r, sessionChannel(id))
 	}))
 	m.HandleFunc("GET /api/notifications/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
-		s.hub.Serve(w, r, "notifications")
+		s.hub.Serve(w, r, notificationsChannel)
 	}))
 	m.HandleFunc("GET /api/invitations/{token}/events", s.handleInvitationEvents)
 
@@ -186,7 +192,7 @@ func (s *Server) handleInvitationEvents(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusNotFound, "Not found")
 		return
 	}
-	s.hub.Serve(w, r, "invitation:"+token)
+	s.hub.Serve(w, r, invitationChannel(token))
 }
 
 // handleStatic serves the built frontend, falling back to index.html for client-side routes.
