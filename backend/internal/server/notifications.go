@@ -119,19 +119,13 @@ func (s *Server) CreateNotification(n NewNotification) {
 	if n.TimeslotStartTime != "" {
 		startTime = n.TimeslotStartTime
 	}
-	res, err := s.db.Exec(`
+	notification, _, err := db.One[Notification](s.db, `
 		INSERT INTO notifications (type, invitation_id, session_id, student_name, session_date, timeslot_start_time)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?)
+		RETURNING id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at`,
 		n.Type, invitationID, sessionID, n.StudentName, n.SessionDate, startTime)
 	if err != nil {
 		logf("create notification %s for session %d: %v", n.Type, n.SessionID, err)
-		return
-	}
-	notification, _, err := db.One[Notification](s.db, `
-		SELECT id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at
-		FROM notifications WHERE id = ?`, lastID(res))
-	if err != nil {
-		logf("load notification: %v", err)
 		return
 	}
 	count, err := s.unreadCount()
