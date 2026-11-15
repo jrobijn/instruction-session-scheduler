@@ -285,8 +285,7 @@ func (s *Server) studentRoutes() {
 		id := r.PathValue("id")
 		// Open invitations for sessions that haven't taken place are admin-cancelled, as if
 		// the admin cancelled each one; completed sessions are history and stay as they are.
-		open, err := s.findInvitations(`
-			WHERE inv.student_id = ? AND inv.status IN ('scheduled', 'invited', 'confirmed') AND ts.status != 'completed'`, id)
+		open, err := s.openStudentInvitations(id)
 		if err != nil {
 			return err
 		}

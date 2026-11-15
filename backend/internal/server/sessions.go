@@ -593,7 +593,7 @@ func (s *Server) adminCancelInvitation(inv invitationDetails) error {
 // admin-cancelled, unsent ones deleted, and older ones kept as history. It returns the number
 // of cancelled invitations.
 func (s *Server) removeSlot(sessionID int64, slotID int64) (int, error) {
-	affected, err := s.findInvitations("WHERE inv.slot_id = ?", slotID)
+	affected, err := s.slotInvitations(slotID)
 	if err != nil {
 		return 0, err
 	}
@@ -686,8 +686,7 @@ func (s *Server) handleSendInvitations(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	id := r.PathValue("id")
-	pending, err := s.findInvitations(`
-		WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'`, id)
+	pending, err := s.unsentSessionInvitations(id)
 	if err != nil {
 		return err
 	}
@@ -802,7 +801,7 @@ func (s *Server) handleAdminCancelInvitation(w http.ResponseWriter, r *http.Requ
 		httpx.Error(w, http.StatusBadRequest, "Session already completed")
 		return nil
 	}
-	inv, found, err := s.findInvitation("WHERE inv.id = ? AND inv.session_id = ?", r.PathValue("invitationId"), r.PathValue("id"))
+	inv, found, err := s.sessionInvitation(r.PathValue("id"), r.PathValue("invitationId"))
 	if err != nil {
 		return err
 	}
@@ -891,8 +890,7 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) err
 	if err := s.cancelAllSessionTimers(id); err != nil {
 		return err
 	}
-	active, err := s.findInvitations(`
-		WHERE inv.session_id = ? AND inv.status IN ('invited', 'confirmed')`, id)
+	active, err := s.activeSessionInvitations(id)
 	if err != nil {
 		return err
 	}

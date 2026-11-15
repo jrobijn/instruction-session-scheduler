@@ -118,7 +118,7 @@ func (s *Server) rehydrateTimers() {
 
 // processExpiredInvitation runs when an invitation's expiry timer fires.
 func (s *Server) processExpiredInvitation(invitationID int64) error {
-	inv, found, err := s.findInvitation("WHERE inv.id = ? AND inv.status = 'invited'", invitationID)
+	inv, found, err := s.awaitingInvitation(invitationID)
 	if err != nil || !found {
 		return err // nil: already handled (confirmed, declined, ...)
 	}

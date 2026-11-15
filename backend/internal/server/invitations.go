@@ -12,7 +12,7 @@ import (
 const terminalStatuses = "('declined', 'expired', 'invalidated', 'cancelled', 'admin_cancelled')"
 
 // invitationDetails is an invitation with the session, student, timeslot and discipline
-// details the invitation actions need. Load it with findInvitation(s).
+// details the invitation actions need. Load it with one of the queries below.
 type invitationDetails struct {
 	ID             int64   `db:"id"`
 	SessionID      int64   `db:"session_id"`
@@ -34,31 +34,62 @@ type invitationDetails struct {
 	DisciplineName *string `db:"discipline_name"`
 }
 
-// findInvitations loads the invitations matching where, a WHERE clause (plus anything that
-// may follow it) over inv (invitations), ts (training_sessions), s (students), tslot
+// selectInvitationDetails selects invitationDetails rows; the queries below append a fixed
+// WHERE clause over inv (invitations), ts (training_sessions), s (students), tslot
 // (timeslots) and d (disciplines).
-func (s *Server) findInvitations(where string, args ...any) ([]invitationDetails, error) {
-	return db.Many[invitationDetails](s.db, `
-		SELECT inv.id, inv.session_id, inv.student_id, inv.timeslot_id, inv.slot_id, inv.group_id, inv.discipline_id,
-			inv.token, inv.status, inv.invited_at, inv.email_sent,
-			ts.date AS session_date, ts.status AS session_status, ts.notes AS session_notes,
-			s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
-			tslot.start_time, d.name AS discipline_name
-		FROM invitations inv
-		JOIN training_sessions ts ON ts.id = inv.session_id
-		JOIN students s ON s.id = inv.student_id
-		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
-		LEFT JOIN disciplines d ON d.id = inv.discipline_id
-		`+where, args...)
+const selectInvitationDetails = `
+	SELECT inv.id, inv.session_id, inv.student_id, inv.timeslot_id, inv.slot_id, inv.group_id, inv.discipline_id,
+		inv.token, inv.status, inv.invited_at, inv.email_sent,
+		ts.date AS session_date, ts.status AS session_status, ts.notes AS session_notes,
+		s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
+		tslot.start_time, d.name AS discipline_name
+	FROM invitations inv
+	JOIN training_sessions ts ON ts.id = inv.session_id
+	JOIN students s ON s.id = inv.student_id
+	JOIN timeslots tslot ON tslot.id = inv.timeslot_id
+	LEFT JOIN disciplines d ON d.id = inv.discipline_id`
+
+// invitationByToken loads the invitation with the given public token.
+func (s *Server) invitationByToken(token string) (invitationDetails, bool, error) {
+	return db.One[invitationDetails](s.db, selectInvitationDetails+`
+		WHERE inv.token = ?`, token)
 }
 
-// findInvitation is findInvitations for a single invitation; found is false if none matches.
-func (s *Server) findInvitation(where string, args ...any) (inv invitationDetails, found bool, err error) {
-	invs, err := s.findInvitations(where, args...)
-	if err != nil || len(invs) == 0 {
-		return inv, false, err
-	}
-	return invs[0], true, nil
+// sessionInvitation loads an invitation by id, provided it belongs to the session.
+func (s *Server) sessionInvitation(sessionID, invitationID string) (invitationDetails, bool, error) {
+	return db.One[invitationDetails](s.db, selectInvitationDetails+`
+		WHERE inv.id = ? AND inv.session_id = ?`, invitationID, sessionID)
+}
+
+// awaitingInvitation loads an invitation by id, provided it is still awaiting a response.
+func (s *Server) awaitingInvitation(invitationID int64) (invitationDetails, bool, error) {
+	return db.One[invitationDetails](s.db, selectInvitationDetails+`
+		WHERE inv.id = ? AND inv.status = 'invited'`, invitationID)
+}
+
+// slotInvitations loads every invitation, in any status, on an instructor's slot.
+func (s *Server) slotInvitations(slotID int64) ([]invitationDetails, error) {
+	return db.Many[invitationDetails](s.db, selectInvitationDetails+`
+		WHERE inv.slot_id = ?`, slotID)
+}
+
+// unsentSessionInvitations loads the session's scheduled invitations whose email hasn't gone out.
+func (s *Server) unsentSessionInvitations(sessionID string) ([]invitationDetails, error) {
+	return db.Many[invitationDetails](s.db, selectInvitationDetails+`
+		WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'`, sessionID)
+}
+
+// activeSessionInvitations loads the session's invited and confirmed invitations.
+func (s *Server) activeSessionInvitations(sessionID string) ([]invitationDetails, error) {
+	return db.Many[invitationDetails](s.db, selectInvitationDetails+`
+		WHERE inv.session_id = ? AND inv.status IN ('invited', 'confirmed')`, sessionID)
+}
+
+// openStudentInvitations loads the student's scheduled, invited and confirmed invitations
+// for sessions that haven't been completed.
+func (s *Server) openStudentInvitations(studentID string) ([]invitationDetails, error) {
+	return db.Many[invitationDetails](s.db, selectInvitationDetails+`
+		WHERE inv.student_id = ? AND inv.status IN ('scheduled', 'invited', 'confirmed') AND ts.status != 'completed'`, studentID)
 }
 
 func (i invitationDetails) timing() invitationTiming {
@@ -101,7 +132,7 @@ type PublicInvitation struct {
 }
 
 func (s *Server) handleGetInvitation(w http.ResponseWriter, r *http.Request) error {
-	inv, found, err := s.findInvitation("WHERE inv.token = ?", r.PathValue("token"))
+	inv, found, err := s.invitationByToken(r.PathValue("token"))
 	if err != nil {
 		return err
 	}
@@ -134,7 +165,7 @@ func (s *Server) handleGetInvitation(w http.ResponseWriter, r *http.Request) err
 // loadOpenInvitation fetches the invitation by token and applies the checks shared by the
 // public actions. ok is false when a response was already written.
 func (s *Server) loadOpenInvitation(w http.ResponseWriter, r *http.Request, requiredStatus string) (invitationDetails, bool, error) {
-	inv, found, err := s.findInvitation("WHERE inv.token = ?", r.PathValue("token"))
+	inv, found, err := s.invitationByToken(r.PathValue("token"))
 	if err != nil || !found {
 		if err == nil {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
