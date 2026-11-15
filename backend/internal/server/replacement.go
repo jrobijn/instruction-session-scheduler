@@ -132,8 +132,9 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 	})
 
 	token := newToken()
-	if _, err := s.db.Exec("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		sessionID, replacement.ID, vacated.TimeslotID, vacated.SlotID, pick.GroupID, token, decisionLog); err != nil {
+	var newID int64
+	if err := s.db.QueryRow("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+		sessionID, replacement.ID, vacated.TimeslotID, vacated.SlotID, pick.GroupID, token, decisionLog).Scan(&newID); err != nil {
 		return nil, err
 	}
 
@@ -142,19 +143,16 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 		To: replacement.Email, StudentName: name, Date: sessionDate, Token: token,
 		ClubName: s.clubName(), Locale: s.emailLocale(),
 	})
-	if _, err := s.db.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE token = ?", token); err == nil {
-		var newID int64
-		if s.db.QueryRow("SELECT id FROM invitations WHERE token = ?", token).Scan(&newID) == nil {
-			s.scheduleExpiryForInvitation(newID)
-		}
+	if _, err := s.db.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE id = ?", newID); err == nil {
+		s.scheduleExpiryForInvitation(newID)
 	}
 
-	added, err := s.sessionInvitations(sessionDate, "WHERE inv.token = ?", token)
+	added, found, err := s.sessionInvitationByID(newID)
 	if err != nil {
 		return nil, err
 	}
-	if len(added) > 0 {
-		s.hub.Broadcast(sessionChannel(sessionID), "invitation_added", added[0])
+	if found {
+		s.hub.Broadcast(sessionChannel(sessionID), "invitation_added", added)
 	}
 	s.broadcastSessionCounts(sessionID)
 
