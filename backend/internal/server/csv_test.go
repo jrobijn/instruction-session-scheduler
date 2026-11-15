@@ -2,69 +2,55 @@ package server
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 )
 
-func TestEscapeCSVField(t *testing.T) {
-	for _, tc := range []struct {
-		in, want string
-	}{
-		{"plain", "plain"},
-		{"a,b", `"a,b"`},
-		{`say "hi"`, `"say ""hi"""`},
-		{"two\nlines", "\"two\nlines\""},
-		{"", ""},
-	} {
-		if got := escapeCSVField(tc.in); got != tc.want {
-			t.Errorf("escapeCSVField(%#v) = %q, want %q", tc.in, got, tc.want)
-		}
+func TestParseCSVImport(t *testing.T) {
+	data := "\uFEFF \"First_Name\",EMAIL \r\n" +
+		"Ann , a@x.nl\n" +
+		"\n" +
+		"  ,  \n" +
+		"\"Smith, \"\"Jr.\"\"\",\"multi\nline\"\n" +
+		"short\n"
+	in, err := parseCSVImport(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !in.has("first_name", "email") || in.has("last_name") {
+		t.Errorf("cols = %v", in.cols)
+	}
+	type row struct {
+		line         int
+		first, email string
+	}
+	var got []row
+	for _, r := range in.rows {
+		got = append(got, row{r.line, r.get("first_name"), r.get("email")})
+	}
+	want := []row{{2, "Ann", "a@x.nl"}, {5, `Smith, "Jr."`, "multi\nline"}, {7, "short", ""}}
+	if !slices.Equal(got, want) {
+		t.Errorf("rows = %+v, want %+v", got, want)
 	}
 }
 
-func TestParseCSVLine(t *testing.T) {
-	for _, tc := range []struct {
-		line string
-		want []string
-	}{
-		{"a,b,c", []string{"a", "b", "c"}},
-		{" a , b ", []string{"a", "b"}},
-		{`"a,b",c`, []string{"a,b", "c"}},
-		{`"say ""hi""",x`, []string{`say "hi"`, "x"}},
-		{"a,,c", []string{"a", "", "c"}},
-		{"a,", []string{"a", ""}},
-		{"", []string{""}},
-		{`"unterminated,x`, []string{"unterminated,x"}},
-	} {
-		if got := parseCSVLine(tc.line); !slices.Equal(got, tc.want) {
-			t.Errorf("parseCSVLine(%q) = %q, want %q", tc.line, got, tc.want)
+func TestCSVExportRoundTrip(t *testing.T) {
+	rec := httptest.NewRecorder()
+	values := []string{"Smith, Jr.", `the "best"`, " padded", "two\nlines", ""}
+	if err := writeCSV(rec, "x.csv", []string{"a", "b", "c", "d", "e"}, [][]string{values}); err != nil {
+		t.Fatal(err)
+	}
+	in, err := parseCSVImport(rec.Body.String())
+	if err != nil || len(in.rows) != 1 {
+		t.Fatalf("parse: %v, %d rows", err, len(in.rows))
+	}
+	for i, col := range []string{"a", "b", "c", "d", "e"} {
+		// get trims, so " padded" comes back as "padded"
+		if got, want := in.rows[0].get(col), strings.TrimSpace(values[i]); got != want {
+			t.Errorf("%s = %q, want %q", col, got, want)
 		}
-	}
-}
-
-func TestCSVRoundTrip(t *testing.T) {
-	values := []string{"Smith, Jr.", `the "best"`, "plain", ""}
-	got := parseCSVLine(csvRow(values...))
-	for i, v := range values {
-		if got[i] != v {
-			t.Errorf("field %d = %q, want %q", i, got[i], v)
-		}
-	}
-}
-
-func TestCSVLinesAndHeader(t *testing.T) {
-	if got := csvLines("a\r\nb\n\n  \nc"); !slices.Equal(got, []string{"a", "b", "c"}) {
-		t.Errorf("csvLines = %q", got)
-	}
-	if got := csvHeader(` "First_Name" ,EMAIL`); !slices.Equal(got, []string{"first_name", "email"}) {
-		t.Errorf("csvHeader = %q", got)
-	}
-	if indexOf([]string{"a", "b"}, "b") != 1 || indexOf([]string{"a"}, "x") != -1 {
-		t.Error("indexOf")
-	}
-	if field([]string{" x "}, 0) != "x" || field([]string{"x"}, 3) != "" || field([]string{"x"}, -1) != "" {
-		t.Error("field")
 	}
 }
 
@@ -75,6 +61,7 @@ func TestCSVImportValidation(t *testing.T) {
 		e.admin(http.MethodPost, path, map[string]any{"csv": 5}).wantError(http.StatusBadRequest, "Invalid value for csv")
 		e.admin(http.MethodPost, path, map[string]any{"csv": "name\n\n"}).
 			wantError(http.StatusBadRequest, "CSV must have a header row and at least one data row")
+		e.admin(http.MethodPost, path, map[string]any{"csv": "name\n\"a\"\"b"}).status(http.StatusBadRequest)
 	}
 }
 

@@ -244,7 +244,7 @@ func TestGroupImportExport(t *testing.T) {
 	e.admin(http.MethodPost, "/api/groups/import", map[string]any{"csv": "title\nx"}).wantError(http.StatusBadRequest, "CSV must contain a name column")
 
 	body := string(e.admin(http.MethodGet, "/api/groups/export", nil).status(http.StatusOK).Body)
-	if want := "name,is_default,active\nExisting,0,1\nNew,0,1\n\"With, comma\",0,1"; body != want {
+	if want := "name,is_default,active\nExisting,0,1\nNew,0,1\n\"With, comma\",0,1\n"; body != want {
 		t.Fatalf("export = %q, want %q", body, want)
 	}
 }

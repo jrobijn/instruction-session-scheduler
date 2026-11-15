@@ -393,7 +393,7 @@ func TestExportStudents(t *testing.T) {
 
 	body := string(e.admin(http.MethodGet, "/api/students/export", nil).status(http.StatusOK).Body)
 	want := "first_name,last_name,email,membership_id,attended_sessions,no_show_count,preferred_days,active\n" +
-		`Ann,"Lee, ""Jr""",` + e.studentEmail(s) + `,,0,0,0|1|2|3|4|5|6,1`
+		`Ann,"Lee, ""Jr""",` + e.studentEmail(s) + `,,0,0,0|1|2|3|4|5|6,1` + "\n"
 	if body != want {
 		t.Fatalf("export =\n%s\nwant\n%s", body, want)
 	}

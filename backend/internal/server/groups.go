@@ -2,7 +2,6 @@ package server
 
 import (
 	"cmp"
-	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -119,31 +118,28 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		lines := make([]string, len(groups))
+		rows := make([][]string, len(groups))
 		for i, g := range groups {
-			lines[i] = csvRow(g.Name, strconv.FormatInt(g.IsDefault, 10), strconv.FormatInt(g.Active, 10))
+			rows[i] = []string{g.Name, strconv.FormatInt(g.IsDefault, 10), strconv.FormatInt(g.Active, 10)}
 		}
-		writeCSV(w, "groups.csv", "name,is_default,active", lines)
-		return nil
+		return writeCSV(w, "groups.csv", []string{"name", "is_default", "active"}, rows)
 	})
 
 	s.adminRoute("POST /api/groups/import", func(w http.ResponseWriter, r *http.Request) error {
-		lines, ok := readCSVImport(w, r)
+		in, ok := readCSVImport(w, r)
 		if !ok {
 			return nil
 		}
-		nameIdx := indexOf(csvHeader(lines[0]), "name")
-		if nameIdx == -1 {
+		if !in.has("name") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain a name column")
 			return nil
 		}
 		result := importResult{Errors: []string{}}
 		err := s.db.InTx(func(tx *sqlx.Tx) error {
-			for i := 1; i < len(lines); i++ {
-				name := field(parseCSVLine(lines[i]), nameIdx)
+			for _, row := range in.rows {
+				name := row.get("name")
 				if name == "" {
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: missing name", i+1))
-					result.Skipped++
+					result.skip(row, "missing name")
 					continue
 				}
 				_, found, err := db.One[int64](tx, "SELECT id FROM groups WHERE name = ?", name)
@@ -157,8 +153,7 @@ func (s *Server) groupRoutes() {
 				_, err = tx.Exec("INSERT INTO groups (name) VALUES (?)", name)
 				switch {
 				case isUniqueErr(err):
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: A group with this name already exists", i+1))
-					result.Skipped++
+					result.skip(row, "A group with this name already exists")
 				case err != nil:
 					return err
 				default:

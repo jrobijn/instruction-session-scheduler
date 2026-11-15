@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -47,34 +46,29 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
-		lines := make([]string, len(instructors))
+		rows := make([][]string, len(instructors))
 		for i, in := range instructors {
-			lines[i] = csvRow(in.FirstName, in.LastName, in.Email, strconv.FormatInt(in.Active, 10))
+			rows[i] = []string{in.FirstName, in.LastName, in.Email, strconv.FormatInt(in.Active, 10)}
 		}
-		writeCSV(w, "instructors.csv", "first_name,last_name,email,active", lines)
-		return nil
+		return writeCSV(w, "instructors.csv", []string{"first_name", "last_name", "email", "active"}, rows)
 	})
 
 	s.adminRoute("POST /api/instructors/import", func(w http.ResponseWriter, r *http.Request) error {
-		lines, ok := readCSVImport(w, r)
+		in, ok := readCSVImport(w, r)
 		if !ok {
 			return nil
 		}
-		header := csvHeader(lines[0])
-		firstIdx, lastIdx, emailIdx := indexOf(header, "first_name"), indexOf(header, "last_name"), indexOf(header, "email")
-		if firstIdx == -1 || lastIdx == -1 || emailIdx == -1 {
+		if !in.has("first_name", "last_name", "email") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
 			return nil
 		}
 
 		result := importResult{Errors: []string{}}
 		err := s.db.InTx(func(tx *sqlx.Tx) error {
-			for i := 1; i < len(lines); i++ {
-				fields := parseCSVLine(lines[i])
-				first, last, email := field(fields, firstIdx), field(fields, lastIdx), field(fields, emailIdx)
+			for _, row := range in.rows {
+				first, last, email := row.get("first_name"), row.get("last_name"), row.get("email")
 				if first == "" || last == "" || email == "" {
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: missing required fields", i+1))
-					result.Skipped++
+					result.skip(row, "missing required fields")
 					continue
 				}
 				id, found, err := db.One[int64](tx, "SELECT id FROM instructors WHERE email = ? AND deleted_at IS NULL", email)
@@ -87,8 +81,7 @@ func (s *Server) instructorRoutes() {
 					_, err = tx.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)", first, last, email)
 				}
 				if isUniqueErr(err) { // the email belongs to a deleted instructor
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: An instructor with this email already exists", i+1))
-					result.Skipped++
+					result.skip(row, "An instructor with this email already exists")
 					continue
 				}
 				if err != nil {

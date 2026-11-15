@@ -102,13 +102,13 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
-		lines := make([]string, len(students))
+		rows := make([][]string, len(students))
 		for i, st := range students {
-			lines[i] = csvRow(st.FirstName, st.LastName, st.Email, st.MembershipID,
-				strconv.FormatInt(st.AttendedSessions, 10), strconv.FormatInt(st.NoShowCount, 10), st.PreferredDays, strconv.FormatInt(st.Active, 10))
+			rows[i] = []string{st.FirstName, st.LastName, st.Email, st.MembershipID,
+				strconv.FormatInt(st.AttendedSessions, 10), strconv.FormatInt(st.NoShowCount, 10), st.PreferredDays, strconv.FormatInt(st.Active, 10)}
 		}
-		writeCSV(w, "students.csv", "first_name,last_name,email,membership_id,attended_sessions,no_show_count,preferred_days,active", lines)
-		return nil
+		header := []string{"first_name", "last_name", "email", "membership_id", "attended_sessions", "no_show_count", "preferred_days", "active"}
+		return writeCSV(w, "students.csv", header, rows)
 	})
 
 	s.adminRoute("POST /api/students/import", s.handleImportStudents)
@@ -561,18 +561,14 @@ func (s *Server) handleListStudents(w http.ResponseWriter, r *http.Request) erro
 }
 
 func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) error {
-	lines, ok := readCSVImport(w, r)
+	in, ok := readCSVImport(w, r)
 	if !ok {
 		return nil
 	}
-	header := csvHeader(lines[0])
-	idx := func(name string) int { return indexOf(header, name) }
-	firstIdx, lastIdx, emailIdx := idx("first_name"), idx("last_name"), idx("email")
-	if firstIdx == -1 || lastIdx == -1 || emailIdx == -1 {
+	if !in.has("first_name", "last_name", "email") {
 		httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
 		return nil
 	}
-	membershipIdx, attendedIdx, noShowIdx, daysIdx, activeIdx := idx("membership_id"), idx("attended_sessions"), idx("no_show_count"), idx("preferred_days"), idx("active")
 
 	result := importResult{Errors: []string{}}
 	err := s.db.InTx(func(tx *sqlx.Tx) error {
@@ -583,49 +579,42 @@ func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) er
 			return err
 		}
 
-		for i := 1; i < len(lines); i++ {
-			fields := parseCSVLine(lines[i])
-			first, last, email := field(fields, firstIdx), field(fields, lastIdx), field(fields, emailIdx)
+		for _, row := range in.rows {
+			first, last, email := row.get("first_name"), row.get("last_name"), row.get("email")
 			if first == "" || last == "" || email == "" {
-				result.Errors = append(result.Errors, fmt.Sprintf("Row %d: missing required fields", i+1))
-				result.Skipped++
+				result.skip(row, "missing required fields")
 				continue
 			}
-			membershipID := field(fields, membershipIdx)
+			membershipID := row.get("membership_id")
 
 			// Optional columns: written only when the value is not blank. A number column
 			// holding anything but a whole number makes the row an error.
 			var cols []string
 			var vals []any
 			invalid := ""
-			for _, c := range []struct {
-				name string
-				idx  int
-			}{{"attended_sessions", attendedIdx}, {"no_show_count", noShowIdx}, {"active", activeIdx}} {
-				v := field(fields, c.idx)
+			for _, c := range []string{"attended_sessions", "no_show_count", "active"} {
+				v := row.get(c)
 				if v == "" {
 					continue
 				}
 				n, err := strconv.Atoi(v)
 				if err != nil {
-					invalid = fmt.Sprintf("%s must be a whole number, got %q", c.name, v)
+					invalid = fmt.Sprintf("%s must be a whole number, got %q", c, v)
 					break
 				}
-				cols, vals = append(cols, c.name), append(vals, n)
+				cols, vals = append(cols, c), append(vals, n)
 			}
 			if invalid != "" {
-				result.Errors = append(result.Errors, fmt.Sprintf("Row %d: %s", i+1, invalid))
-				result.Skipped++
+				result.skip(row, "%s", invalid)
 				continue
 			}
-			if d := field(fields, daysIdx); d != "" {
+			if d := row.get("preferred_days"); d != "" {
 				cols, vals = append(cols, "preferred_days"), append(vals, d)
 			}
 
 			err := importStudentRow(tx, first, last, email, membershipID, cols, vals, defaultGroup)
 			if isUniqueErr(err) { // the email belongs to a deleted student
-				result.Errors = append(result.Errors, fmt.Sprintf("Row %d: A student with this email already exists", i+1))
-				result.Skipped++
+				result.skip(row, "A student with this email already exists")
 				continue
 			}
 			if err != nil {

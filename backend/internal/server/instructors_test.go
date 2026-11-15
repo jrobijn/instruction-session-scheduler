@@ -124,7 +124,7 @@ func TestInstructorImportExport(t *testing.T) {
 		t.Fatalf("import = %v", res)
 	}
 	body := string(e.admin(http.MethodGet, "/api/instructors/export", nil).status(http.StatusOK).Body)
-	if want := "first_name,last_name,email,active\nNew,Name,old@example.test,1\nBo,Ng,bo@example.test,1"; body != want {
+	if want := "first_name,last_name,email,active\nNew,Name,old@example.test,1\nBo,Ng,bo@example.test,1\n"; body != want {
 		t.Fatalf("export = %q", body)
 	}
 	e.admin(http.MethodPost, "/api/instructors/import", map[string]any{"csv": "name\nx"}).

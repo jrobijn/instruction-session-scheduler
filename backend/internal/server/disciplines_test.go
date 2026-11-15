@@ -52,12 +52,12 @@ func TestDisciplineImportExport(t *testing.T) {
 	e.discipline("Kayak")
 	csv := "name,abbreviation\nKayak,KY\nCanoe,C\n,X"
 	res := e.admin(http.MethodPost, "/api/disciplines/import", map[string]any{"csv": csv}).status(http.StatusOK).object()
-	// Updating an existing discipline counts as skipped.
-	if res["imported"] != 1.0 || res["skipped"] != 2.0 {
+	// Updating an existing discipline counts as imported.
+	if res["imported"] != 2.0 || res["skipped"] != 1.0 {
 		t.Fatalf("import = %v", res)
 	}
 	body := string(e.admin(http.MethodGet, "/api/disciplines/export", nil).status(http.StatusOK).Body)
-	if want := "name,abbreviation,active\nCanoe,C,1\nKayak,KY,1"; body != want {
+	if want := "name,abbreviation,active\nCanoe,C,1\nKayak,KY,1\n"; body != want {
 		t.Fatalf("export = %q", body)
 	}
 }

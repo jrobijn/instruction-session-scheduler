@@ -1,108 +1,86 @@
 package server
 
 import (
+	"encoding/csv"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
-// These helpers reproduce the hand-written CSV handling of the TS routes exactly, so
-// imports and exports behave identically (encoding/csv is stricter about quoting).
-
-func escapeCSVField(s string) string {
-	if strings.ContainsAny(s, ",\"\n") {
-		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-	}
-	return s
-}
-
-func csvRow(values ...string) string {
-	parts := make([]string, len(values))
-	for i, v := range values {
-		parts[i] = escapeCSVField(v)
-	}
-	return strings.Join(parts, ",")
-}
-
-func writeCSV(w http.ResponseWriter, filename, header string, rows []string) {
+// writeCSV sends header and rows as a CSV file download.
+func writeCSV(w http.ResponseWriter, filename string, header []string, rows [][]string) error {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	w.Write([]byte(strings.Join(append([]string{header}, rows...), "\n")))
+	cw := csv.NewWriter(w)
+	cw.Write(header)
+	cw.WriteAll(rows) // flushes
+	return cw.Error()
 }
 
-var lineSplit = regexp.MustCompile(`\r?\n`)
+// csvImport is a parsed CSV upload: one entry per non-blank data row.
+type csvImport struct {
+	cols map[string]int // lowercased, trimmed header name -> field index
+	rows []csvRecord
+}
 
-// csvLines splits on newlines and drops blank lines.
-func csvLines(csv string) []string {
-	var out []string
-	for _, l := range lineSplit.Split(csv, -1) {
-		if strings.TrimSpace(l) != "" {
-			out = append(out, l)
+type csvRecord struct {
+	line   int // line number in the uploaded file, for error messages
+	cols   map[string]int
+	fields []string
+}
+
+// has reports whether the header contains all of the named columns.
+func (c csvImport) has(names ...string) bool {
+	for _, n := range names {
+		if _, ok := c.cols[n]; !ok {
+			return false
 		}
 	}
-	return out
+	return true
 }
 
-// csvHeader lowercases, trims and strips one pair of surrounding quotes from each column name.
-func csvHeader(line string) []string {
-	cols := strings.Split(strings.ToLower(line), ",")
-	for i, c := range cols {
-		c = strings.TrimSpace(c)
-		c = strings.TrimPrefix(c, `"`)
-		c = strings.TrimSuffix(c, `"`)
-		cols[i] = c
-	}
-	return cols
-}
-
-func indexOf(cols []string, name string) int {
-	for i, c := range cols {
-		if c == name {
-			return i
-		}
-	}
-	return -1
-}
-
-func parseCSVLine(line string) []string {
-	var fields []string
-	var cur strings.Builder
-	inQuotes := false
-	for i := 0; i < len(line); i++ {
-		ch := line[i]
-		if inQuotes {
-			switch {
-			case ch == '"' && i+1 < len(line) && line[i+1] == '"':
-				cur.WriteByte('"')
-				i++
-			case ch == '"':
-				inQuotes = false
-			default:
-				cur.WriteByte(ch)
-			}
-		} else {
-			switch ch {
-			case '"':
-				inQuotes = true
-			case ',':
-				fields = append(fields, strings.TrimSpace(cur.String()))
-				cur.Reset()
-			default:
-				cur.WriteByte(ch)
-			}
-		}
-	}
-	return append(fields, strings.TrimSpace(cur.String()))
-}
-
-// field returns fields[idx] trimmed, or "" when the index is out of range or negative.
-func field(fields []string, idx int) string {
-	if idx < 0 || idx >= len(fields) {
+// get returns the trimmed value of the named column, or "" when the column is absent or
+// the row is too short.
+func (r csvRecord) get(col string) string {
+	i, ok := r.cols[col]
+	if !ok || i >= len(r.fields) {
 		return ""
 	}
-	return strings.TrimSpace(fields[idx])
+	return strings.TrimSpace(r.fields[i])
+}
+
+func parseCSVImport(data string) (csvImport, error) {
+	rd := csv.NewReader(strings.NewReader(strings.TrimPrefix(data, "\uFEFF")))
+	rd.FieldsPerRecord = -1 // rows may be shorter or longer than the header
+	rd.TrimLeadingSpace = true
+
+	in := csvImport{cols: map[string]int{}}
+	first := true
+	for {
+		rec, err := rd.Read()
+		if errors.Is(err, io.EOF) {
+			return in, nil
+		}
+		if err != nil {
+			return in, err
+		}
+		if first {
+			for i, c := range rec {
+				in.cols[strings.ToLower(strings.TrimSpace(c))] = i
+			}
+			first = false
+			continue
+		}
+		if strings.TrimSpace(strings.Join(rec, "")) == "" {
+			continue
+		}
+		line, _ := rd.FieldPos(0)
+		in.rows = append(in.rows, csvRecord{line: line, cols: in.cols, fields: rec})
+	}
 }
 
 type importResult struct {
@@ -111,25 +89,34 @@ type importResult struct {
 	Errors   []string `json:"errors"`
 }
 
-// readCSVImport validates the {csv} body shared by all import endpoints. It returns the
-// non-blank lines, or writes a 400 and returns ok=false.
-func readCSVImport(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+// skip counts row as skipped and records why.
+func (res *importResult) skip(row csvRecord, format string, args ...any) {
+	res.Errors = append(res.Errors, fmt.Sprintf("Row %d: ", row.line)+fmt.Sprintf(format, args...))
+	res.Skipped++
+}
+
+// readCSVImport decodes and parses the {csv} body shared by all import endpoints, or
+// writes a 400 and returns ok=false.
+func readCSVImport(w http.ResponseWriter, r *http.Request) (csvImport, bool) {
 	type request struct {
 		CSV string `json:"csv"`
 	}
-	in, ok := decode[request](w, r)
+	body, ok := decode[request](w, r)
 	if !ok {
-		return nil, false
+		return csvImport{}, false
 	}
-	csv := in.CSV
-	if csv == "" {
+	if body.CSV == "" {
 		httpx.Error(w, http.StatusBadRequest, "CSV data is required")
-		return nil, false
+		return csvImport{}, false
 	}
-	lines := csvLines(csv)
-	if len(lines) < 2 {
+	in, err := parseCSVImport(body.CSV)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "Invalid CSV: "+err.Error())
+		return csvImport{}, false
+	}
+	if len(in.rows) == 0 {
 		httpx.Error(w, http.StatusBadRequest, "CSV must have a header row and at least one data row")
-		return nil, false
+		return csvImport{}, false
 	}
-	return lines, true
+	return in, true
 }

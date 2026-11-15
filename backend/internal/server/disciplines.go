@@ -1,8 +1,6 @@
 package server
 
 import (
-	"database/sql"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -76,56 +74,45 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
-		lines := make([]string, len(disciplines))
+		rows := make([][]string, len(disciplines))
 		for i, d := range disciplines {
-			lines[i] = csvRow(d.Name, d.Abbreviation, strconv.FormatInt(d.Active, 10))
+			rows[i] = []string{d.Name, d.Abbreviation, strconv.FormatInt(d.Active, 10)}
 		}
-		writeCSV(w, "disciplines.csv", "name,abbreviation,active", lines)
-		return nil
+		return writeCSV(w, "disciplines.csv", []string{"name", "abbreviation", "active"}, rows)
 	})
 
 	s.adminRoute("POST /api/disciplines/import", func(w http.ResponseWriter, r *http.Request) error {
-		lines, ok := readCSVImport(w, r)
+		in, ok := readCSVImport(w, r)
 		if !ok {
 			return nil
 		}
-		header := csvHeader(lines[0])
-		nameIdx, abbrIdx := indexOf(header, "name"), indexOf(header, "abbreviation")
-		if nameIdx == -1 {
+		if !in.has("name") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain a name column")
 			return nil
 		}
 
 		result := importResult{Errors: []string{}}
 		err := s.db.InTx(func(tx *sqlx.Tx) error {
-			for i := 1; i < len(lines); i++ {
-				fields := parseCSVLine(lines[i])
-				name, abbr := field(fields, nameIdx), field(fields, abbrIdx)
+			for _, row := range in.rows {
+				name, abbr := row.get("name"), row.get("abbreviation")
 				if name == "" {
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: missing name", i+1))
-					result.Skipped++
+					result.skip(row, "missing name")
 					continue
 				}
-				var id int64
-				var err error
-				existing := false
-				switch scanErr := tx.QueryRow("SELECT id FROM disciplines WHERE name = ?", name).Scan(&id); scanErr {
-				case nil:
-					existing = true
+				id, found, err := db.One[int64](tx, "SELECT id FROM disciplines WHERE name = ?", name)
+				if err != nil {
+					return err
+				}
+				if found {
 					_, err = tx.Exec("UPDATE disciplines SET abbreviation = ? WHERE id = ?", abbr, id)
-				case sql.ErrNoRows:
+				} else {
 					_, err = tx.Exec("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)", name, abbr)
-				default:
-					err = scanErr
 				}
 				switch {
 				case isUniqueErr(err):
-					result.Errors = append(result.Errors, fmt.Sprintf("Row %d: A discipline with this name already exists", i+1))
-					result.Skipped++
+					result.skip(row, "A discipline with this name already exists")
 				case err != nil:
 					return err
-				case existing: // updating an existing discipline counts as skipped in the TS version
-					result.Skipped++
 				default:
 					result.Imported++
 				}
