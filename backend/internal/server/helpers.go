@@ -38,27 +38,6 @@ func decode[T any](r *http.Request) (T, error) {
 	return v, nil
 }
 
-// optional is a request field that tells a missing key (Set false) from null (Set true,
-// Value nil). Use it only where null means something other than "leave unchanged".
-type optional[T any] struct {
-	Set   bool
-	Value *T
-}
-
-func (o *optional[T]) UnmarshalJSON(data []byte) error {
-	o.Set = true
-	if string(data) == "null" {
-		o.Value = nil
-		return nil
-	}
-	var v T
-	if err := json.Unmarshal(data, &v); err != nil {
-		return err
-	}
-	o.Value = &v
-	return nil
-}
-
 // deref returns *p, or "" for a NULL column.
 func deref(p *string) string {
 	if p == nil {

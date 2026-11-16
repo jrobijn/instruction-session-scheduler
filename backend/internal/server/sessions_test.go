@@ -167,34 +167,47 @@ func TestUpdateSession(t *testing.T) {
 		t.Fatalf("updated = %v", got)
 	}
 
+	// The general update ignores timetable_id and status; both have their own endpoints.
+	other, _ := f.testEnv.timetable("09:00")
+	got = f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": other, "status": "completed"}).status(http.StatusOK).object()
+	if toInt64(got["timetable_id"]) != f.timetable || got["status"] != "draft" {
+		t.Fatalf("timetable_id = %v, status = %v; want unchanged %d, draft", got["timetable_id"], got["status"], f.timetable)
+	}
+
+	f.admin(http.MethodPut, "/api/sessions/999", map[string]any{}).wantError(http.StatusNotFound, "Training session not found")
+}
+
+func TestChangeSessionTimetable(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	f.student("A", g)
+	path := sessionPath(f.sessionID, "timetable")
+
 	// Changing the timetable of a scheduled session clears its schedule.
 	f.generate().status(http.StatusOK)
 	other, _ := f.testEnv.timetable("09:00")
-	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": other}).status(http.StatusOK)
+	got := f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK).object()
+	if toInt64(got["timetable_id"]) != other {
+		t.Fatalf("timetable_id = %v, want %d", got["timetable_id"], other)
+	}
 	if n := len(f.invitationRows()); n != 0 || f.sessionStatus(f.sessionID) != "draft" {
 		t.Fatalf("after timetable change: %d invitations, status %s", n, f.sessionStatus(f.sessionID))
 	}
 
-	// Null removes the timetable; leaving the key out keeps the current one.
-	got = f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": nil}).status(http.StatusOK).object()
+	// Null removes the timetable.
+	got = f.admin(http.MethodPut, path, map[string]any{"timetable_id": nil}).status(http.StatusOK).object()
 	if got["timetable_id"] != nil {
 		t.Fatalf("timetable_id = %v after null, want none", got["timetable_id"])
 	}
-	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": other}).status(http.StatusOK)
-	got = f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"notes": "Kept"}).status(http.StatusOK).object()
-	if toInt64(got["timetable_id"]) != other {
-		t.Fatalf("timetable_id = %v without the key, want %d", got["timetable_id"], other)
-	}
 
 	// Same timetable again is not a change.
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK)
 	f.exec("UPDATE training_sessions SET status = 'invitations_sent'")
-	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": other}).status(http.StatusOK)
-	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": f.timetable}).
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK)
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": f.timetable}).
 		wantError(http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
-	f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": nil}).
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": nil}).
 		wantError(http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
-
-	f.admin(http.MethodPut, "/api/sessions/999", map[string]any{}).wantError(http.StatusNotFound, "Training session not found")
 }
 
 func TestDeleteSession(t *testing.T) {
@@ -589,6 +602,7 @@ func TestSessionRoutesRejectBadInput(t *testing.T) {
 		notFound("GET", "/api/sessions/x/events", nil, "Not found"),
 		notFound("PUT", "/api/sessions/x", nil, "Training session not found"),
 		notFound("DELETE", "/api/sessions/x", nil, "Training session not found"),
+		notFound("PUT", "/api/sessions/x/timetable", nil, "Training session not found"),
 		notFound("POST", "/api/sessions/x/instructors", map[string]any{"instructor_id": in}, "Training session not found"),
 		notFound("DELETE", p("/api/sessions/x/instructors/%d", in), nil, "Training session not found"),
 		notFound("DELETE", p("/api/sessions/%d/instructors/x", se), nil, "Assignment not found"),
@@ -610,6 +624,7 @@ func TestSessionRoutesRejectBadInput(t *testing.T) {
 		notFound("POST", "/api/sessions/x/reactivate", nil, "Training session not found"),
 		badJSON("POST", "/api/sessions"),
 		badJSON("PUT", p("/api/sessions/%d", se)),
+		badJSON("PUT", p("/api/sessions/%d/timetable", se)),
 		badJSON("POST", p("/api/sessions/%d/instructors", se)),
 		badJSON("POST", p("/api/sessions/%d/instructors/%d/replace", se, in)),
 		badJSON("POST", p("/api/sessions/%d/invitations", se)),

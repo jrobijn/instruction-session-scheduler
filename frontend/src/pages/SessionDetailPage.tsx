@@ -343,7 +343,7 @@ export default function SessionDetailPage() {
       if (!await confirm({ title: t.timetableSection, message: t.confirmTimetableChange })) return;
     }
     try {
-      await api.updateSession(String(id), { timetable_id: newTtId });
+      await api.setSessionTimetable(String(id), newTtId);
       load();
     } catch (err: any) {
       toast(err.message);

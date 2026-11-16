@@ -207,12 +207,53 @@ func (s *Server) sessionRoutes() {
 
 	s.adminRoute("PUT /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) error {
 		type request struct {
-			Date   *string `json:"date"`
-			Notes  *string `json:"notes"`
-			Status *string `json:"status"`
-			// Missing: unchanged. Null: no timetable. A different timetable (or none) clears
-			// the schedule.
-			TimetableID optional[int64] `json:"timetable_id"`
+			Date  *string `json:"date"`
+			Notes *string `json:"notes"`
+		}
+		in, err := decode[request](r)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
+		}
+		session, found, err := s.loadSession(r)
+		if err != nil {
+			return err
+		}
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		var dow any
+		if in.Date != nil {
+			d, valid := dayOfWeek(*in.Date)
+			if !valid {
+				httpx.Error(w, http.StatusBadRequest, "Invalid date")
+				return nil
+			}
+			dow = d
+		}
+		row, err := db.Get[Session](s.db, `
+			UPDATE training_sessions SET
+				date = COALESCE(?, date),
+				day_of_week = COALESCE(?, day_of_week),
+				notes = COALESCE(?, notes)
+			WHERE id = ?
+			RETURNING id, date, status, timetable_id, notes`,
+			in.Date, dow, in.Notes, session.ID)
+		if isUniqueErr(err, "training_sessions.date") {
+			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		httpx.OK(w, row)
+		return nil
+	})
+
+	s.adminRoute("PUT /api/sessions/{id}/timetable", func(w http.ResponseWriter, r *http.Request) error {
+		type request struct {
+			TimetableID *int64 `json:"timetable_id"` // null or missing: no timetable
 		}
 		in, err := decode[request](r)
 		if err != nil {
@@ -228,16 +269,7 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		id := session.ID
-		var dow any
-		if in.Date != nil {
-			d, valid := dayOfWeek(*in.Date)
-			if !valid {
-				httpx.Error(w, http.StatusBadRequest, "Invalid date")
-				return nil
-			}
-			dow = d
-		}
-		if in.TimetableID.Set && !session.sameTimetable(in.TimetableID.Value) {
+		if !session.sameTimetable(in.TimetableID) {
 			switch session.Status {
 			case "invitations_sent", "completed":
 				httpx.Error(w, http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
@@ -253,19 +285,9 @@ func (s *Server) sessionRoutes() {
 			}
 		}
 		row, err := db.Get[Session](s.db, `
-			UPDATE training_sessions SET
-				date = COALESCE(?, date),
-				day_of_week = COALESCE(?, day_of_week),
-				notes = COALESCE(?, notes),
-				status = COALESCE(?, status),
-				timetable_id = CASE WHEN ? THEN ? ELSE timetable_id END
-			WHERE id = ?
+			UPDATE training_sessions SET timetable_id = ? WHERE id = ?
 			RETURNING id, date, status, timetable_id, notes`,
-			in.Date, dow, in.Notes, in.Status, in.TimetableID.Set, in.TimetableID.Value, id)
-		if isUniqueErr(err, "training_sessions.date") {
-			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
-			return nil
-		}
+			in.TimetableID, id)
 		if err != nil {
 			return err
 		}
