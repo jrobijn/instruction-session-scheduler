@@ -48,14 +48,6 @@ type GroupRef struct {
 	Name string `db:"name" json:"name"`
 }
 
-// GroupSummary is a group as listed for a discipline.
-type GroupSummary struct {
-	ID        int64  `db:"id" json:"id"`
-	Name      string `db:"name" json:"name"`
-	IsDefault int64  `db:"is_default" json:"is_default"`
-	Active    int64  `db:"active" json:"active"`
-}
-
 // GroupMember is a member in a group's queue, with what only the group page shows.
 type GroupMember struct {
 	queue.Member

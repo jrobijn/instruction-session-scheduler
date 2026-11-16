@@ -265,7 +265,13 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		groups, err := db.Many[GroupSummary](s.db, `
+		type groupSummary struct {
+			ID        int64  `db:"id" json:"id"`
+			Name      string `db:"name" json:"name"`
+			IsDefault int64  `db:"is_default" json:"is_default"`
+			Active    int64  `db:"active" json:"active"`
+		}
+		groups, err := db.Many[groupSummary](s.db, `
 			SELECT g.id, g.name, g.is_default, g.active
 			FROM groups g
 			JOIN discipline_groups dg ON dg.group_id = g.id
