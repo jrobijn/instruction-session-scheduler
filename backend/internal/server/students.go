@@ -195,8 +195,10 @@ func (s *Server) studentRoutes() {
 		if in.PreferredDays != "" {
 			cols, vals = append(cols, "preferred_days"), append(vals, in.PreferredDays)
 		}
-		var studentID int64
-		err = s.db.QueryRow("INSERT INTO students ("+strings.Join(cols, ", ")+") VALUES ("+placeholders(len(cols))+") RETURNING id", vals...).Scan(&studentID)
+		row, err := db.Get[Student](s.db, `
+			INSERT INTO students (`+strings.Join(cols, ", ")+`) VALUES (`+placeholders(len(cols))+`)
+			RETURNING id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
+				preferred_days, active, cooldown_until`, vals...)
 		if isUniqueErr(err, "students.email") {
 			httpx.Error(w, http.StatusConflict, "A student with this email already exists")
 			return nil
@@ -208,15 +210,11 @@ func (s *Server) studentRoutes() {
 		var defaultGroup int64
 		switch err := s.db.QueryRow("SELECT id FROM groups WHERE is_default = 1").Scan(&defaultGroup); err {
 		case nil:
-			if _, err := s.db.Exec("INSERT OR IGNORE INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", studentID, defaultGroup); err != nil {
+			if _, err := s.db.Exec("INSERT OR IGNORE INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", row.ID, defaultGroup); err != nil {
 				return err
 			}
 		case sql.ErrNoRows:
 		default:
-			return err
-		}
-		row, _, err := s.getStudent(studentID)
-		if err != nil {
 			return err
 		}
 		httpx.JSON(w, http.StatusCreated, row)
@@ -249,8 +247,10 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+		var row Student
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
-			if _, err := tx.Exec(`
+			var err error
+			if row, err = db.Get[Student](tx, `
 				UPDATE students SET
 					first_name = COALESCE(?, first_name),
 					last_name = COALESCE(?, last_name),
@@ -259,7 +259,9 @@ func (s *Server) studentRoutes() {
 					attended_sessions = COALESCE(?, attended_sessions),
 					active = COALESCE(?, active),
 					preferred_days = COALESCE(?, preferred_days)
-				WHERE id = ?`,
+				WHERE id = ?
+				RETURNING id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
+					preferred_days, active, cooldown_until`,
 				in.FirstName, in.LastName, in.Email, in.MembershipID,
 				in.AttendedSessions, in.Active, in.PreferredDays, id); err != nil {
 				return err
@@ -276,10 +278,6 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusConflict, "A student with this email already exists")
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		row, _, err := s.getStudent(id)
 		if err != nil {
 			return err
 		}
@@ -471,19 +469,23 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "A positive number of days is required")
 			return nil
 		}
-		id, err := s.requireStudent(r)
+		id, err := pathID(r, "id", "Student not found")
 		if err != nil {
 			return err
 		}
 		// new Date(Date.now() + days * 864e5).toISOString() truncated to whole seconds, UTC.
 		ms := math.Trunc(float64(time.Now().UnixMilli()) + days*24*60*60*1000)
 		cooldownUntil := time.UnixMilli(int64(ms)).UTC().Format(time.DateTime)
-		if _, err := s.db.Exec("UPDATE students SET cooldown_until = ? WHERE id = ?", cooldownUntil, id); err != nil {
-			return err
-		}
-		row, _, err := s.getStudent(id)
+		row, found, err := db.One[Student](s.db, `
+			UPDATE students SET cooldown_until = ? WHERE id = ? AND deleted_at IS NULL
+			RETURNING id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
+				preferred_days, active, cooldown_until`, cooldownUntil, id)
 		if err != nil {
 			return err
+		}
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		httpx.OK(w, row)
 		return nil
@@ -498,7 +500,10 @@ func (s *Server) studentRoutes() {
 		if _, err := s.db.Exec("UPDATE students SET cooldown_until = datetime('now') WHERE id = ? AND cooldown_until > datetime('now')", id); err != nil {
 			return err
 		}
-		row, _, err := s.getStudent(id)
+		row, err := db.Get[Student](s.db, `
+			SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
+				preferred_days, active, cooldown_until
+			FROM students WHERE id = ?`, id)
 		if err != nil {
 			return err
 		}

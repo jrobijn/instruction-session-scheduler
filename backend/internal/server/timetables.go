@@ -113,8 +113,8 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
-		var id int64
-		if err := s.db.QueryRow("INSERT INTO timetables (name) VALUES (?) RETURNING id", in.Name).Scan(&id); err != nil {
+		row, err := db.Get[Timetable](s.db, "INSERT INTO timetables (name) VALUES (?) RETURNING id, name, status, is_default, active", in.Name)
+		if err != nil {
 			return err
 		}
 		// Auto-assign the default group at 100%.
@@ -123,13 +123,9 @@ func (s *Server) timetableRoutes() {
 			return err
 		}
 		if found {
-			if _, err := s.db.Exec("INSERT INTO timetable_groups (timetable_id, group_id, percentage, position) VALUES (?, ?, 100, 0)", id, defaultGroup); err != nil {
+			if _, err := s.db.Exec("INSERT INTO timetable_groups (timetable_id, group_id, percentage, position) VALUES (?, ?, 100, 0)", row.ID, defaultGroup); err != nil {
 				return err
 			}
-		}
-		row, _, err := s.getTimetable(id)
-		if err != nil {
-			return err
 		}
 		httpx.JSON(w, http.StatusCreated, row)
 		return nil
@@ -147,21 +143,16 @@ func (s *Server) timetableRoutes() {
 		if err != nil {
 			return err
 		}
-		id := t.ID
 		if in.Name != nil {
 			if t.Status != "draft" {
 				httpx.Error(w, http.StatusBadRequest, "Cannot edit a saved timetable")
 				return nil
 			}
-			if _, err := s.db.Exec("UPDATE timetables SET name = ? WHERE id = ?", *in.Name, id); err != nil {
+			if t, err = db.Get[Timetable](s.db, "UPDATE timetables SET name = ? WHERE id = ? RETURNING id, name, status, is_default, active", *in.Name, t.ID); err != nil {
 				return err
 			}
 		}
-		row, _, err := s.getTimetable(id)
-		if err != nil {
-			return err
-		}
-		httpx.OK(w, row)
+		httpx.OK(w, t)
 		return nil
 	})
 
@@ -199,10 +190,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, fmt.Sprintf("Group percentages must add up to 100%% (currently %d%%)", total))
 			return nil
 		}
-		if _, err := s.db.Exec("UPDATE timetables SET status = 'saved' WHERE id = ?", id); err != nil {
-			return err
-		}
-		row, _, err := s.getTimetable(id)
+		row, err := db.Get[Timetable](s.db, "UPDATE timetables SET status = 'saved' WHERE id = ? RETURNING id, name, status, is_default, active", id)
 		if err != nil {
 			return err
 		}
@@ -399,7 +387,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify timeslots of a saved timetable")
 			return nil
 		}
-		row, _, err := db.One[Timeslot](s.db, "INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id, timetable_id, start_time", t.ID, in.StartTime)
+		row, err := db.Get[Timeslot](s.db, "INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id, timetable_id, start_time", t.ID, in.StartTime)
 		if isUniqueErr(err, "timeslots.timetable_id", "timeslots.start_time") {
 			httpx.Error(w, http.StatusConflict, "A timeslot with this start time already exists in this timetable")
 			return nil

@@ -191,16 +191,12 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Invalid date")
 			return nil
 		}
-		var id int64
-		err = s.db.QueryRow("INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?) RETURNING id", in.Date, dow, nonEmpty(in.Notes), ttID).Scan(&id)
+		row, err := db.Get[Session](s.db, "INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?) RETURNING id, date, status, timetable_id, notes",
+			in.Date, dow, nonEmpty(in.Notes), ttID)
 		if isUniqueErr(err, "training_sessions.date") {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		row, _, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -250,23 +246,20 @@ func (s *Server) sessionRoutes() {
 				}
 			}
 		}
-		_, err = s.db.Exec(`
+		row, err := db.Get[Session](s.db, `
 			UPDATE training_sessions SET
 				date = COALESCE(?, date),
 				day_of_week = COALESCE(?, day_of_week),
 				notes = COALESCE(?, notes),
 				status = COALESCE(?, status),
 				timetable_id = CASE WHEN ? THEN ? ELSE timetable_id END
-			WHERE id = ?`,
+			WHERE id = ?
+			RETURNING id, date, status, timetable_id, notes`,
 			in.Date, dow, in.Notes, in.Status, in.TimetableID.Set, in.TimetableID.Value, id)
 		if isUniqueErr(err, "training_sessions.date") {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		row, _, err := s.getSession(id)
 		if err != nil {
 			return err
 		}

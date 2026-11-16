@@ -129,17 +129,12 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
 			return nil
 		}
-		var id int64
-		err = s.db.QueryRow("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id",
-			in.FirstName, in.LastName, in.Email).Scan(&id)
+		row, err := db.Get[Instructor](s.db, "INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id, first_name, last_name, email, active",
+			in.FirstName, in.LastName, in.Email)
 		if isUniqueErr(err, "instructors.email") {
 			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		row, _, err := s.getInstructor(id)
 		if err != nil {
 			return err
 		}
@@ -162,17 +157,14 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
-		if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id) {
-			httpx.Error(w, http.StatusNotFound, "Instructor not found")
-			return nil
-		}
-		_, err = s.db.Exec(`
+		row, found, err := db.One[Instructor](s.db, `
 			UPDATE instructors SET
 				first_name = COALESCE(?, first_name),
 				last_name = COALESCE(?, last_name),
 				email = COALESCE(?, email),
 				active = COALESCE(?, active)
-			WHERE id = ?`,
+			WHERE id = ? AND deleted_at IS NULL
+			RETURNING id, first_name, last_name, email, active`,
 			in.FirstName, in.LastName, in.Email, in.Active, id)
 		if isUniqueErr(err, "instructors.email") {
 			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
@@ -181,9 +173,9 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
-		row, _, err := s.getInstructor(id)
-		if err != nil {
-			return err
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Instructor not found")
+			return nil
 		}
 		httpx.OK(w, row)
 		return nil

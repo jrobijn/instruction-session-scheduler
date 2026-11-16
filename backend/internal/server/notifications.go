@@ -119,7 +119,7 @@ func (s *Server) CreateNotification(n NewNotification) {
 	if n.TimeslotStartTime != "" {
 		startTime = n.TimeslotStartTime
 	}
-	notification, _, err := db.One[Notification](s.db, `
+	notification, err := db.Get[Notification](s.db, `
 		INSERT INTO notifications (type, invitation_id, session_id, student_name, session_date, timeslot_start_time)
 		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at`,

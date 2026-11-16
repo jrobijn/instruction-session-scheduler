@@ -156,16 +156,12 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
-		var id int64
-		err = s.db.QueryRow("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?) RETURNING id", in.Name, in.Abbreviation).Scan(&id)
+		row, err := db.Get[Discipline](s.db, "INSERT INTO disciplines (name, abbreviation) VALUES (?, ?) RETURNING id, name, abbreviation, active",
+			in.Name, in.Abbreviation)
 		if isUniqueErr(err, "disciplines.name") {
 			httpx.Error(w, http.StatusConflict, "A discipline with this name already exists")
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		row, _, err := s.getDiscipline(id)
 		if err != nil {
 			return err
 		}
@@ -187,16 +183,13 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
-		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
-			httpx.Error(w, http.StatusNotFound, "Discipline not found")
-			return nil
-		}
-		_, err = s.db.Exec(`
+		row, found, err := db.One[Discipline](s.db, `
 			UPDATE disciplines SET
 				name = COALESCE(?, name),
 				abbreviation = COALESCE(?, abbreviation),
 				active = COALESCE(?, active)
-			WHERE id = ?`,
+			WHERE id = ?
+			RETURNING id, name, abbreviation, active`,
 			in.Name, in.Abbreviation, in.Active, id)
 		if isUniqueErr(err, "disciplines.name") {
 			httpx.Error(w, http.StatusConflict, "A discipline with this name already exists")
@@ -205,9 +198,9 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
-		row, _, err := s.getDiscipline(id)
-		if err != nil {
-			return err
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Discipline not found")
+			return nil
 		}
 		httpx.OK(w, row)
 		return nil

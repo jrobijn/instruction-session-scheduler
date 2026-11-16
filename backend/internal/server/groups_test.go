@@ -70,7 +70,11 @@ func TestGroupDefault(t *testing.T) {
 	if isDefault(b) {
 		t.Fatal("unset-default left the flag")
 	}
+	e.admin(http.MethodPost, groupPath(a, "set-default"), nil).status(http.StatusOK)
 	e.admin(http.MethodPost, groupPath(999, "set-default"), nil).wantError(http.StatusNotFound, "Group not found")
+	if !isDefault(a) {
+		t.Fatal("setting a missing group as default cleared the existing default")
+	}
 	e.admin(http.MethodPost, groupPath(999, "unset-default"), nil).wantError(http.StatusNotFound, "Group not found")
 }
 

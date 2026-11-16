@@ -25,15 +25,6 @@ type Group struct {
 	CooldownMemberPriority    string `db:"cooldown_member_priority" json:"cooldown_member_priority"`
 }
 
-// getGroup loads a group by id; it must exist.
-func (s *Server) getGroup(id int64) (Group, error) {
-	g, _, err := db.One[Group](s.db, `
-		SELECT id, name, color, is_default, active,
-			new_member_priority, reactivated_member_priority, cooldown_member_priority
-		FROM groups WHERE id = ?`, id)
-	return g, err
-}
-
 type GroupWithCounts struct {
 	Group
 	MemberCount     int64 `db:"member_count" json:"member_count"`
@@ -185,17 +176,16 @@ func (s *Server) groupRoutes() {
 		if in.Color == "" {
 			in.Color = "#3b82f6"
 		}
-		var id int64
-		err = s.db.QueryRow("INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority) VALUES (?, ?, 'back', 'back', 'back') RETURNING id",
-			in.Name, in.Color).Scan(&id)
+		row, err := db.Get[Group](s.db, `
+			INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority)
+			VALUES (?, ?, 'back', 'back', 'back')
+			RETURNING id, name, color, is_default, active,
+				new_member_priority, reactivated_member_priority, cooldown_member_priority`,
+			in.Name, in.Color)
 		if isUniqueErr(err, "groups.name") {
 			httpx.Error(w, http.StatusConflict, "A group with this name already exists")
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		row, err := s.getGroup(id)
 		if err != nil {
 			return err
 		}
@@ -220,10 +210,6 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
-			httpx.Error(w, http.StatusNotFound, "Group not found")
-			return nil
-		}
 		for _, p := range []struct {
 			key   string
 			value *string
@@ -237,7 +223,7 @@ func (s *Server) groupRoutes() {
 				return nil
 			}
 		}
-		_, err = s.db.Exec(`
+		row, found, err := db.One[Group](s.db, `
 			UPDATE groups SET
 				name = COALESCE(?, name),
 				active = COALESCE(?, active),
@@ -245,7 +231,9 @@ func (s *Server) groupRoutes() {
 				new_member_priority = COALESCE(?, new_member_priority),
 				reactivated_member_priority = COALESCE(?, reactivated_member_priority),
 				cooldown_member_priority = COALESCE(?, cooldown_member_priority)
-			WHERE id = ?`,
+			WHERE id = ?
+			RETURNING id, name, color, is_default, active,
+				new_member_priority, reactivated_member_priority, cooldown_member_priority`,
 			in.Name, in.Active, in.Color,
 			in.NewMemberPriority, in.ReactivatedMemberPriority, in.CooldownMemberPriority, id)
 		if isUniqueErr(err, "groups.name") {
@@ -255,9 +243,9 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		row, err := s.getGroup(id)
-		if err != nil {
-			return err
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Group not found")
+			return nil
 		}
 		httpx.OK(w, row)
 		return nil
@@ -288,21 +276,21 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
-			httpx.Error(w, http.StatusNotFound, "Group not found")
-			return nil
-		}
+		var row Group
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("UPDATE groups SET is_default = 0 WHERE is_default = 1"); err != nil {
 				return err
 			}
-			_, err := tx.Exec("UPDATE groups SET is_default = 1 WHERE id = ?", id)
+			g, found, err := db.One[Group](tx, `
+				UPDATE groups SET is_default = 1 WHERE id = ?
+				RETURNING id, name, color, is_default, active,
+					new_member_priority, reactivated_member_priority, cooldown_member_priority`, id)
+			if err == nil && !found {
+				err = httpx.NotFound("Group not found") // rolls back clearing the old default
+			}
+			row = g
 			return err
 		})
-		if err != nil {
-			return err
-		}
-		row, err := s.getGroup(id)
 		if err != nil {
 			return err
 		}
@@ -315,16 +303,16 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		if !s.exists("SELECT 1 FROM groups WHERE id = ?", id) {
-			httpx.Error(w, http.StatusNotFound, "Group not found")
-			return nil
-		}
-		if _, err := s.db.Exec("UPDATE groups SET is_default = 0 WHERE id = ?", id); err != nil {
-			return err
-		}
-		row, err := s.getGroup(id)
+		row, found, err := db.One[Group](s.db, `
+			UPDATE groups SET is_default = 0 WHERE id = ?
+			RETURNING id, name, color, is_default, active,
+				new_member_priority, reactivated_member_priority, cooldown_member_priority`, id)
 		if err != nil {
 			return err
+		}
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Group not found")
+			return nil
 		}
 		httpx.OK(w, row)
 		return nil

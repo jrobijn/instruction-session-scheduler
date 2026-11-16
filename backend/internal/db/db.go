@@ -117,6 +117,13 @@ func One[T any](q Querier, query string, args ...any) (v T, found bool, err erro
 	return v, err == nil, err
 }
 
+// Get scans the first row of a query into a T, like One, but a missing row is an error
+// (sql.ErrNoRows): for queries that must return a row, such as INSERT … RETURNING.
+func Get[T any](q Querier, query string, args ...any) (v T, err error) {
+	err = sqlx.Get(q, &v, query, args...)
+	return v, err
+}
+
 // Setting reads a value from the settings table, falling back to def.
 func Setting(q Querier, key, def string) string {
 	var v string

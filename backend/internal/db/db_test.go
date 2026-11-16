@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -60,6 +61,21 @@ func TestOne(t *testing.T) {
 	}
 	if _, found, err := One[thing](d, "SELECT nope"); err == nil || found {
 		t.Fatalf("query error: found %v, err %v", found, err)
+	}
+}
+
+func TestGet(t *testing.T) {
+	d := openWithTable(t)
+	th, err := Get[thing](d, "INSERT INTO things (id, name) VALUES (1, 'a') RETURNING id, name")
+	if err != nil || th.ID != 1 || *th.Name != "a" {
+		t.Fatalf("Get = %+v, %v", th, err)
+	}
+	// Unlike One, a missing row is an error.
+	if _, err := Get[thing](d, "UPDATE things SET name = 'b' WHERE id = 2 RETURNING id, name"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("Get without rows: err %v, want sql.ErrNoRows", err)
+	}
+	if _, err := Get[thing](d, "SELECT nope"); err == nil || errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("query error: err %v", err)
 	}
 }
 

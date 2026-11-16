@@ -340,6 +340,9 @@ func TestStudentCooldown(t *testing.T) {
 		t.Fatalf("past cooldown changed to %v", got["cooldown_until"])
 	}
 	e.admin(http.MethodDelete, studentPath(999, "cooldown"), nil).wantError(http.StatusNotFound, "Student not found")
+	e.admin(http.MethodPut, studentPath(999, "cooldown"), map[string]any{"days": 1}).wantError(http.StatusNotFound, "Student not found")
+	e.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", s)
+	e.admin(http.MethodPut, path, map[string]any{"days": 1}).wantError(http.StatusNotFound, "Student not found")
 }
 
 func TestImportStudents(t *testing.T) {
