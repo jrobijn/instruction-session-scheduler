@@ -104,9 +104,6 @@ func (s *Server) routes() {
 	s.sessionRoutes()
 	s.invitationRoutes()
 
-	m.HandleFunc("GET /api/public/disciplines", s.handlePublicDisciplines)
-	m.HandleFunc("GET /api/public/disciplines/{token}", s.handlePublicDisciplinesForToken)
-
 	m.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.OK(w, map[string]string{"status": "ok"})
 	})
