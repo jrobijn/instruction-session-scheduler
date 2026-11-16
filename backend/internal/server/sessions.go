@@ -663,7 +663,7 @@ func (s *Server) adminCancelInvitation(inv invitationDetails) error {
 	if inv.EmailSent != 0 {
 		s.mailer.SendAdminCancellation(email.SessionParams{
 			To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
-			StartTime: inv.StartTime, DisciplineName: deref(inv.DisciplineName),
+			StartTime: inv.StartTime, DisciplineName: inv.DisciplineName,
 			ClubName: s.clubName(), Locale: s.emailLocale(),
 		})
 	}
@@ -1032,7 +1032,7 @@ func (s *Server) handleCancelSession(w http.ResponseWriter, r *http.Request) err
 		for _, inv := range active {
 			s.mailer.SendAdminCancellation(email.SessionParams{
 				To: inv.StudentEmail, StudentName: inv.StudentName, Date: session.Date,
-				StartTime: inv.StartTime, DisciplineName: deref(inv.DisciplineName), ClubName: clubName, Locale: locale,
+				StartTime: inv.StartTime, DisciplineName: inv.DisciplineName, ClubName: clubName, Locale: locale,
 			})
 		}
 	}

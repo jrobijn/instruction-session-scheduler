@@ -31,7 +31,7 @@ type invitationDetails struct {
 	StudentName    string  `db:"student_name"`
 	StudentEmail   string  `db:"student_email"`
 	StartTime      string  `db:"start_time"`
-	DisciplineName *string `db:"discipline_name"`
+	DisciplineName string  `db:"discipline_name"` // "" when the invitation has no discipline
 }
 
 // selectInvitationDetails selects invitationDetails rows; the queries below append a fixed
@@ -42,7 +42,7 @@ const selectInvitationDetails = `
 		inv.token, inv.status, inv.invited_at, inv.email_sent,
 		ts.date AS session_date, ts.status AS session_status, ts.notes AS session_notes,
 		s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email,
-		tslot.start_time, d.name AS discipline_name
+		tslot.start_time, COALESCE(d.name, '') AS discipline_name
 	FROM invitations inv
 	JOIN training_sessions ts ON ts.id = inv.session_id
 	JOIN students s ON s.id = inv.student_id
@@ -155,7 +155,7 @@ func (s *Server) handleGetInvitation(w http.ResponseWriter, r *http.Request) err
 		Notes:          inv.SessionNotes,
 		Status:         status,
 		SessionStatus:  inv.SessionStatus,
-		DisciplineName: nonEmpty(deref(inv.DisciplineName)),
+		DisciplineName: nonEmpty(inv.DisciplineName),
 		ClubName:       s.clubName(),
 		Locale:         s.emailLocale(),
 		ExpiresAt:      expiresAt,
@@ -306,7 +306,7 @@ func (s *Server) handleCancelInvitation(w http.ResponseWriter, r *http.Request) 
 
 	s.mailer.SendCancellation(email.SessionParams{
 		To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
-		StartTime: inv.StartTime, DisciplineName: deref(inv.DisciplineName), ClubName: s.clubName(), Locale: s.emailLocale(),
+		StartTime: inv.StartTime, DisciplineName: inv.DisciplineName, ClubName: s.clubName(), Locale: s.emailLocale(),
 	})
 
 	// The decision log records the status the invitation had when it was loaded.

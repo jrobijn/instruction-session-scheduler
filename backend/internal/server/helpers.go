@@ -38,14 +38,6 @@ func decode[T any](r *http.Request) (T, error) {
 	return v, nil
 }
 
-// deref returns *p, or "" for a NULL column.
-func deref(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
 // isUniqueErr reports whether err is a UNIQUE (or PRIMARY KEY) violation of exactly the
 // constraint over columns, given as "table.column" in declaration order, e.g.
 // isUniqueErr(err, "disciplines.name"). Violations of any other constraint return false,
