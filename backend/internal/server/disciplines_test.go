@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -82,4 +83,44 @@ func TestDisciplineRoutesRejectBadInput(t *testing.T) {
 		badJSON("PUT", p("/api/disciplines/%d", d)),
 		badJSON("PUT", p("/api/disciplines/%d/groups", d)),
 	)
+}
+
+func TestPublicDisciplines(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	juniors := f.groupIn("Juniors", 100) // with discipline "Juniors discipline"
+	seniors := f.group("Seniors")
+	inactive := f.discipline("Archived", juniors)
+	f.exec("UPDATE disciplines SET active = 0 WHERE id = ?", inactive)
+	a := f.student("A", juniors)
+	manual := f.student("M", seniors)
+	f.sendInvitations()
+	f.invitation(f.sessionID, manual, f.timeslots[0], f.slots[0], 0, "invited")
+	// A moves to Seniors after being invited; the invitation keeps its scheduled group.
+	f.exec("UPDATE student_groups SET group_id = ? WHERE student_id = ?", seniors, a)
+	// A manual invitation for a student who has since left every group.
+	loner := f.student("L", seniors)
+	f.exec("DELETE FROM student_groups WHERE student_id = ?", loner)
+	f.invitation(f.sessionID, loner, f.timeslots[0], f.slots[0], 0, "invited")
+
+	names := func(path string) string {
+		var out []string
+		for _, d := range f.public(http.MethodGet, path, nil).status(http.StatusOK).array() {
+			out = append(out, d["name"].(string))
+		}
+		return strings.Join(out, ",")
+	}
+	if got := names("/api/public/disciplines"); got != "Juniors discipline,Seniors discipline" {
+		t.Errorf("all active = %s", got)
+	}
+	if got := names("/api/public/disciplines/" + f.tokenOf("A")); got != "Juniors discipline" {
+		t.Errorf("for auto-scheduled invitation = %s, want the invitation group's (active only)", got)
+	}
+	if got := names("/api/public/disciplines/" + f.tokenOf("M")); got != "Seniors discipline" {
+		t.Errorf("for manual invitation = %s, want the student's group's", got)
+	}
+	// Exactly [] (not null): the invitation page maps over the result.
+	if got := strings.TrimSpace(string(f.public(http.MethodGet, "/api/public/disciplines/"+f.tokenOf("L"), nil).status(http.StatusOK).Body)); got != "[]" {
+		t.Errorf("for manual invitation of a student without a group = %s, want []", got)
+	}
+	f.public(http.MethodGet, "/api/public/disciplines/unknown", nil).wantError(http.StatusNotFound, "Invitation not found")
 }

@@ -130,38 +130,6 @@ func TestStaticFiles(t *testing.T) {
 	}
 }
 
-// --- public disciplines -----------------------------------------------------------------
-
-func TestPublicDisciplines(t *testing.T) {
-	f := newScheduleFixture(t, []string{"18:00"}, 1)
-	juniors := f.groupIn("Juniors", 100) // with discipline "Juniors discipline"
-	seniors := f.group("Seniors")
-	inactive := f.discipline("Archived", juniors)
-	f.exec("UPDATE disciplines SET active = 0 WHERE id = ?", inactive)
-	f.student("A", juniors)
-	manual := f.student("M", seniors)
-	f.sendInvitations()
-	f.invitation(f.sessionID, manual, f.timeslots[0], f.slots[0], 0, "invited")
-
-	names := func(path string) string {
-		var out []string
-		for _, d := range f.public(http.MethodGet, path, nil).status(http.StatusOK).array() {
-			out = append(out, d["name"].(string))
-		}
-		return strings.Join(out, ",")
-	}
-	if got := names("/api/public/disciplines"); got != "Juniors discipline,Seniors discipline" {
-		t.Errorf("all active = %s", got)
-	}
-	if got := names("/api/public/disciplines/" + f.tokenOf("A")); got != "Juniors discipline" {
-		t.Errorf("for auto-scheduled invitation = %s, want the invitation group's", got)
-	}
-	if got := names("/api/public/disciplines/" + f.tokenOf("M")); got != "Seniors discipline" {
-		t.Errorf("for manual invitation = %s, want the student's group's", got)
-	}
-	f.public(http.MethodGet, "/api/public/disciplines/unknown", nil).status(http.StatusNotFound)
-}
-
 // --- server-sent events -----------------------------------------------------------------
 
 // readEvent reads the stream until an "event:" line and returns it with its data line.
