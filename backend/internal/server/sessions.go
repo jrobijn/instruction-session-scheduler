@@ -193,7 +193,7 @@ func (s *Server) sessionRoutes() {
 		}
 		var id int64
 		err = s.db.QueryRow("INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?) RETURNING id", in.Date, dow, nonEmpty(in.Notes), ttID).Scan(&id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "training_sessions.date") {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
 		}
@@ -259,7 +259,7 @@ func (s *Server) sessionRoutes() {
 				timetable_id = CASE WHEN ? THEN ? ELSE timetable_id END
 			WHERE id = ?`,
 			in.Date, dow, in.Notes, in.Status, in.TimetableID.Set, in.TimetableID.Value, id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "training_sessions.date") {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
 		}
@@ -554,7 +554,7 @@ func (s *Server) handleAssignInstructor(w http.ResponseWriter, r *http.Request) 
 	}
 	_, err = s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", id, instructorID)
 	switch {
-	case isUniqueErr(err):
+	case isUniqueErr(err, "session_slots.session_id", "session_slots.instructor_id"):
 		httpx.Error(w, http.StatusConflict, "Instructor already assigned to this session")
 	case err != nil && strings.Contains(err.Error(), "FOREIGN KEY"):
 		httpx.Error(w, http.StatusBadRequest, "Invalid instructor")

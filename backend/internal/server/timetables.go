@@ -400,7 +400,7 @@ func (s *Server) timetableRoutes() {
 			return nil
 		}
 		row, _, err := db.One[Timeslot](s.db, "INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id, timetable_id, start_time", t.ID, in.StartTime)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "timeslots.timetable_id", "timeslots.start_time") {
 			httpx.Error(w, http.StatusConflict, "A timeslot with this start time already exists in this timetable")
 			return nil
 		}

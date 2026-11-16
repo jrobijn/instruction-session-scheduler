@@ -152,7 +152,7 @@ func (s *Server) groupRoutes() {
 				}
 				_, err = tx.Exec("INSERT INTO groups (name) VALUES (?)", name)
 				switch {
-				case isUniqueErr(err):
+				case isUniqueErr(err, "groups.name"):
 					result.skip(row, "A group with this name already exists")
 				case err != nil:
 					return err
@@ -188,7 +188,7 @@ func (s *Server) groupRoutes() {
 		var id int64
 		err = s.db.QueryRow("INSERT INTO groups (name, color, new_member_priority, reactivated_member_priority, cooldown_member_priority) VALUES (?, ?, 'back', 'back', 'back') RETURNING id",
 			in.Name, in.Color).Scan(&id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "groups.name") {
 			httpx.Error(w, http.StatusConflict, "A group with this name already exists")
 			return nil
 		}
@@ -248,7 +248,7 @@ func (s *Server) groupRoutes() {
 			WHERE id = ?`,
 			in.Name, in.Active, in.Color,
 			in.NewMemberPriority, in.ReactivatedMemberPriority, in.CooldownMemberPriority, id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "groups.name") {
 			httpx.Error(w, http.StatusConflict, "A group with this name already exists")
 			return nil
 		}
@@ -501,7 +501,7 @@ func (s *Server) groupRoutes() {
 			return nil
 		}
 		_, err = s.db.Exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", disciplineID, id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "discipline_groups.discipline_id", "discipline_groups.group_id") {
 			httpx.Error(w, http.StatusConflict, "Already assigned")
 			return nil
 		}

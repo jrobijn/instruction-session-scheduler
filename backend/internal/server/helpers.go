@@ -15,6 +15,8 @@ import (
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // handlerFunc is an http.HandlerFunc that may return an error. An *httpx.StatusError (from
@@ -98,8 +100,25 @@ func deref(p *string) string {
 	return *p
 }
 
-func isUniqueErr(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
+// isUniqueErr reports whether err is a UNIQUE (or PRIMARY KEY) violation of exactly the
+// constraint over columns, given as "table.column" in declaration order, e.g.
+// isUniqueErr(err, "disciplines.name"). Violations of any other constraint return false,
+// so they surface as internal errors rather than a misleading conflict message.
+func isUniqueErr(err error, columns ...string) bool {
+	var se *sqlite.Error
+	if !errors.As(err, &se) {
+		return false
+	}
+	if code := se.Code(); code != sqlite3.SQLITE_CONSTRAINT_UNIQUE && code != sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY {
+		return false
+	}
+	// The message reads "... UNIQUE constraint failed: t.a, t.b (2067)".
+	_, failed, ok := strings.Cut(se.Error(), "UNIQUE constraint failed: ")
+	if !ok {
+		return false
+	}
+	failed = strings.TrimSuffix(failed, fmt.Sprintf(" (%d)", se.Code()))
+	return failed == strings.Join(columns, ", ")
 }
 
 func changes(res sql.Result) int64 {

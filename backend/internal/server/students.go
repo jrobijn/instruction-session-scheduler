@@ -197,7 +197,7 @@ func (s *Server) studentRoutes() {
 		}
 		var studentID int64
 		err = s.db.QueryRow("INSERT INTO students ("+strings.Join(cols, ", ")+") VALUES ("+placeholders(len(cols))+") RETURNING id", vals...).Scan(&studentID)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "students.email") {
 			httpx.Error(w, http.StatusConflict, "A student with this email already exists")
 			return nil
 		}
@@ -272,7 +272,7 @@ func (s *Server) studentRoutes() {
 			}
 			return nil
 		})
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "students.email") {
 			httpx.Error(w, http.StatusConflict, "A student with this email already exists")
 			return nil
 		}
@@ -632,7 +632,7 @@ func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) er
 			}
 
 			err := importStudentRow(tx, first, last, email, membershipID, cols, vals, defaultGroup)
-			if isUniqueErr(err) { // the email belongs to a deleted student
+			if isUniqueErr(err, "students.email") { // the email belongs to a deleted student
 				result.skip(row, "A student with this email already exists")
 				continue
 			}

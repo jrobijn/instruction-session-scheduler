@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -37,11 +38,48 @@ func TestToInt64(t *testing.T) {
 	}
 }
 
-func TestSQLiteHelpers(t *testing.T) {
-	err := errors.New("constraint failed: UNIQUE constraint failed: students.email (2067)")
-	if !isUniqueErr(err) || isUniqueErr(nil) || isUniqueErr(errors.New("FOREIGN KEY constraint failed")) {
-		t.Error("isUniqueErr")
+func TestIsUniqueErr(t *testing.T) {
+	conn, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer conn.Close()
+	conn.SetMaxOpenConns(1) // every connection to :memory: is its own database
+	if _, err := conn.Exec(`
+		CREATE TABLE t (a TEXT UNIQUE, ab TEXT UNIQUE, b INT, c INT, UNIQUE(b, c));
+		CREATE TABLE p (x INT, y INT, PRIMARY KEY(x, y));
+		INSERT INTO t VALUES ('a', 'ab', 1, 1);
+		INSERT INTO p VALUES (1, 1);`); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(q string) error { _, err := conn.Exec(q); return err }
+	dupA := insert("INSERT INTO t VALUES ('a', 'x', 2, 2)")
+	dupAB := insert("INSERT INTO t VALUES ('x', 'ab', 2, 2)")
+	dupBC := insert("INSERT INTO t VALUES ('x', 'y', 1, 1)")
+	dupPK := insert("INSERT INTO p VALUES (1, 1)")
+
+	for _, tc := range []struct {
+		name    string
+		err     error
+		columns []string
+		want    bool
+	}{
+		{"single column", dupA, []string{"t.a"}, true},
+		{"other column", dupA, []string{"t.ab"}, false},
+		{"column name prefix", dupAB, []string{"t.a"}, false},
+		{"composite", dupBC, []string{"t.b", "t.c"}, true},
+		{"composite subset", dupBC, []string{"t.b"}, false},
+		{"composite primary key", dupPK, []string{"p.x", "p.y"}, true},
+		{"nil", nil, []string{"t.a"}, false},
+		{"untyped error", errors.New("UNIQUE constraint failed: t.a"), []string{"t.a"}, false},
+	} {
+		if got := isUniqueErr(tc.err, tc.columns...); got != tc.want {
+			t.Errorf("%s: isUniqueErr(%v, %v) = %v", tc.name, tc.err, tc.columns, got)
+		}
+	}
+}
+
+func TestPlaceholders(t *testing.T) {
 	if placeholders(0) != "" || placeholders(1) != "?" || placeholders(3) != "?,?,?" {
 		t.Error("placeholders")
 	}

@@ -80,7 +80,7 @@ func (s *Server) instructorRoutes() {
 				} else {
 					_, err = tx.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)", first, last, email)
 				}
-				if isUniqueErr(err) { // the email belongs to a deleted instructor
+				if isUniqueErr(err, "instructors.email") { // the email belongs to a deleted instructor
 					result.skip(row, "An instructor with this email already exists")
 					continue
 				}
@@ -132,7 +132,7 @@ func (s *Server) instructorRoutes() {
 		var id int64
 		err = s.db.QueryRow("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id",
 			in.FirstName, in.LastName, in.Email).Scan(&id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "instructors.email") {
 			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
 			return nil
 		}
@@ -174,7 +174,7 @@ func (s *Server) instructorRoutes() {
 				active = COALESCE(?, active)
 			WHERE id = ?`,
 			in.FirstName, in.LastName, in.Email, in.Active, id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "instructors.email") {
 			httpx.Error(w, http.StatusConflict, "An instructor with this email already exists")
 			return nil
 		}

@@ -109,7 +109,7 @@ func (s *Server) disciplineRoutes() {
 					_, err = tx.Exec("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)", name, abbr)
 				}
 				switch {
-				case isUniqueErr(err):
+				case isUniqueErr(err, "disciplines.name"):
 					result.skip(row, "A discipline with this name already exists")
 				case err != nil:
 					return err
@@ -158,7 +158,7 @@ func (s *Server) disciplineRoutes() {
 		}
 		var id int64
 		err = s.db.QueryRow("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?) RETURNING id", in.Name, in.Abbreviation).Scan(&id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "disciplines.name") {
 			httpx.Error(w, http.StatusConflict, "A discipline with this name already exists")
 			return nil
 		}
@@ -198,7 +198,7 @@ func (s *Server) disciplineRoutes() {
 				active = COALESCE(?, active)
 			WHERE id = ?`,
 			in.Name, in.Abbreviation, in.Active, id)
-		if isUniqueErr(err) {
+		if isUniqueErr(err, "disciplines.name") {
 			httpx.Error(w, http.StatusConflict, "A discipline with this name already exists")
 			return nil
 		}
