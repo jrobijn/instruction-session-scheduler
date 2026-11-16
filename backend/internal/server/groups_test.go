@@ -98,6 +98,8 @@ func TestGroupMembersEndpoints(t *testing.T) {
 	e.admin(http.MethodPut, path, map[string]any{"enabled": "yes"}).wantError(http.StatusBadRequest, "Invalid value for enabled")
 	e.admin(http.MethodPut, groupPath(a, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
 		wantError(http.StatusNotFound, "Member not found")
+	e.admin(http.MethodPut, groupPath(999, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
+		wantError(http.StatusNotFound, "Group not found")
 	e.admin(http.MethodPut, path, map[string]any{"enabled": true}).status(http.StatusOK)
 	if e.row("SELECT invite_next_at FROM student_groups WHERE student_id = ?", s)["invite_next_at"] == nil {
 		t.Fatal("invite-next not set")
@@ -267,10 +269,10 @@ func TestGroupRoutesRejectBadInput(t *testing.T) {
 		notFound("POST", "/api/groups/x/unset-default", nil, "Group not found"),
 		notFound("GET", "/api/groups/x/members", nil, "Group not found"),
 		notFound("POST", "/api/groups/x/members", map[string]any{"student_id": st}, "Group not found"),
-		notFound("PUT", p("/api/groups/x/members/%d/invite-next", st), map[string]any{"enabled": true}, "Member not found"),
+		notFound("PUT", p("/api/groups/x/members/%d/invite-next", st), map[string]any{"enabled": true}, "Group not found"),
 		notFound("PUT", p("/api/groups/%d/members/x/invite-next", g), map[string]any{"enabled": true}, "Member not found"),
 		notFound("DELETE", p("/api/groups/x/members/%d", st), nil, "Group not found"),
-		notFound("DELETE", p("/api/groups/%d/members/x", g), nil, "Student not found"),
+		notFound("DELETE", p("/api/groups/%d/members/x", g), nil, "Member not found"),
 		notFound("GET", "/api/groups/x/non-members", nil, "Group not found"),
 		notFound("GET", "/api/groups/x/disciplines", nil, "Group not found"),
 		notFound("POST", p("/api/groups/x/disciplines/%d", d), nil, "Group not found"),

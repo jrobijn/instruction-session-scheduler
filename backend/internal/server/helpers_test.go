@@ -124,7 +124,7 @@ func TestPathIDNotAnInteger(t *testing.T) {
 		{http.MethodDelete, "/api/buddy-groups/abc", "Buddy group not found"},
 		{http.MethodGet, "/api/sessions/abc/events", "Not found"},
 		// Second path ids, behind an existing first one.
-		{http.MethodDelete, fmt.Sprintf("/api/groups/%d/members/abc", group), "Student not found"},
+		{http.MethodDelete, fmt.Sprintf("/api/groups/%d/members/abc", group), "Member not found"},
 		{http.MethodPost, fmt.Sprintf("/api/groups/%d/disciplines/abc", group), "Discipline not found"},
 		{http.MethodDelete, fmt.Sprintf("/api/sessions/%d/instructors/abc", session), "Assignment not found"},
 		{http.MethodPost, fmt.Sprintf("/api/sessions/%d/invitations/abc/admin-cancel", session), "Invitation not found"},
