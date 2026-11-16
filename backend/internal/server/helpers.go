@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -129,9 +128,6 @@ func newToken() string {
 	b[8] = b[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
-
-func (s *Server) clubName() string    { return db.Setting(s.db, "club_name", "Sports Club") }
-func (s *Server) emailLocale() string { return db.Setting(s.db, "email_locale", "en") }
 
 // encodeJSON encodes v for storage (decision logs) without escaping <, > and &.
 func encodeJSON(v any) string {

@@ -123,7 +123,7 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 			GroupName:            nonEmpty(groupName),
 			GroupColor:           nonEmpty(groupColor),
 			PreferredTimeslots:   preferredTimeslots,
-			PreferredDays:        preferredDays(replacement.PreferredDays, db.Setting(s.db, "club_days", "0|1|2|3|4|5|6")),
+			PreferredDays:        preferredDays(replacement.PreferredDays, s.clubDays()),
 			BuddyPlacedNear:      nonEmpty(buddyName),
 		},
 		ReplacedStudent:   nonEmpty(replacedName),

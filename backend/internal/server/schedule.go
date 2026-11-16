@@ -129,7 +129,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return err
 	}
-	clubDays := db.Setting(s.db, "club_days", "0|1|2|3|4|5|6")
+	clubDays := s.clubDays()
 	loc := s.clubLocation()
 
 	// From here on everything runs in one transaction, so a failed regeneration leaves the
