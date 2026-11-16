@@ -213,10 +213,13 @@ func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request)
 	invID, sessionID := inv.ID, inv.SessionID
 
 	// The discipline must belong to the invitation's group.
-	if disciplineID != 0 && inv.GroupID != nil && *inv.GroupID != 0 &&
-		!s.exists("SELECT 1 FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", disciplineID, *inv.GroupID) {
-		httpx.Error(w, http.StatusBadRequest, "Selected discipline is not available for your group")
-		return nil
+	if disciplineID != 0 && inv.GroupID != nil && *inv.GroupID != 0 {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", disciplineID, *inv.GroupID); err != nil {
+			return err
+		} else if !found {
+			httpx.Error(w, http.StatusBadRequest, "Selected discipline is not available for your group")
+			return nil
+		}
 	}
 
 	var storedDiscipline *int64

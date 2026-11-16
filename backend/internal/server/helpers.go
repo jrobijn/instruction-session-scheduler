@@ -94,12 +94,6 @@ func changes(res sql.Result) int64 {
 	return n
 }
 
-// exists reports whether query returns at least one row.
-func (s *Server) exists(query string, a ...any) bool {
-	var one any
-	return s.db.QueryRow(query, a...).Scan(&one) == nil
-}
-
 // pathID parses the integer path parameter name, reporting whether it is one. A value that
 // isn't an integer can't match any row, so callers answer it with the same 404 as an id
 // that doesn't exist.

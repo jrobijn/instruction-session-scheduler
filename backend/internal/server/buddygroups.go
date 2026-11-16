@@ -81,7 +81,9 @@ func (s *Server) buddyGroupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Buddy group not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM buddy_groups WHERE id = ?", id) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM buddy_groups WHERE id = ?", id); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Buddy group not found")
 			return nil
 		}

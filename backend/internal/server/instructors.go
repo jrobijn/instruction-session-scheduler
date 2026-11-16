@@ -192,7 +192,9 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}

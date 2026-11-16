@@ -132,7 +132,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/invitations", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok := s.requireStudent(r)
+		id, ok, err := s.requireStudent(r)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
@@ -153,7 +156,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/invitation-history", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok := s.requireStudent(r)
+		id, ok, err := s.requireStudent(r)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
@@ -292,7 +298,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/students/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok := s.requireStudent(r)
+		id, ok, err := s.requireStudent(r)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
@@ -325,7 +334,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/preferred-timeslots", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok := s.requireStudent(r)
+		id, ok, err := s.requireStudent(r)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
@@ -360,7 +372,10 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "timeslot_ids array is required")
 			return nil
 		}
-		id, ok := s.requireStudent(r)
+		id, ok, err := s.requireStudent(r)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
@@ -370,7 +385,9 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM timetables WHERE id = ?", timetableID) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ?", timetableID); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
@@ -414,7 +431,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/groups", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok := s.requireStudent(r)
+		id, ok, err := s.requireStudent(r)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
@@ -448,7 +468,10 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
-		id, ok := s.requireStudent(r)
+		id, ok, err := s.requireStudent(r)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
@@ -508,7 +531,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/students/{id}/cooldown", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok := s.requireStudent(r)
+		id, ok, err := s.requireStudent(r)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
@@ -531,9 +557,13 @@ func (s *Server) studentRoutes() {
 
 // requireStudent returns the id in the {id} path value and whether it names a non-deleted
 // student.
-func (s *Server) requireStudent(r *http.Request) (int64, bool) {
+func (s *Server) requireStudent(r *http.Request) (int64, bool, error) {
 	id, ok := pathID(r, "id")
-	return id, ok && s.exists("SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
+	if !ok {
+		return id, false, nil
+	}
+	_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
+	return id, found, err
 }
 
 func (s *Server) handleListStudents(w http.ResponseWriter, r *http.Request) error {

@@ -229,7 +229,9 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
@@ -257,7 +259,9 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
@@ -280,7 +284,9 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
@@ -289,7 +295,9 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM groups WHERE id = ?", groupID) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", groupID); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
@@ -306,7 +314,9 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if !s.exists("SELECT 1 FROM disciplines WHERE id = ?", id) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}

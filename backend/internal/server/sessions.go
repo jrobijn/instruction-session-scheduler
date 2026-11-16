@@ -445,7 +445,9 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		id := session.ID
-		if !s.exists("SELECT 1 FROM invitations WHERE id = ? AND session_id = ?", invID, id) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE id = ? AND session_id = ?", invID, id); err != nil {
+			return err
+		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
@@ -453,7 +455,9 @@ func (s *Server) sessionRoutes() {
 			return err
 		}
 		// With no invitations left the session reverts to draft.
-		if !s.exists("SELECT 1 FROM invitations WHERE session_id = ?", id) {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ?", id); err != nil {
+			return err
+		} else if !found {
 			if _, err := s.db.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ?", id); err != nil {
 				return err
 			}
@@ -717,11 +721,15 @@ func (s *Server) handleReplaceInstructor(w http.ResponseWriter, r *http.Request)
 		httpx.Error(w, http.StatusNotFound, "Original instructor not assigned to this session")
 		return nil
 	}
-	if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", newID) {
+	if _, found, err := db.One[int](s.db, "SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", newID); err != nil {
+		return err
+	} else if !found {
 		httpx.Error(w, http.StatusBadRequest, "New instructor not found")
 		return nil
 	}
-	if s.exists("SELECT 1 FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, newID) {
+	if _, found, err := db.One[int](s.db, "SELECT 1 FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, newID); err != nil {
+		return err
+	} else if found {
 		httpx.Error(w, http.StatusConflict, "New instructor is already assigned to this session")
 		return nil
 	}
@@ -822,11 +830,15 @@ func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) err
 		httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
 		return nil
 	}
-	if s.exists("SELECT 1 FROM invitations WHERE session_id = ? AND student_id = ? AND status NOT IN "+terminalStatuses, id, studentID) {
+	if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND student_id = ? AND status NOT IN "+terminalStatuses, id, studentID); err != nil {
+		return err
+	} else if found {
 		httpx.Error(w, http.StatusConflict, "Student already has an active invitation for this session")
 		return nil
 	}
-	if s.exists("SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN "+terminalStatuses, id, timeslotID, slotID) {
+	if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN "+terminalStatuses, id, timeslotID, slotID); err != nil {
+		return err
+	} else if found {
 		httpx.Error(w, http.StatusConflict, "This slot is already occupied")
 		return nil
 	}
@@ -939,7 +951,9 @@ func (s *Server) handleAutoScheduleSlot(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
 		return nil
 	}
-	if s.exists("SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN "+terminalStatuses, id, timeslotID, slotID) {
+	if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN "+terminalStatuses, id, timeslotID, slotID); err != nil {
+		return err
+	} else if found {
 		httpx.Error(w, http.StatusConflict, "This slot is already occupied")
 		return nil
 	}
