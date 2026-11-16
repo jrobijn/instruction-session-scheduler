@@ -102,10 +102,6 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, err == nil
 }
 
-// errNotFound lets a transaction roll back because a row is missing; the handler answers it
-// with a 404.
-var errNotFound = errors.New("not found")
-
 // placeholders returns "?,?,?" for n values (n >= 1).
 func placeholders(n int) string {
 	if n <= 0 {

@@ -2,7 +2,6 @@ package server
 
 import (
 	"cmp"
-	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -275,26 +274,25 @@ func (s *Server) groupRoutes() {
 			return nil
 		}
 		var row Group
+		var found bool
 		err := s.db.InTx(func(tx *sqlx.Tx) error {
-			if _, err := tx.Exec("UPDATE groups SET is_default = 0 WHERE is_default = 1"); err != nil {
-				return err
-			}
-			g, found, err := db.One[Group](tx, `
+			var err error
+			row, found, err = db.One[Group](tx, `
 				UPDATE groups SET is_default = 1 WHERE id = ?
 				RETURNING id, name, color, is_default, active,
 					new_member_priority, reactivated_member_priority, cooldown_member_priority`, id)
-			if err == nil && !found {
-				err = errNotFound // rolls back clearing the old default
+			if err != nil || !found {
+				return err
 			}
-			row = g
+			_, err = tx.Exec("UPDATE groups SET is_default = 0 WHERE is_default = 1 AND id != ?", id)
 			return err
 		})
-		if errors.Is(err, errNotFound) {
-			httpx.Error(w, http.StatusNotFound, "Group not found")
-			return nil
-		}
 		if err != nil {
 			return err
+		}
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Group not found")
+			return nil
 		}
 		httpx.OK(w, row)
 		return nil
