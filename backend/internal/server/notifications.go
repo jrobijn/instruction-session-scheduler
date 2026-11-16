@@ -69,13 +69,18 @@ func (s *Server) notificationRoutes() {
 	})
 
 	s.adminRoute("POST /api/notifications/{id}/read", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := strconv.Atoi(r.PathValue("id"))
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, "Invalid id")
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Notification not found")
 			return nil
 		}
-		if _, err := s.db.Exec("UPDATE notifications SET read = 1 WHERE id = ?", id); err != nil {
+		res, err := s.db.Exec("UPDATE notifications SET read = 1 WHERE id = ?", id)
+		if err != nil {
 			return err
+		}
+		if changes(res) == 0 {
+			httpx.Error(w, http.StatusNotFound, "Notification not found")
+			return nil
 		}
 		count, err := s.unreadCount()
 		if err != nil {

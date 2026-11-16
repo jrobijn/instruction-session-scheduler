@@ -56,7 +56,8 @@ func (s *Server) instructorRoutes() {
 	s.adminRoute("POST /api/instructors/import", func(w http.ResponseWriter, r *http.Request) error {
 		in, err := readCSVImport(r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
 		if !in.has("first_name", "last_name", "email") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
@@ -99,9 +100,10 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("GET /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := pathID(r, "id", "Instructor not found")
-		if err != nil {
-			return err
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Instructor not found")
+			return nil
 		}
 		row, found, err := s.getInstructor(id)
 		if err != nil {
@@ -123,7 +125,8 @@ func (s *Server) instructorRoutes() {
 		}
 		in, err := decode[request](r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
 		if in.FirstName == "" || in.LastName == "" || in.Email == "" {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
@@ -151,11 +154,13 @@ func (s *Server) instructorRoutes() {
 		}
 		in, err := decode[request](r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
-		id, err := pathID(r, "id", "Instructor not found")
-		if err != nil {
-			return err
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Instructor not found")
+			return nil
 		}
 		row, found, err := db.One[Instructor](s.db, `
 			UPDATE instructors SET
@@ -182,9 +187,10 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/instructors/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := pathID(r, "id", "Instructor not found")
-		if err != nil {
-			return err
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Instructor not found")
+			return nil
 		}
 		if !s.exists("SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id) {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")

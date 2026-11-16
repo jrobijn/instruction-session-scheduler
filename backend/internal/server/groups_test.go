@@ -252,3 +252,38 @@ func TestGroupImportExport(t *testing.T) {
 		t.Fatalf("export = %q, want %q", body, want)
 	}
 }
+
+func TestGroupRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("Group")
+	d := e.discipline("Discipline", g)
+	st := e.student("Student", g)
+	p := fmt.Sprintf
+	e.wantRejected(
+		notFound("PUT", "/api/groups/x", nil, "Group not found"),
+		notFound("DELETE", "/api/groups/x", nil, "Group not found"),
+		notFound("POST", "/api/groups/x/set-default", nil, "Group not found"),
+		notFound("POST", "/api/groups/999999/set-default", nil, "Group not found"), // inside the transaction
+		notFound("POST", "/api/groups/x/unset-default", nil, "Group not found"),
+		notFound("GET", "/api/groups/x/members", nil, "Group not found"),
+		notFound("POST", "/api/groups/x/members", map[string]any{"student_id": st}, "Group not found"),
+		notFound("PUT", p("/api/groups/x/members/%d/invite-next", st), map[string]any{"enabled": true}, "Member not found"),
+		notFound("PUT", p("/api/groups/%d/members/x/invite-next", g), map[string]any{"enabled": true}, "Member not found"),
+		notFound("DELETE", p("/api/groups/x/members/%d", st), nil, "Group not found"),
+		notFound("DELETE", p("/api/groups/%d/members/x", g), nil, "Student not found"),
+		notFound("GET", "/api/groups/x/non-members", nil, "Group not found"),
+		notFound("GET", "/api/groups/x/disciplines", nil, "Group not found"),
+		notFound("POST", p("/api/groups/x/disciplines/%d", d), nil, "Group not found"),
+		notFound("POST", p("/api/groups/%d/disciplines/x", g), nil, "Discipline not found"),
+		notFound("DELETE", p("/api/groups/x/disciplines/%d", d), nil, "Group not found"),
+		notFound("DELETE", p("/api/groups/%d/disciplines/x", g), nil, "Discipline not found"),
+		badJSON("POST", "/api/groups/import"),
+		badJSON("POST", "/api/groups"),
+		badJSON("PUT", p("/api/groups/%d", g)),
+		badJSON("POST", p("/api/groups/%d/members", g)),
+		badJSON("PUT", p("/api/groups/%d/members/%d/invite-next", g, st)),
+	)
+	if e.row("SELECT is_default FROM groups WHERE id = ?", g)["is_default"] != int64(0) {
+		t.Fatal("rejected set-default changed the default group")
+	}
+}

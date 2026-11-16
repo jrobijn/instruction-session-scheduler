@@ -81,9 +81,9 @@ func (s *Server) routes() {
 		s.hub.Serve(w, r, sessionsListChannel)
 	}))
 	m.HandleFunc("GET /api/sessions/{id}/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
-		id, err := pathID(r, "id", "Not found")
-		if err != nil {
-			s.writeError(w, err)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Not found")
 			return
 		}
 		s.hub.Serve(w, r, sessionChannel(id))
@@ -128,6 +128,32 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// handlerFunc is an http.HandlerFunc that may return an error. Handlers write every
+// response themselves, client errors included (httpx.Error, then return nil); a returned
+// error is always unexpected and becomes a 500 (like an uncaught exception in an Express
+// handler). A handler that returns an error must not have written a response.
+type handlerFunc func(w http.ResponseWriter, r *http.Request) error
+
+func (s *Server) wrap(fn handlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if err := fn(w, r); err != nil {
+			s.internalError(w, err)
+		}
+	}
+}
+
+// adminRoute registers an authenticated route.
+func (s *Server) adminRoute(pattern string, fn handlerFunc) {
+	s.mux.HandleFunc(pattern, s.admin(s.wrap(fn)))
+}
+
+// publicRoute registers an unauthenticated route.
+func (s *Server) publicRoute(pattern string, fn handlerFunc) {
+	s.mux.HandleFunc(pattern, s.wrap(fn))
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

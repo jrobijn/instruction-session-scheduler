@@ -31,7 +31,8 @@ func (s *Server) settingsRoutes() {
 		}
 		in, err := decode[request](r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
 		if in.Value == nil {
 			httpx.Error(w, http.StatusBadRequest, "Value is required")

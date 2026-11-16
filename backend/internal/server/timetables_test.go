@@ -138,3 +138,28 @@ func TestDeleteTimetableBlockedBySentSessions(t *testing.T) {
 	f.admin(http.MethodDelete, timetablePath(f.timetable), nil).
 		wantError(http.StatusBadRequest, "Cannot delete: timetable is attached to sessions with sent invitations or completed sessions")
 }
+
+func TestTimetableRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	tt, slots := e.timetable("10:00")
+	draft := e.insert("INSERT INTO timetables (name) VALUES ('Draft') RETURNING id")
+	p := fmt.Sprintf
+	e.wantRejected(
+		notFound("GET", "/api/timetables/x", nil, "Timetable not found"),
+		notFound("PUT", "/api/timetables/x", nil, "Timetable not found"),
+		notFound("POST", "/api/timetables/x/save", nil, "Timetable not found"),
+		notFound("POST", "/api/timetables/x/set-default", nil, "Timetable not found"),
+		notFound("POST", "/api/timetables/x/toggle-active", nil, "Timetable not found"),
+		notFound("DELETE", "/api/timetables/x", nil, "Timetable not found"),
+		notFound("PUT", "/api/timetables/x/groups", map[string]any{"groups": []int{}}, "Timetable not found"),
+		notFound("PUT", "/api/timetables/x/groups/reorder", map[string]any{"group_ids": []int{}}, "Timetable not found"),
+		notFound("POST", "/api/timetables/x/timeslots", map[string]any{"start_time": "11:00"}, "Timetable not found"),
+		notFound("DELETE", p("/api/timetables/x/timeslots/%d", slots[0]), nil, "Timetable not found"),
+		notFound("DELETE", p("/api/timetables/%d/timeslots/x", draft), nil, "Timeslot not found"),
+		badJSON("POST", "/api/timetables"),
+		badJSON("PUT", p("/api/timetables/%d", tt)),
+		badJSON("PUT", p("/api/timetables/%d/groups", tt)),
+		badJSON("PUT", p("/api/timetables/%d/groups/reorder", tt)),
+		badJSON("POST", p("/api/timetables/%d/timeslots", tt)),
+	)
+}

@@ -114,9 +114,10 @@ func (s *Server) studentRoutes() {
 	s.adminRoute("POST /api/students/import", s.handleImportStudents)
 
 	s.adminRoute("GET /api/students/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := pathID(r, "id", "Student not found")
-		if err != nil {
-			return err
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		row, found, err := s.getStudent(id)
 		if err != nil {
@@ -131,9 +132,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/invitations", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := s.requireStudent(r)
-		if err != nil {
-			return err
+		id, ok := s.requireStudent(r)
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		invitations, err := db.Many[StudentInvitation](s.db, `
 			SELECT i.id, i.status, ts.date AS session_date, tsl.start_time
@@ -151,9 +153,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/invitation-history", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := s.requireStudent(r)
-		if err != nil {
-			return err
+		id, ok := s.requireStudent(r)
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		invitations, err := db.Many[InvitationHistoryEntry](s.db, `
 			SELECT i.id, i.status, i.invited_at, i.responded_at,
@@ -184,7 +187,8 @@ func (s *Server) studentRoutes() {
 		}
 		in, err := decode[request](r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
 		if in.FirstName == "" || in.LastName == "" || in.Email == "" {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
@@ -233,11 +237,13 @@ func (s *Server) studentRoutes() {
 		}
 		in, err := decode[request](r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
-		id, err := pathID(r, "id", "Student not found")
-		if err != nil {
-			return err
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		student, found, err := s.getStudent(id)
 		if err != nil {
@@ -286,9 +292,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/students/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := s.requireStudent(r)
-		if err != nil {
-			return err
+		id, ok := s.requireStudent(r)
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		// Open invitations for sessions that haven't taken place are admin-cancelled, as if
 		// the admin cancelled each one; completed sessions are history and stay as they are.
@@ -318,9 +325,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/preferred-timeslots", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := s.requireStudent(r)
-		if err != nil {
-			return err
+		id, ok := s.requireStudent(r)
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		type preference struct {
 			TimetableID int64 `db:"timetable_id"`
@@ -345,19 +353,22 @@ func (s *Server) studentRoutes() {
 		}
 		in, err := decode[request](r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
 		if in.TimeslotIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "timeslot_ids array is required")
 			return nil
 		}
-		id, err := s.requireStudent(r)
-		if err != nil {
-			return err
+		id, ok := s.requireStudent(r)
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
-		timetableID, err := pathID(r, "timetableId", "Timetable not found")
-		if err != nil {
-			return err
+		timetableID, ok := pathID(r, "timetableId")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Timetable not found")
+			return nil
 		}
 		if !s.exists("SELECT 1 FROM timetables WHERE id = ?", timetableID) {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
@@ -403,9 +414,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/groups", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := s.requireStudent(r)
-		if err != nil {
-			return err
+		id, ok := s.requireStudent(r)
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		type studentGroup struct {
 			ID        int64  `db:"id" json:"id"`
@@ -433,11 +445,13 @@ func (s *Server) studentRoutes() {
 		}
 		in, err := decode[request](r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
-		id, err := s.requireStudent(r)
-		if err != nil {
-			return err
+		id, ok := s.requireStudent(r)
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM student_groups WHERE student_id = ?", id); err != nil {
@@ -462,16 +476,18 @@ func (s *Server) studentRoutes() {
 		}
 		in, err := decode[request](r)
 		if err != nil {
-			return err
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
 		}
 		days := in.Days
 		if days <= 0 {
 			httpx.Error(w, http.StatusBadRequest, "A positive number of days is required")
 			return nil
 		}
-		id, err := pathID(r, "id", "Student not found")
-		if err != nil {
-			return err
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		// new Date(Date.now() + days * 864e5).toISOString() truncated to whole seconds, UTC.
 		ms := math.Trunc(float64(time.Now().UnixMilli()) + days*24*60*60*1000)
@@ -492,9 +508,10 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/students/{id}/cooldown", func(w http.ResponseWriter, r *http.Request) error {
-		id, err := s.requireStudent(r)
-		if err != nil {
-			return err
+		id, ok := s.requireStudent(r)
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
 		}
 		// End the cooldown now rather than erasing it, so its end still counts for the queue position.
 		if _, err := s.db.Exec("UPDATE students SET cooldown_until = datetime('now') WHERE id = ? AND cooldown_until > datetime('now')", id); err != nil {
@@ -512,17 +529,11 @@ func (s *Server) studentRoutes() {
 	})
 }
 
-// requireStudent returns the id in the {id} path value, or a 404 error unless it names a
-// non-deleted student.
-func (s *Server) requireStudent(r *http.Request) (int64, error) {
-	id, err := pathID(r, "id", "Student not found")
-	if err != nil {
-		return 0, err
-	}
-	if !s.exists("SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id) {
-		return 0, httpx.NotFound("Student not found")
-	}
-	return id, nil
+// requireStudent returns the id in the {id} path value and whether it names a non-deleted
+// student.
+func (s *Server) requireStudent(r *http.Request) (int64, bool) {
+	id, ok := pathID(r, "id")
+	return id, ok && s.exists("SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 }
 
 func (s *Server) handleListStudents(w http.ResponseWriter, r *http.Request) error {
@@ -587,7 +598,8 @@ func (s *Server) handleListStudents(w http.ResponseWriter, r *http.Request) erro
 func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) error {
 	in, err := readCSVImport(r)
 	if err != nil {
-		return err
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return nil
 	}
 	if !in.has("first_name", "last_name", "email") {
 		httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")

@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
-	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
 // writeCSV sends header and rows as a CSV file download.
@@ -96,7 +94,7 @@ func (res *importResult) skip(row csvRecord, format string, args ...any) {
 }
 
 // readCSVImport decodes and parses the {csv} body shared by all import endpoints, returning
-// a 400 error if it is missing or malformed.
+// an error whose message is meant for the client, as a 400, if it is missing or malformed.
 func readCSVImport(r *http.Request) (csvImport, error) {
 	type request struct {
 		CSV string `json:"csv"`
@@ -106,14 +104,14 @@ func readCSVImport(r *http.Request) (csvImport, error) {
 		return csvImport{}, err
 	}
 	if body.CSV == "" {
-		return csvImport{}, httpx.BadRequest("CSV data is required")
+		return csvImport{}, errors.New("CSV data is required")
 	}
 	in, err := parseCSVImport(body.CSV)
 	if err != nil {
-		return csvImport{}, httpx.BadRequest("Invalid CSV: " + err.Error())
+		return csvImport{}, errors.New("Invalid CSV: " + err.Error())
 	}
 	if len(in.rows) == 0 {
-		return csvImport{}, httpx.BadRequest("CSV must have a header row and at least one data row")
+		return csvImport{}, errors.New("CSV must have a header row and at least one data row")
 	}
 	return in, nil
 }

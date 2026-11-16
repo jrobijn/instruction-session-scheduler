@@ -144,3 +144,16 @@ func TestImportInstructorWithDeletedEmail(t *testing.T) {
 		t.Fatalf("import = %v", res)
 	}
 }
+
+func TestInstructorRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	in := e.instructor("Instructor")
+	e.wantRejected(
+		notFound("GET", "/api/instructors/x", nil, "Instructor not found"),
+		notFound("PUT", "/api/instructors/x", nil, "Instructor not found"),
+		notFound("DELETE", "/api/instructors/x", nil, "Instructor not found"),
+		badJSON("POST", "/api/instructors/import"),
+		badJSON("POST", "/api/instructors"),
+		badJSON("PUT", fmt.Sprintf("/api/instructors/%d", in)),
+	)
+}

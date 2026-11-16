@@ -26,3 +26,8 @@ func TestSettings(t *testing.T) {
 		t.Fatal("timezone not applied")
 	}
 }
+
+func TestSettingRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	e.wantRejected(badJSON("PUT", "/api/settings/club_name"))
+}

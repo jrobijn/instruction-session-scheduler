@@ -401,3 +401,30 @@ func TestExportStudents(t *testing.T) {
 		t.Fatalf("export =\n%s\nwant\n%s", body, want)
 	}
 }
+
+func TestStudentRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	st := e.student("Student", e.group("Group"))
+	tt, _ := e.timetable("10:00")
+	p := fmt.Sprintf
+	e.wantRejected(
+		notFound("GET", "/api/students/x", nil, "Student not found"),
+		notFound("GET", "/api/students/x/invitations", nil, "Student not found"),
+		notFound("GET", "/api/students/x/invitation-history", nil, "Student not found"),
+		notFound("PUT", "/api/students/x", nil, "Student not found"),
+		notFound("DELETE", "/api/students/x", nil, "Student not found"),
+		notFound("GET", "/api/students/x/preferred-timeslots", nil, "Student not found"),
+		notFound("PUT", p("/api/students/x/preferred-timeslots/%d", tt), map[string]any{"timeslot_ids": []int{}}, "Student not found"),
+		notFound("PUT", p("/api/students/%d/preferred-timeslots/x", st), map[string]any{"timeslot_ids": []int{}}, "Timetable not found"),
+		notFound("GET", "/api/students/x/groups", nil, "Student not found"),
+		notFound("PUT", "/api/students/x/groups", nil, "Student not found"),
+		notFound("PUT", "/api/students/x/cooldown", map[string]any{"days": 1}, "Student not found"),
+		notFound("DELETE", "/api/students/x/cooldown", nil, "Student not found"),
+		badJSON("POST", "/api/students/import"),
+		badJSON("POST", "/api/students"),
+		badJSON("PUT", p("/api/students/%d", st)),
+		badJSON("PUT", p("/api/students/%d/preferred-timeslots/%d", st, tt)),
+		badJSON("PUT", p("/api/students/%d/groups", st)),
+		badJSON("PUT", p("/api/students/%d/cooldown", st)),
+	)
+}

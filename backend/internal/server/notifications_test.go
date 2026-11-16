@@ -39,7 +39,9 @@ func TestNotifications(t *testing.T) {
 	if unread() != 24 {
 		t.Fatal("mark read")
 	}
-	e.admin(http.MethodPost, "/api/notifications/abc/read", nil).wantError(http.StatusBadRequest, "Invalid id")
+	e.admin(http.MethodPost, "/api/notifications/1/read", nil).status(http.StatusOK) // already read
+	e.admin(http.MethodPost, "/api/notifications/abc/read", nil).wantError(http.StatusNotFound, "Notification not found")
+	e.admin(http.MethodPost, "/api/notifications/999999/read", nil).wantError(http.StatusNotFound, "Notification not found")
 	e.admin(http.MethodPost, "/api/notifications/read-all", nil).status(http.StatusOK)
 	if unread() != 0 {
 		t.Fatal("read-all")

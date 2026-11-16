@@ -163,37 +163,30 @@ func (s *Server) handleGetInvitation(w http.ResponseWriter, r *http.Request) err
 	return nil
 }
 
-// loadOpenInvitation fetches the invitation by token and applies the checks shared by the
-// public actions, returning a 404 or 400 error if one fails.
-func (s *Server) loadOpenInvitation(r *http.Request, requiredStatus string) (invitationDetails, error) {
-	inv, found, err := s.invitationByToken(r.PathValue("token"))
-	if err != nil {
-		return inv, err
-	}
-	if !found {
-		return inv, httpx.NotFound("Invitation not found")
-	}
+// closedReason applies the checks shared by the public invitation actions, which need the
+// invitation to have requiredStatus. It returns why the action is not allowed (to answer
+// with a 400), or "" if it is.
+func (s *Server) closedReason(inv invitationDetails, requiredStatus string) string {
 	if inv.SessionStatus == "completed" {
-		return inv, httpx.BadRequest("This session has already passed")
+		return "This session has already passed"
 	}
 	if inv.Status != requiredStatus {
-		msg := fmt.Sprintf("Invitation already %s", inv.Status)
 		if requiredStatus == "confirmed" {
-			msg = fmt.Sprintf("Cannot cancel — invitation is %s", inv.Status)
+			return fmt.Sprintf("Cannot cancel — invitation is %s", inv.Status)
 		}
-		return inv, httpx.BadRequest(msg)
+		return fmt.Sprintf("Invitation already %s", inv.Status)
 	}
 	if requiredStatus == "invited" {
 		// The expiry timer may not have fired yet.
-		if st := effectiveStatus(inv.timing(), s.expiryMinutes(), s.clubLocation(), nowFunc()); st != "invited" {
-			msg := "This invitation has expired"
-			if st == "invalidated" {
-				msg = "This time slot has already started"
-			}
-			return inv, httpx.BadRequest(msg)
+		switch effectiveStatus(inv.timing(), s.expiryMinutes(), s.clubLocation(), nowFunc()) {
+		case "invited":
+		case "invalidated":
+			return "This time slot has already started"
+		default:
+			return "This invitation has expired"
 		}
 	}
-	return inv, nil
+	return ""
 }
 
 func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request) error {
@@ -204,9 +197,17 @@ func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request)
 	if httpx.Decode(r, &in) != nil {
 		in.DisciplineID = 0
 	}
-	inv, err := s.loadOpenInvitation(r, "invited")
+	inv, found, err := s.invitationByToken(r.PathValue("token"))
 	if err != nil {
 		return err
+	}
+	if !found {
+		httpx.Error(w, http.StatusNotFound, "Invitation not found")
+		return nil
+	}
+	if msg := s.closedReason(inv, "invited"); msg != "" {
+		httpx.Error(w, http.StatusBadRequest, msg)
+		return nil
 	}
 	disciplineID := in.DisciplineID
 	invID, sessionID := inv.ID, inv.SessionID
@@ -263,9 +264,17 @@ func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleCancelInvitation(w http.ResponseWriter, r *http.Request) error {
-	inv, err := s.loadOpenInvitation(r, "confirmed")
+	inv, found, err := s.invitationByToken(r.PathValue("token"))
 	if err != nil {
 		return err
+	}
+	if !found {
+		httpx.Error(w, http.StatusNotFound, "Invitation not found")
+		return nil
+	}
+	if msg := s.closedReason(inv, "confirmed"); msg != "" {
+		httpx.Error(w, http.StatusBadRequest, msg)
+		return nil
 	}
 	invID, sessionID := inv.ID, inv.SessionID
 	wasFull, err := s.sessionFull(sessionID)
@@ -302,9 +311,17 @@ func (s *Server) handleCancelInvitation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleDeclineInvitation(w http.ResponseWriter, r *http.Request) error {
-	inv, err := s.loadOpenInvitation(r, "invited")
+	inv, found, err := s.invitationByToken(r.PathValue("token"))
 	if err != nil {
 		return err
+	}
+	if !found {
+		httpx.Error(w, http.StatusNotFound, "Invitation not found")
+		return nil
+	}
+	if msg := s.closedReason(inv, "invited"); msg != "" {
+		httpx.Error(w, http.StatusBadRequest, msg)
+		return nil
 	}
 	invID, sessionID := inv.ID, inv.SessionID
 	if _, err := s.db.Exec("UPDATE invitations SET status = 'declined', responded_at = datetime('now') WHERE id = ?", invID); err != nil {

@@ -19,42 +19,10 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// handlerFunc is an http.HandlerFunc that may return an error. An *httpx.StatusError (from
-// httpx.NotFound, httpx.BadRequest, ...) becomes that response; any other error is
-// unexpected and becomes a 500 (like an uncaught exception in an Express handler). A
-// handler that returns an error must not have written a response.
-type handlerFunc func(w http.ResponseWriter, r *http.Request) error
-
-func (s *Server) wrap(fn handlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if err := fn(w, r); err != nil {
-			s.writeError(w, err)
-		}
-	}
-}
-
-// writeError writes err as its *httpx.StatusError response, or as a 500.
-func (s *Server) writeError(w http.ResponseWriter, err error) {
-	if !httpx.WriteError(w, err) {
-		s.internalError(w, err)
-	}
-}
-
-// adminRoute registers an authenticated route.
-func (s *Server) adminRoute(pattern string, fn handlerFunc) {
-	s.mux.HandleFunc(pattern, s.admin(s.wrap(fn)))
-}
-
-// publicRoute registers an unauthenticated route.
-func (s *Server) publicRoute(pattern string, fn handlerFunc) {
-	s.mux.HandleFunc(pattern, s.wrap(fn))
-}
-
-// decode reads a JSON request body into a T (usually a struct with json tags), returning a
-// 400 error if it is malformed or a field has the wrong type. Unknown fields are ignored
-// and an empty body leaves T at its zero value.
+// decode reads a JSON request body into a T (usually a struct with json tags). If the body
+// is malformed or a field has the wrong type it returns an error whose message is meant for
+// the client, as a 400. Unknown fields are ignored and an empty body leaves T at its zero
+// value.
 //
 // Conventions for request structs: required values are plain types, validated with
 // == "" / == 0; values that may be left out of a partial update are pointers, which bind as
@@ -64,9 +32,9 @@ func decode[T any](r *http.Request) (T, error) {
 	if err := httpx.Decode(r, &v); err != nil {
 		var typeErr *json.UnmarshalTypeError
 		if errors.As(err, &typeErr) && typeErr.Field != "" {
-			return v, httpx.BadRequest("Invalid value for " + typeErr.Field)
+			return v, errors.New("Invalid value for " + typeErr.Field)
 		}
-		return v, httpx.BadRequest("Invalid JSON body")
+		return v, errors.New("Invalid JSON body")
 	}
 	return v, nil
 }
@@ -132,16 +100,17 @@ func (s *Server) exists(query string, a ...any) bool {
 	return s.db.QueryRow(query, a...).Scan(&one) == nil
 }
 
-// pathID parses the integer path parameter name. A value that isn't an integer can't match
-// any row, so it gets the same 404 error (with notFound as the message) as an id that
-// doesn't exist.
-func pathID(r *http.Request, name, notFound string) (int64, error) {
+// pathID parses the integer path parameter name, reporting whether it is one. A value that
+// isn't an integer can't match any row, so callers answer it with the same 404 as an id
+// that doesn't exist.
+func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
-	if err != nil {
-		return 0, httpx.NotFound(notFound)
-	}
-	return id, nil
+	return id, err == nil
 }
+
+// errNotFound lets a transaction roll back because a row is missing; the handler answers it
+// with a 404.
+var errNotFound = errors.New("not found")
 
 // placeholders returns "?,?,?" for n values (n >= 1).
 func placeholders(n int) string {

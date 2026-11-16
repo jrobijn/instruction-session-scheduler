@@ -61,3 +61,25 @@ func TestDisciplineImportExport(t *testing.T) {
 		t.Fatalf("export = %q", body)
 	}
 }
+
+func TestDisciplineRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("Group")
+	d := e.discipline("Discipline", g)
+	p := fmt.Sprintf
+	e.wantRejected(
+		notFound("GET", "/api/disciplines/x", nil, "Discipline not found"),
+		notFound("PUT", "/api/disciplines/x", nil, "Discipline not found"),
+		notFound("PUT", "/api/disciplines/x/groups", map[string]any{"group_ids": []int{}}, "Discipline not found"),
+		notFound("GET", "/api/disciplines/x/groups", nil, "Discipline not found"),
+		notFound("POST", p("/api/disciplines/x/groups/%d", g), nil, "Discipline not found"),
+		notFound("POST", p("/api/disciplines/%d/groups/x", d), nil, "Group not found"),
+		notFound("DELETE", p("/api/disciplines/x/groups/%d", g), nil, "Discipline not found"),
+		notFound("DELETE", p("/api/disciplines/%d/groups/x", d), nil, "Group not found"),
+		notFound("DELETE", "/api/disciplines/x", nil, "Discipline not found"),
+		badJSON("POST", "/api/disciplines/import"),
+		badJSON("POST", "/api/disciplines"),
+		badJSON("PUT", p("/api/disciplines/%d", d)),
+		badJSON("PUT", p("/api/disciplines/%d/groups", d)),
+	)
+}

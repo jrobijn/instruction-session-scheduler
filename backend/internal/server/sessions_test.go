@@ -574,3 +574,47 @@ func TestCancelAndReactivateSession(t *testing.T) {
 	f.exec("UPDATE training_sessions SET status = 'completed'")
 	f.admin(http.MethodPost, sessionPath(f.sessionID, "cancel"), nil).wantError(http.StatusBadRequest, "Cannot cancel a completed session")
 }
+
+func TestSessionRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("Group")
+	st := e.student("Student", g)
+	in := e.instructor("Instructor")
+	tt, slots := e.timetable("10:00")
+	se := e.session("2030-06-03", tt)
+	inv := e.invitation(se, st, slots[0], e.assign(se, in), g, "invited")
+	p := fmt.Sprintf
+	e.wantRejected(
+		notFound("GET", "/api/sessions/x", nil, "Training session not found"),
+		notFound("GET", "/api/sessions/x/events", nil, "Not found"),
+		notFound("PUT", "/api/sessions/x", nil, "Training session not found"),
+		notFound("DELETE", "/api/sessions/x", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/instructors", map[string]any{"instructor_id": in}, "Training session not found"),
+		notFound("DELETE", p("/api/sessions/x/instructors/%d", in), nil, "Training session not found"),
+		notFound("DELETE", p("/api/sessions/%d/instructors/x", se), nil, "Assignment not found"),
+		notFound("POST", p("/api/sessions/x/instructors/%d/replace", in), map[string]any{"new_instructor_id": in}, "Training session not found"),
+		notFound("POST", p("/api/sessions/%d/instructors/x/replace", se), map[string]any{"new_instructor_id": in}, "Original instructor not assigned to this session"),
+		notFound("POST", "/api/sessions/x/generate-schedule", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/send-invitations", nil, "Training session not found"),
+		notFound("POST", p("/api/sessions/x/invitations/%d/toggle-no-show", inv), nil, "Training session not found"),
+		notFound("POST", p("/api/sessions/%d/invitations/x/toggle-no-show", se), nil, "Invitation not found"),
+		notFound("POST", "/api/sessions/x/complete", nil, "Training session not found"),
+		notFound("GET", "/api/sessions/x/available-students", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/invitations", nil, "Training session not found"),
+		notFound("DELETE", p("/api/sessions/x/invitations/%d", inv), nil, "Training session not found"),
+		notFound("DELETE", p("/api/sessions/%d/invitations/x", se), nil, "Invitation not found"),
+		notFound("POST", p("/api/sessions/x/invitations/%d/admin-cancel", inv), nil, "Training session not found"),
+		notFound("POST", p("/api/sessions/%d/invitations/x/admin-cancel", se), nil, "Invitation not found"),
+		notFound("POST", "/api/sessions/x/auto-schedule-slot", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/cancel", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/reactivate", nil, "Training session not found"),
+		badJSON("POST", "/api/sessions"),
+		badJSON("PUT", p("/api/sessions/%d", se)),
+		badJSON("POST", p("/api/sessions/%d/instructors", se)),
+		badJSON("POST", p("/api/sessions/%d/instructors/%d/replace", se, in)),
+		badJSON("POST", p("/api/sessions/%d/invitations", se)),
+	)
+	// Auto-scheduling reads its body only once invitations are out.
+	e.exec("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?", se)
+	e.wantRejected(badJSON("POST", p("/api/sessions/%d/auto-schedule-slot", se)))
+}

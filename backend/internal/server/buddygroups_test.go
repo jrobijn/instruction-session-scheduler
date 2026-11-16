@@ -77,3 +77,17 @@ func TestBuddyGroupCreateIsAtomic(t *testing.T) {
 		t.Fatal("a failed create left a buddy group behind")
 	}
 }
+
+func TestBuddyGroupRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("Group")
+	st := e.student("Student", g)
+	bg := e.buddies(st, e.student("Buddy", g))
+	p := fmt.Sprintf
+	e.wantRejected(
+		notFound("DELETE", "/api/buddy-groups/x", nil, "Buddy group not found"),
+		notFound("DELETE", p("/api/buddy-groups/x/members/%d", st), nil, "Buddy group not found"),
+		notFound("DELETE", p("/api/buddy-groups/%d/members/x", bg), nil, "Student not found"),
+		badJSON("POST", "/api/buddy-groups/quick-create"),
+	)
+}

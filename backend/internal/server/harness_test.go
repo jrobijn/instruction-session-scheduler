@@ -192,6 +192,41 @@ func (r *response) wantError(status int, msg string) {
 	}
 }
 
+// rejected is an admin request that must fail with an error response before changing
+// anything, so many can run against one testEnv.
+type rejected struct {
+	method, path string
+	body         any
+	status       int
+	msg          string
+}
+
+// notFound is a request whose path names no row (or isn't an integer); body, if given, is
+// valid so the 404 isn't preempted by body validation.
+func notFound(method, path string, body any, msg string) rejected {
+	return rejected{method, path, body, http.StatusNotFound, msg}
+}
+
+// badJSON is a request with a malformed JSON body.
+func badJSON(method, path string) rejected {
+	return rejected{method, path, "{", http.StatusBadRequest, "Invalid JSON body"}
+}
+
+// wantRejected sends each request and checks its error response.
+func (e *testEnv) wantRejected(cases ...rejected) {
+	e.t.Helper()
+	for _, c := range cases {
+		r := e.admin(c.method, c.path, c.body)
+		var got struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(r.Body, &got)
+		if r.Code != c.status || got.Error != c.msg {
+			e.t.Errorf("%s %s: %d %q, want %d %q", c.method, c.path, r.Code, got.Error, c.status, c.msg)
+		}
+	}
+}
+
 // --- database ---------------------------------------------------------------------------
 
 // exec runs a statement.
