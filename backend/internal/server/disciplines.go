@@ -375,27 +375,19 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
-
-		var disciplines []DisciplineOption
-		switch {
-		case !found:
-			disciplines, err = db.Many[DisciplineOption](s.db, "SELECT id, name FROM disciplines WHERE active = 1 ORDER BY name ASC")
-		case inv.GroupID != nil:
-			// Auto-scheduled: disciplines linked to the invitation's specific group.
-			disciplines, err = db.Many[DisciplineOption](s.db, `
-				SELECT DISTINCT d.id, d.name FROM disciplines d
-				JOIN discipline_groups dg ON dg.discipline_id = d.id
-				WHERE d.active = 1 AND dg.group_id = ?
-				ORDER BY d.name ASC`, *inv.GroupID)
-		default:
-			// Manually assigned (no group): disciplines from all the student's groups.
-			disciplines, err = db.Many[DisciplineOption](s.db, `
-				SELECT DISTINCT d.id, d.name FROM disciplines d
-				JOIN discipline_groups dg ON dg.discipline_id = d.id
-				JOIN student_groups sg ON sg.group_id = dg.group_id
-				WHERE d.active = 1 AND sg.student_id = ?
-				ORDER BY d.name ASC`, inv.StudentID)
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Invitation not found")
+			return nil
 		}
+
+		// Auto-scheduled invitations use the group they were scheduled from;
+		// manual ones (no group) fall back to the student's current group.
+		disciplines, err := db.Many[DisciplineOption](s.db, `
+			SELECT d.id, d.name FROM disciplines d
+			JOIN discipline_groups dg ON dg.discipline_id = d.id
+			WHERE d.active = 1
+			  AND dg.group_id = COALESCE(?, (SELECT group_id FROM student_groups WHERE student_id = ?))
+			ORDER BY d.name ASC`, inv.GroupID, inv.StudentID)
 		if err != nil {
 			return err
 		}

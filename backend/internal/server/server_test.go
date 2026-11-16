@@ -159,9 +159,7 @@ func TestPublicDisciplines(t *testing.T) {
 	if got := names("/api/public/disciplines/" + f.tokenOf("M")); got != "Seniors discipline" {
 		t.Errorf("for manual invitation = %s, want the student's group's", got)
 	}
-	if got := names("/api/public/disciplines/unknown"); got != "Juniors discipline,Seniors discipline" {
-		t.Errorf("for unknown token = %s, want all active", got)
-	}
+	f.public(http.MethodGet, "/api/public/disciplines/unknown", nil).status(http.StatusNotFound)
 }
 
 // --- server-sent events -----------------------------------------------------------------
