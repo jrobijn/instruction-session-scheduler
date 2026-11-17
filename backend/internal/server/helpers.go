@@ -71,14 +71,6 @@ func pathID(r *http.Request, name string) (int64, bool) {
 	return id, err == nil
 }
 
-// placeholders returns "?,?,?" for n values (n >= 1).
-func placeholders(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	return strings.Repeat("?,", n-1) + "?"
-}
-
 // isValidTimeZone matches the Intl.DateTimeFormat check in expiryTimers.ts.
 func isValidTimeZone(tz string) bool {
 	if tz == "" || tz == "Local" {

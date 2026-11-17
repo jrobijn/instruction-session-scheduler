@@ -79,12 +79,6 @@ func TestIsUniqueErr(t *testing.T) {
 	}
 }
 
-func TestPlaceholders(t *testing.T) {
-	if placeholders(0) != "" || placeholders(1) != "?" || placeholders(3) != "?,?,?" {
-		t.Error("placeholders")
-	}
-}
-
 func TestEncodeJSON(t *testing.T) {
 	if got := encodeJSON(map[string]any{"html": "<b>&</b>"}); got != `{"html":"<b>&</b>"}` {
 		t.Errorf("encodeJSON = %s", got)

@@ -28,6 +28,10 @@ type Student struct {
 	CooldownUntil    *string `db:"cooldown_until" json:"cooldown_until"`
 }
 
+// everyDay is the preferred_days value for a student available on every weekday; it matches
+// the students.preferred_days column default.
+const everyDay = "0|1|2|3|4|5|6"
+
 func (s *Server) listStudents() ([]Student, error) {
 	return db.Many[Student](s.db, `
 		SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
@@ -200,15 +204,15 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
 			return nil
 		}
-		cols := []string{"first_name", "last_name", "email", "membership_id"}
-		vals := []any{in.FirstName, in.LastName, in.Email, in.MembershipID}
-		if in.PreferredDays != "" {
-			cols, vals = append(cols, "preferred_days"), append(vals, in.PreferredDays)
+		if in.PreferredDays == "" {
+			in.PreferredDays = everyDay
 		}
 		row, err := db.Get[Student](s.db, `
-			INSERT INTO students (`+strings.Join(cols, ", ")+`) VALUES (`+placeholders(len(cols))+`)
+			INSERT INTO students (first_name, last_name, email, membership_id, preferred_days)
+			VALUES (?, ?, ?, ?, ?)
 			RETURNING id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
-				preferred_days, active, cooldown_until`, vals...)
+				preferred_days, active, cooldown_until`,
+			in.FirstName, in.LastName, in.Email, in.MembershipID, in.PreferredDays)
 		if isUniqueErr(err, "students.email") {
 			httpx.Error(w, http.StatusConflict, "A student with this email already exists")
 			return nil
@@ -653,32 +657,38 @@ func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) er
 			}
 			membershipID := row.get("membership_id")
 
-			// Optional columns: written only when the value is not blank. A number column
-			// holding anything but a whole number makes the row an error.
-			var cols []string
-			var vals []any
+			// Optional columns stay nil when blank, which keeps the current value. A number
+			// column holding anything but a whole number makes the row an error.
+			var opt importOptional
 			invalid := ""
-			for _, c := range []string{"attended_sessions", "no_show_count", "active"} {
-				v := row.get(c)
+			for _, f := range []struct {
+				col string
+				dst **int
+			}{
+				{"attended_sessions", &opt.AttendedSessions},
+				{"no_show_count", &opt.NoShowCount},
+				{"active", &opt.Active},
+			} {
+				v := row.get(f.col)
 				if v == "" {
 					continue
 				}
 				n, err := strconv.Atoi(v)
 				if err != nil {
-					invalid = fmt.Sprintf("%s must be a whole number, got %q", c, v)
+					invalid = fmt.Sprintf("%s must be a whole number, got %q", f.col, v)
 					break
 				}
-				cols, vals = append(cols, c), append(vals, n)
+				*f.dst = &n
 			}
 			if invalid != "" {
 				result.skip(row, "%s", invalid)
 				continue
 			}
 			if d := row.get("preferred_days"); d != "" {
-				cols, vals = append(cols, "preferred_days"), append(vals, d)
+				opt.PreferredDays = &d
 			}
 
-			err := importStudentRow(tx, first, last, email, membershipID, cols, vals, defaultGroup)
+			err := importStudentRow(tx, first, last, email, membershipID, opt, defaultGroup)
 			if isUniqueErr(err, "students.email") { // the email belongs to a deleted student
 				result.skip(row, "A student with this email already exists")
 				continue
@@ -697,18 +707,29 @@ func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
+// importOptional holds an import row's optional columns; nil means the cell was blank.
+type importOptional struct {
+	AttendedSessions *int
+	NoShowCount      *int
+	Active           *int
+	PreferredDays    *string
+}
+
 // importStudentRow updates the student with this email, or inserts a new one, and puts them
-// in the default group (if any) when they have no group yet.
-func importStudentRow(tx *sqlx.Tx, first, last, email, membershipID string, cols []string, vals []any, defaultGroup int64) error {
+// in the default group (if any) when they have no group yet. Blank optional columns keep the
+// existing student's value, or the column default for a new student.
+func importStudentRow(tx *sqlx.Tx, first, last, email, membershipID string, opt importOptional, defaultGroup int64) error {
 	var existing int64
 	switch err := tx.QueryRow("SELECT id FROM students WHERE email = ? AND deleted_at IS NULL", email).Scan(&existing); err {
 	case nil:
-		set := "first_name = ?, last_name = ?, membership_id = ?"
-		for _, c := range cols {
-			set += ", " + c + " = ?"
-		}
-		a := append([]any{first, last, membershipID}, vals...)
-		if _, err := tx.Exec("UPDATE students SET "+set+" WHERE id = ?", append(a, existing)...); err != nil {
+		if _, err := tx.Exec(`
+			UPDATE students SET first_name = ?, last_name = ?, membership_id = ?,
+				attended_sessions = COALESCE(?, attended_sessions),
+				no_show_count = COALESCE(?, no_show_count),
+				active = COALESCE(?, active),
+				preferred_days = COALESCE(?, preferred_days)
+			WHERE id = ?`,
+			first, last, membershipID, opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, existing); err != nil {
 			return err
 		}
 		if defaultGroup != 0 {
@@ -723,10 +744,15 @@ func importStudentRow(tx *sqlx.Tx, first, last, email, membershipID string, cols
 		}
 		return nil
 	case sql.ErrNoRows:
-		names := append([]string{"first_name", "last_name", "email", "membership_id"}, cols...)
-		a := append([]any{first, last, email, membershipID}, vals...)
+		// The fallbacks match the students column defaults.
 		var studentID int64
-		if err := tx.QueryRow("INSERT INTO students ("+strings.Join(names, ", ")+") VALUES ("+placeholders(len(names))+") RETURNING id", a...).Scan(&studentID); err != nil {
+		if err := tx.QueryRow(`
+			INSERT INTO students (first_name, last_name, email, membership_id,
+				attended_sessions, no_show_count, active, preferred_days)
+			VALUES (?, ?, ?, ?, COALESCE(?, 0), COALESCE(?, 0), COALESCE(?, 1), COALESCE(?, ?))
+			RETURNING id`,
+			first, last, email, membershipID,
+			opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, everyDay).Scan(&studentID); err != nil {
 			return err
 		}
 		if defaultGroup != 0 {

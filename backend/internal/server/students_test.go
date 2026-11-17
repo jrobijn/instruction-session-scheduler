@@ -382,6 +382,12 @@ func TestImportStudents(t *testing.T) {
 	if g := e.row("SELECT group_id FROM student_groups WHERE student_id = ?", existing); toInt64(g["group_id"]) != other {
 		t.Errorf("existing student moved to group %v", g)
 	}
+	// A new student's blank columns get the same values as the schema's column defaults.
+	e.exec("INSERT INTO students (first_name, last_name, email) VALUES ('Raw', 'Ng', 'raw@example.test')")
+	const optional = "SELECT membership_id, attended_sessions, no_show_count, active, preferred_days FROM students WHERE email = ?"
+	if bo, raw := e.row(optional, "bo@example.test"), e.row(optional, "raw@example.test"); fmt.Sprint(bo) != fmt.Sprint(raw) {
+		t.Errorf("imported defaults = %v, column defaults = %v", bo, raw)
+	}
 
 	e.admin(http.MethodPost, "/api/students/import", map[string]any{"csv": "first_name,email\nA,a@example.test"}).
 		wantError(http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
