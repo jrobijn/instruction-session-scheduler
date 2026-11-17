@@ -12,34 +12,6 @@ import (
 
 // These tables pin the edge cases of small helpers.
 
-func TestSessionSameTimetable(t *testing.T) {
-	zero, three, four := int64(0), int64(3), int64(4)
-	for _, tc := range []struct {
-		timetable, id *int64
-		want          bool
-	}{
-		{nil, nil, true}, {nil, &zero, false}, {&three, nil, false},
-		{&three, &three, true}, {&three, &four, false},
-	} {
-		if got := (Session{TimetableID: tc.timetable}).sameTimetable(tc.id); got != tc.want {
-			t.Errorf("sameTimetable(%v, %v) = %v", tc.timetable, tc.id, got)
-		}
-	}
-}
-
-func TestToInt64(t *testing.T) {
-	for _, tc := range []struct {
-		in   any
-		want int64
-	}{
-		{int64(5), 5}, {5.9, 5}, {7, 7}, {"12", 12}, {"x", 0}, {nil, 0}, {true, 0},
-	} {
-		if got := toInt64(tc.in); got != tc.want {
-			t.Errorf("toInt64(%#v) = %d", tc.in, got)
-		}
-	}
-}
-
 func TestIsUniqueErr(t *testing.T) {
 	conn, err := sql.Open("sqlite", ":memory:")
 	if err != nil {

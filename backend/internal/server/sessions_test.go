@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func TestSessionSameTimetable(t *testing.T) {
+	zero, three, four := int64(0), int64(3), int64(4)
+	for _, tc := range []struct {
+		timetable, id *int64
+		want          bool
+	}{
+		{nil, nil, true}, {nil, &zero, false}, {&three, nil, false},
+		{&three, &three, true}, {&three, &four, false},
+	} {
+		if got := (Session{TimetableID: tc.timetable}).sameTimetable(tc.id); got != tc.want {
+			t.Errorf("sameTimetable(%v, %v) = %v", tc.timetable, tc.id, got)
+		}
+	}
+}
+
 func sessionPath(id int64, rest ...string) string {
 	p := fmt.Sprintf("/api/sessions/%d", id)
 	if len(rest) > 0 {
