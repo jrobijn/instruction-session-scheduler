@@ -47,10 +47,14 @@ func main() {
 	app.Start()
 	defer app.Stop()
 
+	// There is no reverse proxy in front of the server, so it sets its own timeouts. No
+	// WriteTimeout: it would cut off the long-lived SSE streams.
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           app.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
