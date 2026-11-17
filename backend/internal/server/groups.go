@@ -505,7 +505,7 @@ func (s *Server) groupRoutes() {
 		if err != nil {
 			return err
 		}
-		if changes(res) == 0 {
+		if n, _ := res.RowsAffected(); n == 0 {
 			httpx.Error(w, http.StatusNotFound, "Member not found")
 			return nil
 		}

@@ -70,7 +70,7 @@ func TestDisciplineRoutesRejectBadInput(t *testing.T) {
 	p := fmt.Sprintf
 	e.wantRejected(
 		notFound("GET", "/api/disciplines/x", nil, "Discipline not found"),
-		notFound("PUT", "/api/disciplines/x", nil, "Discipline not found"),
+		notFound("PUT", "/api/disciplines/x", map[string]any{}, "Discipline not found"),
 		notFound("PUT", "/api/disciplines/x/groups", map[string]any{"group_ids": []int{}}, "Discipline not found"),
 		notFound("GET", "/api/disciplines/x/groups", nil, "Discipline not found"),
 		notFound("POST", p("/api/disciplines/x/groups/%d", g), nil, "Discipline not found"),

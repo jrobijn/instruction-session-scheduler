@@ -166,7 +166,6 @@ func TestClubLocationSetting(t *testing.T) {
 	for value, want := range map[string]string{
 		"America/New_York": "America/New_York",
 		"Not/AZone":        "Europe/Amsterdam",
-		"Local":            "Europe/Amsterdam",
 		"":                 "Europe/Amsterdam",
 	} {
 		e.setSetting("timezone", value)

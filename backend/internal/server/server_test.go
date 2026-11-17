@@ -20,7 +20,7 @@ func TestLogin(t *testing.T) {
 	e := newTestEnv(t)
 	e.public(http.MethodPost, "/api/auth/login", map[string]any{"password": "wrong"}).wantError(http.StatusUnauthorized, "Invalid password")
 	e.public(http.MethodPost, "/api/auth/login", map[string]any{}).wantError(http.StatusUnauthorized, "Invalid password")
-	e.public(http.MethodPost, "/api/auth/login", "{").wantError(http.StatusBadRequest, "Invalid JSON")
+	e.public(http.MethodPost, "/api/auth/login", "{").wantError(http.StatusBadRequest, "Invalid JSON body")
 
 	res := e.public(http.MethodPost, "/api/auth/login", map[string]any{"password": testAdminPassword}).status(http.StatusOK)
 	var cookie *http.Cookie

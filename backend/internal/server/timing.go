@@ -25,10 +25,8 @@ func (s *Server) expiryMinutes() float64 {
 
 func (s *Server) clubLocation() *time.Location {
 	tz := db.Setting(s.db, "timezone", defaultTimeZone)
-	if isValidTimeZone(tz) {
-		if loc, err := time.LoadLocation(tz); err == nil {
-			return loc
-		}
+	if loc, err := time.LoadLocation(tz); err == nil {
+		return loc
 	}
 	loc, _ := time.LoadLocation(defaultTimeZone)
 	return loc

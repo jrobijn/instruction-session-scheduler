@@ -345,7 +345,7 @@ func TestGenerateScheduleOverflowFillsUnusedQuota(t *testing.T) {
 	f.generate().status(http.StatusOK)
 	wantInvited(t, f.placements(), "A1", "B1", "B2", "B3")
 	log := f.decisionLog("B3")
-	if log["overflow"] != true || log["group_quota"] != nil {
+	if log["overflow"] != true || log["group_quota"] != "" {
 		t.Fatalf("B3 decision log = %v, want overflow without quota", log)
 	}
 }
@@ -435,8 +435,8 @@ func TestGenerateScheduleBuddyPulledUp(t *testing.T) {
 	if near := f.decisionLog("D")["buddy_placed_near"]; near != "A Test" {
 		t.Fatalf("buddy_placed_near = %v, want %q", near, "A Test")
 	}
-	if near := f.decisionLog("A")["buddy_placed_near"]; near != nil {
-		t.Fatalf("A buddy_placed_near = %v, want null", near)
+	if near := f.decisionLog("A")["buddy_placed_near"]; near != "" {
+		t.Fatalf("A buddy_placed_near = %v, want empty", near)
 	}
 }
 

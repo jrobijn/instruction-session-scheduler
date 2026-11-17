@@ -95,7 +95,7 @@ func TestGroupMembersEndpoints(t *testing.T) {
 
 	path := groupPath(b, "members", fmt.Sprint(s), "invite-next")
 	e.admin(http.MethodPut, path, map[string]any{}).wantError(http.StatusBadRequest, "enabled (boolean) is required")
-	e.admin(http.MethodPut, path, map[string]any{"enabled": "yes"}).wantError(http.StatusBadRequest, "Invalid value for enabled")
+	e.admin(http.MethodPut, path, map[string]any{"enabled": "yes"}).wantError(http.StatusBadRequest, "Invalid JSON body")
 	e.admin(http.MethodPut, groupPath(a, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
 		wantError(http.StatusNotFound, "Member not found")
 	e.admin(http.MethodPut, groupPath(999, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
@@ -262,7 +262,7 @@ func TestGroupRoutesRejectBadInput(t *testing.T) {
 	st := e.student("Student", g)
 	p := fmt.Sprintf
 	e.wantRejected(
-		notFound("PUT", "/api/groups/x", nil, "Group not found"),
+		notFound("PUT", "/api/groups/x", map[string]any{}, "Group not found"),
 		notFound("DELETE", "/api/groups/x", nil, "Group not found"),
 		notFound("POST", "/api/groups/x/set-default", nil, "Group not found"),
 		notFound("POST", "/api/groups/999999/set-default", nil, "Group not found"), // inside the transaction

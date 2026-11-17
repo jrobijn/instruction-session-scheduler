@@ -146,7 +146,7 @@ func TestTimetableRoutesRejectBadInput(t *testing.T) {
 	p := fmt.Sprintf
 	e.wantRejected(
 		notFound("GET", "/api/timetables/x", nil, "Timetable not found"),
-		notFound("PUT", "/api/timetables/x", nil, "Timetable not found"),
+		notFound("PUT", "/api/timetables/x", map[string]any{}, "Timetable not found"),
 		notFound("POST", "/api/timetables/x/save", nil, "Timetable not found"),
 		notFound("POST", "/api/timetables/x/set-default", nil, "Timetable not found"),
 		notFound("POST", "/api/timetables/x/toggle-active", nil, "Timetable not found"),

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/scheduling"
@@ -170,7 +171,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		ts := timeslots[p.Timeslot]
 		slotID := freeSlots[p.Timeslot][0]
 		freeSlots[p.Timeslot] = freeSlots[p.Timeslot][1:]
-		token := newToken()
+		token := uuid.NewString()
 
 		var quota, buddyOf string
 		if !p.Overflow {
@@ -186,13 +187,13 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 				InviteNext:           st.InviteNextPendingSince != nil,
 				CandidateRank:        p.Rank,
 				CandidatesConsidered: p.Considered,
-				GroupName:            nonEmpty(groupName[p.GroupID]),
-				GroupColor:           nonEmpty(groupColor[p.GroupID]),
+				GroupName:            groupName[p.GroupID],
+				GroupColor:           groupColor[p.GroupID],
 				PreferredTimeslots:   prefs.startTimes(st.ID, timeslots),
 				PreferredDays:        preferredDays(st.PreferredDays, clubDays),
-				BuddyPlacedNear:      nonEmpty(buddyOf),
+				BuddyPlacedNear:      buddyOf,
 			},
-			GroupQuota: nonEmpty(quota),
+			GroupQuota: quota,
 			Overflow:   p.Overflow,
 		})
 		if _, err := tx.Exec(`

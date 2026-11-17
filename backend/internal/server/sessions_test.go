@@ -69,7 +69,7 @@ func TestSessionDateValidation(t *testing.T) {
 	for _, date := range []string{"next monday", "2030-02-30", "07-01-2030"} {
 		e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": date}).wantError(http.StatusBadRequest, "Invalid date")
 	}
-	e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": 20300107}).wantError(http.StatusBadRequest, "Invalid value for date")
+	e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": 20300107}).wantError(http.StatusBadRequest, "Invalid JSON body")
 	if n := len(e.rows("SELECT 1 FROM training_sessions")); n != 0 {
 		t.Fatalf("%d sessions created from invalid dates", n)
 	}
@@ -600,9 +600,9 @@ func TestSessionRoutesRejectBadInput(t *testing.T) {
 	e.wantRejected(
 		notFound("GET", "/api/sessions/x", nil, "Training session not found"),
 		notFound("GET", "/api/sessions/x/events", nil, "Not found"),
-		notFound("PUT", "/api/sessions/x", nil, "Training session not found"),
+		notFound("PUT", "/api/sessions/x", map[string]any{}, "Training session not found"),
 		notFound("DELETE", "/api/sessions/x", nil, "Training session not found"),
-		notFound("PUT", "/api/sessions/x/timetable", nil, "Training session not found"),
+		notFound("PUT", "/api/sessions/x/timetable", map[string]any{}, "Training session not found"),
 		notFound("POST", "/api/sessions/x/instructors", map[string]any{"instructor_id": in}, "Training session not found"),
 		notFound("DELETE", p("/api/sessions/x/instructors/%d", in), nil, "Training session not found"),
 		notFound("DELETE", p("/api/sessions/%d/instructors/x", se), nil, "Assignment not found"),

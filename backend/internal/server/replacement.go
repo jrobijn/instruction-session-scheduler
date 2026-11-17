@@ -6,6 +6,7 @@ package server
 import (
 	mrand "math/rand/v2"
 
+	"github.com/google/uuid"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/email"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/scheduling"
@@ -120,18 +121,18 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 			InviteNext:           replacement.InviteNextPendingSince != nil,
 			CandidateRank:        pick.Rank,
 			CandidatesConsidered: pick.Considered,
-			GroupName:            nonEmpty(groupName),
-			GroupColor:           nonEmpty(groupColor),
+			GroupName:            groupName,
+			GroupColor:           groupColor,
 			PreferredTimeslots:   preferredTimeslots,
 			PreferredDays:        preferredDays(replacement.PreferredDays, s.clubDays()),
-			BuddyPlacedNear:      nonEmpty(buddyName),
+			BuddyPlacedNear:      buddyName,
 		},
-		ReplacedStudent:   nonEmpty(replacedName),
+		ReplacedStudent:   replacedName,
 		ReplacementReason: reason,
 		SameGroupMatch:    pick.SameGroup,
 	})
 
-	token := newToken()
+	token := uuid.NewString()
 	var newID int64
 	if err := s.db.QueryRow("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
 		sessionID, replacement.ID, vacated.TimeslotID, vacated.SlotID, pick.GroupID, token, decisionLog).Scan(&newID); err != nil {

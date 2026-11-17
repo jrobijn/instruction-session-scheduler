@@ -2,36 +2,27 @@ package server
 
 import (
 	"bytes"
-	"crypto/rand"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// decode reads a JSON request body into a T (usually a struct with json tags). If the body
-// is malformed or a field has the wrong type it returns an error whose message is meant for
-// the client, as a 400. Unknown fields are ignored and an empty body leaves T at its zero
-// value.
+// decode reads a JSON request body of at most 1 MiB into a T (usually a struct with json
+// tags). If the body is missing, malformed, too large or a field has the wrong type it returns
+// an "Invalid JSON body" error meant for the client, as a 400. Unknown fields are ignored.
 //
 // Conventions for request structs: required values are plain types, validated with
 // == "" / == 0; values that may be left out of a partial update are pointers, which bind as
 // NULL so `col = COALESCE(?, col)` keeps the stored value.
 func decode[T any](r *http.Request) (T, error) {
 	var v T
-	if err := httpx.Decode(r, &v); err != nil {
-		var typeErr *json.UnmarshalTypeError
-		if errors.As(err, &typeErr) && typeErr.Field != "" {
-			return v, errors.New("Invalid value for " + typeErr.Field)
-		}
+	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(&v); err != nil {
 		return v, errors.New("Invalid JSON body")
 	}
 	return v, nil
@@ -58,35 +49,12 @@ func isUniqueErr(err error, columns ...string) bool {
 	return failed == strings.Join(columns, ", ")
 }
 
-func changes(res sql.Result) int64 {
-	n, _ := res.RowsAffected()
-	return n
-}
-
 // pathID parses the integer path parameter name, reporting whether it is one. A value that
 // isn't an integer can't match any row, so callers answer it with the same 404 as an id
 // that doesn't exist.
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
 	return id, err == nil
-}
-
-// isValidTimeZone matches the Intl.DateTimeFormat check in expiryTimers.ts.
-func isValidTimeZone(tz string) bool {
-	if tz == "" || tz == "Local" {
-		return false
-	}
-	_, err := time.LoadLocation(tz)
-	return err == nil
-}
-
-// newToken returns a random UUID v4, like crypto.randomUUID().
-func newToken() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // encodeJSON encodes v for storage (decision logs) without escaping <, > and &.
@@ -96,12 +64,4 @@ func encodeJSON(v any) string {
 	enc.SetEscapeHTML(false)
 	enc.Encode(v)
 	return strings.TrimSuffix(buf.String(), "\n")
-}
-
-// nonEmpty returns nil for "", so the value encodes as null (like `value || null`).
-func nonEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/auth"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/config"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
@@ -410,7 +411,7 @@ func (e *testEnv) invitation(sessionID, studentID, timeslotID, slotID, groupID i
 		gid = groupID
 	}
 	return e.insert(`INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`, sessionID, studentID, timeslotID, slotID, newToken(), gid, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`, sessionID, studentID, timeslotID, slotID, uuid.NewString(), gid, status)
 }
 
 func (e *testEnv) preferTimeslots(studentID, timetableID int64, timeslotIDs ...int64) {

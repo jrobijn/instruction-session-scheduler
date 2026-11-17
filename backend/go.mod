@@ -3,6 +3,7 @@ module github.com/jrobijn/instruction-session-scheduler/backend
 go 1.26.0
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/pressly/goose/v3 v3.29.0
 	modernc.org/sqlite v1.61.1
@@ -10,7 +11,6 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect

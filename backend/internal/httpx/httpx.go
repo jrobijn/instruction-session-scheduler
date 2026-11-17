@@ -3,8 +3,6 @@ package httpx
 
 import (
 	"encoding/json"
-	"errors"
-	"io"
 	"log"
 	"net/http"
 )
@@ -25,16 +23,3 @@ func Error(w http.ResponseWriter, status int, msg string) {
 
 // Success writes the {"success": true} body many endpoints return.
 func Success(w http.ResponseWriter) { OK(w, map[string]bool{"success": true}) }
-
-// Decode parses a JSON request body into v. An empty body leaves v untouched, mirroring
-// express.json() which yields {} for requests without a body.
-func Decode(r *http.Request, v any) error {
-	if r.Body == nil || r.ContentLength == 0 {
-		return nil
-	}
-	err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(v)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-	return err
-}

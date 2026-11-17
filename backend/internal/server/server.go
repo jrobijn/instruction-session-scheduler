@@ -154,11 +154,11 @@ func (s *Server) publicRoute(pattern string, fn handlerFunc) {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var body struct {
+	body, err := decode[struct {
 		Password *string `json:"password"`
-	}
-	if err := httpx.Decode(r, &body); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "Invalid JSON")
+	}](r)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Strict equality like the TS version: an unset ADMIN_PASSWORD never matches a sent password.

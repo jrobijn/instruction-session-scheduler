@@ -132,7 +132,7 @@ func TestGetInvitation(t *testing.T) {
 	got := f.public(http.MethodGet, "/api/invitations/"+f.tokenOf("A"), nil).status(http.StatusOK).object()
 	for k, want := range map[string]any{
 		"student_name": "A Test", "date": sessionDate, "start_time": "18:00", "notes": "Bring a helmet",
-		"status": "invited", "session_status": "invitations_sent", "discipline_name": nil,
+		"status": "invited", "session_status": "invitations_sent", "discipline_name": "",
 		"club_name": "Test Club", "locale": "en",
 	} {
 		if got[k] != want {

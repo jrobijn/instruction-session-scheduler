@@ -79,7 +79,7 @@ func (s *Server) notificationRoutes() {
 		if err != nil {
 			return err
 		}
-		if changes(res) == 0 {
+		if n, _ := res.RowsAffected(); n == 0 {
 			httpx.Error(w, http.StatusNotFound, "Notification not found")
 			return nil
 		}

@@ -150,7 +150,7 @@ func TestInstructorRoutesRejectBadInput(t *testing.T) {
 	in := e.instructor("Instructor")
 	e.wantRejected(
 		notFound("GET", "/api/instructors/x", nil, "Instructor not found"),
-		notFound("PUT", "/api/instructors/x", nil, "Instructor not found"),
+		notFound("PUT", "/api/instructors/x", map[string]any{}, "Instructor not found"),
 		notFound("DELETE", "/api/instructors/x", nil, "Instructor not found"),
 		badJSON("POST", "/api/instructors/import"),
 		badJSON("POST", "/api/instructors"),

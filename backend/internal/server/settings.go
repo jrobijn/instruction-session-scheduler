@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
@@ -43,9 +44,11 @@ func (s *Server) settingsRoutes() {
 			return nil
 		}
 		key, value := r.PathValue("key"), *in.Value
-		if key == "timezone" && !isValidTimeZone(value) {
-			httpx.Error(w, http.StatusBadRequest, "Invalid time zone")
-			return nil
+		if key == "timezone" {
+			if _, err := time.LoadLocation(value); err != nil {
+				httpx.Error(w, http.StatusBadRequest, "Invalid time zone")
+				return nil
+			}
 		}
 		if _, err := s.db.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", key, value); err != nil {
 			return err

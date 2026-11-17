@@ -16,27 +16,27 @@ type candidateLog struct {
 	InviteNext           bool     `json:"invite_next"`
 	CandidateRank        int      `json:"candidate_rank"`
 	CandidatesConsidered int      `json:"candidates_considered"`
-	GroupName            *string  `json:"group_name"`
-	GroupColor           *string  `json:"group_color"`
+	GroupName            string   `json:"group_name"`
+	GroupColor           string   `json:"group_color"`
 	PreferredTimeslots   []string `json:"preferred_timeslots"`
 	PreferredDays        []int    `json:"preferred_days"`
 	// BuddyPlacedNear is the name of the buddy who pulled the student up, if any.
-	BuddyPlacedNear *string `json:"buddy_placed_near"`
+	BuddyPlacedNear string `json:"buddy_placed_near"`
 }
 
 // batchLog is the decision log of an invitation made by generating a schedule.
 type batchLog struct {
 	candidateLog
-	GroupQuota *string `json:"group_quota"`
-	Overflow   bool    `json:"overflow"`
+	GroupQuota string `json:"group_quota"`
+	Overflow   bool   `json:"overflow"`
 }
 
 // replacementLog is the decision log of an invitation for a vacated spot.
 type replacementLog struct {
 	candidateLog
-	ReplacedStudent   *string `json:"replaced_student"`
-	ReplacementReason string  `json:"replacement_reason"`
-	SameGroupMatch    bool    `json:"same_group_match"`
+	ReplacedStudent   string `json:"replaced_student"`
+	ReplacementReason string `json:"replacement_reason"`
+	SameGroupMatch    bool   `json:"same_group_match"`
 }
 
 // preferredDays lists the student's preferred days that are club days, for the decision log.

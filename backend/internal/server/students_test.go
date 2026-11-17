@@ -275,7 +275,7 @@ func TestStudentPreferredTimeslotsIgnoresInvalidIDsWhenCounting(t *testing.T) {
 
 	// Ids must be numbers.
 	e.admin(http.MethodPut, path, map[string]any{"timeslot_ids": []any{slots[0], "x"}}).
-		wantError(http.StatusBadRequest, "Invalid value for timeslot_ids")
+		wantError(http.StatusBadRequest, "Invalid JSON body")
 
 	// Two of three plus an invalid id is still a partial selection.
 	e.admin(http.MethodPut, path, map[string]any{"timeslot_ids": []any{slots[0], slots[2], 9999}}).status(http.StatusOK)
@@ -317,7 +317,7 @@ func TestStudentCooldown(t *testing.T) {
 	for _, days := range []any{0, -1, nil} {
 		e.admin(http.MethodPut, path, map[string]any{"days": days}).wantError(http.StatusBadRequest, "A positive number of days is required")
 	}
-	e.admin(http.MethodPut, path, map[string]any{"days": "3"}).wantError(http.StatusBadRequest, "Invalid value for days")
+	e.admin(http.MethodPut, path, map[string]any{"days": "3"}).wantError(http.StatusBadRequest, "Invalid JSON body")
 	before := time.Now().UTC()
 	got := e.admin(http.MethodPut, path, map[string]any{"days": 2}).status(http.StatusOK).object()
 	until, err := time.Parse(time.DateTime, got["cooldown_until"].(string))
@@ -417,13 +417,13 @@ func TestStudentRoutesRejectBadInput(t *testing.T) {
 		notFound("GET", "/api/students/x", nil, "Student not found"),
 		notFound("GET", "/api/students/x/invitations", nil, "Student not found"),
 		notFound("GET", "/api/students/x/invitation-history", nil, "Student not found"),
-		notFound("PUT", "/api/students/x", nil, "Student not found"),
+		notFound("PUT", "/api/students/x", map[string]any{}, "Student not found"),
 		notFound("DELETE", "/api/students/x", nil, "Student not found"),
 		notFound("GET", "/api/students/x/preferred-timeslots", nil, "Student not found"),
 		notFound("PUT", p("/api/students/x/preferred-timeslots/%d", tt), map[string]any{"timeslot_ids": []int{}}, "Student not found"),
 		notFound("PUT", p("/api/students/%d/preferred-timeslots/x", st), map[string]any{"timeslot_ids": []int{}}, "Timetable not found"),
 		notFound("GET", "/api/students/x/groups", nil, "Student not found"),
-		notFound("PUT", "/api/students/x/groups", nil, "Student not found"),
+		notFound("PUT", "/api/students/x/groups", map[string]any{}, "Student not found"),
 		notFound("PUT", "/api/students/x/cooldown", map[string]any{"days": 1}, "Student not found"),
 		notFound("DELETE", "/api/students/x/cooldown", nil, "Student not found"),
 		badJSON("POST", "/api/students/import"),

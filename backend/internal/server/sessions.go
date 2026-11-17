@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/google/uuid"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/email"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
@@ -194,7 +195,7 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		row, err := db.Get[Session](s.db, "INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?) RETURNING id, date, status, timetable_id, notes",
-			in.Date, dow, nonEmpty(in.Notes), ttID)
+			in.Date, dow, in.Notes, ttID)
 		if isUniqueErr(err, "training_sessions.date") {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
@@ -306,7 +307,7 @@ func (s *Server) sessionRoutes() {
 		if err != nil {
 			return err
 		}
-		if changes(res) == 0 {
+		if n, _ := res.RowsAffected(); n == 0 {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
 		}
@@ -865,7 +866,7 @@ func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) err
 		httpx.Error(w, http.StatusConflict, "This slot is already occupied")
 		return nil
 	}
-	token := newToken()
+	token := uuid.NewString()
 	if _, err := s.db.Exec("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token) VALUES (?, ?, ?, ?, ?)",
 		id, studentID, timeslotID, slotID, token); err != nil {
 		return err

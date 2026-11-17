@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -85,21 +87,6 @@ func TestEncodeJSON(t *testing.T) {
 	}
 }
 
-func TestNewToken(t *testing.T) {
-	a, b := newToken(), newToken()
-	if a == b || len(a) != 36 || a[14] != '4' || (a[19] != '8' && a[19] != '9' && a[19] != 'a' && a[19] != 'b') {
-		t.Fatalf("tokens %s, %s are not distinct UUID v4s", a, b)
-	}
-}
-
-func TestIsValidTimeZone(t *testing.T) {
-	for tz, want := range map[string]bool{"Europe/Amsterdam": true, "UTC": true, "": false, "Local": false, "Nope/Nope": false} {
-		if got := isValidTimeZone(tz); got != want {
-			t.Errorf("isValidTimeZone(%q) = %v", tz, got)
-		}
-	}
-}
-
 // An {id} that isn't an integer can't name a row, so it gets the resource's usual 404.
 func TestPathIDNotAnInteger(t *testing.T) {
 	e := newTestEnv(t)
@@ -125,5 +112,26 @@ func TestPathIDNotAnInteger(t *testing.T) {
 		{http.MethodDelete, fmt.Sprintf("/api/timetables/%d/timeslots/abc", draft), "Timeslot not found"},
 	} {
 		e.admin(tc.method, tc.path, map[string]any{}).wantError(http.StatusNotFound, tc.msg)
+	}
+}
+
+func TestDecode(t *testing.T) {
+	type body struct {
+		A int `json:"a"`
+	}
+	post := func(s string) *http.Request { return httptest.NewRequest(http.MethodPost, "/", strings.NewReader(s)) }
+
+	if v, err := decode[body](post(`{"a":1}`)); err != nil || v.A != 1 {
+		t.Fatalf("decode = %v, %v", v, err)
+	}
+	for name, tc := range map[string]struct{ body, want string }{
+		"empty":      {"", "Invalid JSON body"},
+		"malformed":  {"{", "Invalid JSON body"},
+		"wrong type": {`{"a":"x"}`, "Invalid JSON body"},
+		"too large":  {`{"b":"` + strings.Repeat("x", 1<<20) + `"}`, "Invalid JSON body"},
+	} {
+		if _, err := decode[body](post(tc.body)); err == nil || err.Error() != tc.want {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
 	}
 }

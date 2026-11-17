@@ -462,7 +462,7 @@ func (s *Server) timetableRoutes() {
 		if err != nil {
 			return err
 		}
-		if changes(res) == 0 {
+		if n, _ := res.RowsAffected(); n == 0 {
 			httpx.Error(w, http.StatusNotFound, "Timeslot not found")
 			return nil
 		}

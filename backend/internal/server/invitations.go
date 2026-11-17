@@ -126,7 +126,7 @@ type PublicInvitation struct {
 	Notes          *string `json:"notes"`
 	Status         string  `json:"status"` // effective status, see effectiveStatus
 	SessionStatus  string  `json:"session_status"`
-	DisciplineName *string `json:"discipline_name"`
+	DisciplineName string  `json:"discipline_name"`
 	ClubName       string  `json:"club_name"`
 	Locale         string  `json:"locale"`
 	ExpiresAt      *string `json:"expires_at"`
@@ -155,7 +155,7 @@ func (s *Server) handleGetInvitation(w http.ResponseWriter, r *http.Request) err
 		Notes:          inv.SessionNotes,
 		Status:         status,
 		SessionStatus:  inv.SessionStatus,
-		DisciplineName: nonEmpty(inv.DisciplineName),
+		DisciplineName: inv.DisciplineName,
 		ClubName:       s.clubName(),
 		Locale:         s.emailLocale(),
 		ExpiresAt:      expiresAt,
@@ -190,13 +190,10 @@ func (s *Server) closedReason(inv invitationDetails, requiredStatus string) stri
 }
 
 func (s *Server) handleConfirmInvitation(w http.ResponseWriter, r *http.Request) error {
-	var in struct {
-		DisciplineID int64 `json:"discipline_id"` // 0 or null: none chosen
-	}
 	// Lenient: an unreadable body confirms without a discipline.
-	if httpx.Decode(r, &in) != nil {
-		in.DisciplineID = 0
-	}
+	in, _ := decode[struct {
+		DisciplineID int64 `json:"discipline_id"` // 0 or null: none chosen
+	}](r)
 	inv, found, err := s.invitationByToken(r.PathValue("token"))
 	if err != nil {
 		return err

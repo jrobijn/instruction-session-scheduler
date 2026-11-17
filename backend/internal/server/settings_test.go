@@ -19,7 +19,7 @@ func TestSettings(t *testing.T) {
 	if got := e.admin(http.MethodPut, "/api/settings/invitation_expiry_minutes", map[string]any{"value": "90"}).status(http.StatusOK).object(); got["value"] != "90" {
 		t.Fatalf("put number = %v", got)
 	}
-	e.admin(http.MethodPut, "/api/settings/invitation_expiry_minutes", map[string]any{"value": 90}).wantError(http.StatusBadRequest, "Invalid value for value")
+	e.admin(http.MethodPut, "/api/settings/invitation_expiry_minutes", map[string]any{"value": 90}).wantError(http.StatusBadRequest, "Invalid JSON body")
 	e.admin(http.MethodPut, "/api/settings/timezone", map[string]any{"value": "Mars/Base"}).wantError(http.StatusBadRequest, "Invalid time zone")
 	e.admin(http.MethodPut, "/api/settings/timezone", map[string]any{"value": "Europe/London"}).status(http.StatusOK)
 	if e.srv.clubLocation().String() != "Europe/London" {
