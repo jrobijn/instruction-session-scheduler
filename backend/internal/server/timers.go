@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -31,7 +32,7 @@ func (s *Server) scheduleInvitationExpiry(invitationID int64, at time.Time) {
 		}
 		s.locked(func() {
 			if err := s.processExpiredInvitation(invitationID); err != nil {
-				logf("Error processing expiry for invitation %d: %v", invitationID, err)
+				log.Printf("Error processing expiry for invitation %d: %v", invitationID, err)
 			}
 		})
 	})
@@ -67,7 +68,7 @@ func (s *Server) scheduleExpiryForInvitation(invitationID int64) {
 		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
 		WHERE inv.id = ? AND inv.status = 'invited'`, invitationID)
 	if err != nil {
-		logf("schedule expiry for invitation %d: %v", invitationID, err)
+		log.Printf("schedule expiry for invitation %d: %v", invitationID, err)
 		return
 	}
 	if !found {
@@ -105,7 +106,7 @@ func (s *Server) rehydrateTimers() {
 		WHERE inv.status = 'invited'
 			AND ts.status NOT IN ('completed', 'cancelled')`)
 	if err != nil {
-		logf("rehydrate timers: %v", err)
+		log.Printf("rehydrate timers: %v", err)
 		return
 	}
 	for _, p := range pending {
@@ -113,7 +114,7 @@ func (s *Server) rehydrateTimers() {
 			s.scheduleInvitationExpiry(p.ID, deadline)
 		}
 	}
-	logf("Rehydrated %d invitation expiry timer(s)", len(pending))
+	log.Printf("Rehydrated %d invitation expiry timer(s)", len(pending))
 }
 
 // processExpiredInvitation runs when an invitation's expiry timer fires.

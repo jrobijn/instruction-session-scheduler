@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -88,8 +87,6 @@ func isValidTimeZone(tz string) bool {
 	_, err := time.LoadLocation(tz)
 	return err == nil
 }
-
-func logf(format string, a ...any) { log.Printf(format, a...) }
 
 // newToken returns a random UUID v4, like crypto.randomUUID().
 func newToken() string {

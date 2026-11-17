@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -130,12 +131,12 @@ func (s *Server) CreateNotification(n NewNotification) {
 		RETURNING id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at`,
 		n.Type, invitationID, sessionID, n.StudentName, n.SessionDate, startTime)
 	if err != nil {
-		logf("create notification %s for session %d: %v", n.Type, n.SessionID, err)
+		log.Printf("create notification %s for session %d: %v", n.Type, n.SessionID, err)
 		return
 	}
 	count, err := s.unreadCount()
 	if err != nil {
-		logf("count unread notifications: %v", err)
+		log.Printf("count unread notifications: %v", err)
 		return
 	}
 	s.hub.Broadcast(notificationsChannel, "new_notification", map[string]any{"notification": notification, "unread_count": count})

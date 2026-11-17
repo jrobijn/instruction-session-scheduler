@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -878,7 +879,7 @@ func (s *Server) handleAddInvitation(w http.ResponseWriter, r *http.Request) err
 	if status == "invitations_sent" {
 		var first, last, to string
 		if err := s.db.QueryRow("SELECT first_name, last_name, email FROM students WHERE id = ?", studentID).Scan(&first, &last, &to); err != nil {
-			logf("Failed to send invitation email for manually added student: %v", err)
+			log.Printf("Failed to send invitation email for manually added student: %v", err)
 		} else {
 			s.mailer.SendInvitation(email.InvitationParams{
 				To: to, StudentName: first + " " + last, Date: session.Date, Token: token, ClubName: s.clubName(), Locale: s.emailLocale(),
@@ -1059,7 +1060,7 @@ func (s *Server) sessionCounts(sessionID int64) (map[string]any, error) {
 func (s *Server) broadcastSessionCounts(sessionID int64) {
 	counts, err := s.sessionCounts(sessionID)
 	if err != nil {
-		logf("session counts %d: %v", sessionID, err)
+		log.Printf("session counts %d: %v", sessionID, err)
 		return
 	}
 	s.hub.Broadcast(sessionsListChannel, "session_counts_updated", counts)
