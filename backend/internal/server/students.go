@@ -99,7 +99,64 @@ type StudentSearchResult struct {
 }
 
 func (s *Server) studentRoutes() {
-	s.adminRoute("GET /api/students", s.handleListStudents)
+	s.adminRoute("GET /api/students", func(w http.ResponseWriter, r *http.Request) error {
+		students, err := s.listStudents()
+		if err != nil {
+			return err
+		}
+		type membership struct {
+			StudentID int64 `db:"student_id"`
+			StudentGroup
+		}
+		memberships, err := db.Many[membership](s.db, `
+			SELECT sg.student_id, g.id, g.name, g.color
+			FROM student_groups sg
+			JOIN groups g ON g.id = sg.group_id`)
+		if err != nil {
+			return err
+		}
+		groupByStudent := map[int64]StudentGroup{}
+		for _, m := range memberships {
+			groupByStudent[m.StudentID] = m.StudentGroup
+		}
+
+		type buddyMembership struct {
+			StudentID    int64 `db:"student_id"`
+			BuddyGroupID int64 `db:"buddy_group_id"`
+		}
+		buddyMemberships, err := db.Many[buddyMembership](s.db, "SELECT student_id, buddy_group_id FROM buddy_group_members")
+		if err != nil {
+			return err
+		}
+		firstNameByID := make(map[int64]string, len(students))
+		for _, st := range students {
+			firstNameByID[st.ID] = st.FirstName
+		}
+		// Buddy group names are the listed (non-deleted) members' first names.
+		namesByBuddyGroup := map[int64][]string{}
+		for _, m := range buddyMemberships {
+			if name, ok := firstNameByID[m.StudentID]; ok {
+				namesByBuddyGroup[m.BuddyGroupID] = append(namesByBuddyGroup[m.BuddyGroupID], name)
+			}
+		}
+		buddyByStudent := map[int64]GroupRef{}
+		for _, m := range buddyMemberships {
+			buddyByStudent[m.StudentID] = GroupRef{ID: m.BuddyGroupID, Name: strings.Join(namesByBuddyGroup[m.BuddyGroupID], " & ")}
+		}
+
+		out := make([]StudentListItem, len(students))
+		for i, st := range students {
+			out[i].Student = st
+			if g, ok := groupByStudent[st.ID]; ok {
+				out[i].Group = &g
+			}
+			if bg, ok := buddyByStudent[st.ID]; ok {
+				out[i].BuddyGroup = &bg
+			}
+		}
+		httpx.OK(w, out)
+		return nil
+	})
 
 	s.adminRoute("GET /api/students/export", func(w http.ResponseWriter, r *http.Request) error {
 		students, err := s.listStudents()
@@ -115,7 +172,83 @@ func (s *Server) studentRoutes() {
 		return writeCSV(w, "students.csv", header, rows)
 	})
 
-	s.adminRoute("POST /api/students/import", s.handleImportStudents)
+	s.adminRoute("POST /api/students/import", func(w http.ResponseWriter, r *http.Request) error {
+		in, err := readCSVImport(r)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
+		}
+		if !in.has("first_name", "last_name", "email") {
+			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
+			return nil
+		}
+
+		result := importResult{Errors: []string{}}
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
+			var defaultGroup int64
+			switch err := tx.QueryRow("SELECT id FROM groups WHERE is_default = 1").Scan(&defaultGroup); err {
+			case nil, sql.ErrNoRows:
+			default:
+				return err
+			}
+
+			for _, row := range in.rows {
+				first, last, email := row.get("first_name"), row.get("last_name"), row.get("email")
+				if first == "" || last == "" || email == "" {
+					result.skip(row, "missing required fields")
+					continue
+				}
+				membershipID := row.get("membership_id")
+
+				// Optional columns stay nil when blank, which keeps the current value. A number
+				// column holding anything but a whole number makes the row an error.
+				var opt importOptional
+				invalid := ""
+				for _, f := range []struct {
+					col string
+					dst **int
+				}{
+					{"attended_sessions", &opt.AttendedSessions},
+					{"no_show_count", &opt.NoShowCount},
+					{"active", &opt.Active},
+				} {
+					v := row.get(f.col)
+					if v == "" {
+						continue
+					}
+					n, err := strconv.Atoi(v)
+					if err != nil {
+						invalid = fmt.Sprintf("%s must be a whole number, got %q", f.col, v)
+						break
+					}
+					*f.dst = &n
+				}
+				if invalid != "" {
+					result.skip(row, "%s", invalid)
+					continue
+				}
+				if d := row.get("preferred_days"); d != "" {
+					opt.PreferredDays = &d
+				}
+
+				err := importStudentRow(tx, first, last, email, membershipID, opt, defaultGroup)
+				if isUniqueErr(err, "students.email") { // the email belongs to a deleted student
+					result.skip(row, "A student with this email already exists")
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				result.Imported++
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		httpx.OK(w, result)
+		return nil
+	})
 
 	s.adminRoute("GET /api/students/{id}", func(w http.ResponseWriter, r *http.Request) error {
 		id, ok := pathID(r, "id")
@@ -568,143 +701,6 @@ func (s *Server) requireStudent(r *http.Request) (int64, bool, error) {
 	}
 	_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 	return id, found, err
-}
-
-func (s *Server) handleListStudents(w http.ResponseWriter, r *http.Request) error {
-	students, err := s.listStudents()
-	if err != nil {
-		return err
-	}
-	type membership struct {
-		StudentID int64 `db:"student_id"`
-		StudentGroup
-	}
-	memberships, err := db.Many[membership](s.db, `
-		SELECT sg.student_id, g.id, g.name, g.color
-		FROM student_groups sg
-		JOIN groups g ON g.id = sg.group_id`)
-	if err != nil {
-		return err
-	}
-	groupByStudent := map[int64]StudentGroup{}
-	for _, m := range memberships {
-		groupByStudent[m.StudentID] = m.StudentGroup
-	}
-
-	type buddyMembership struct {
-		StudentID    int64 `db:"student_id"`
-		BuddyGroupID int64 `db:"buddy_group_id"`
-	}
-	buddyMemberships, err := db.Many[buddyMembership](s.db, "SELECT student_id, buddy_group_id FROM buddy_group_members")
-	if err != nil {
-		return err
-	}
-	firstNameByID := make(map[int64]string, len(students))
-	for _, st := range students {
-		firstNameByID[st.ID] = st.FirstName
-	}
-	// Buddy group names are the listed (non-deleted) members' first names.
-	namesByBuddyGroup := map[int64][]string{}
-	for _, m := range buddyMemberships {
-		if name, ok := firstNameByID[m.StudentID]; ok {
-			namesByBuddyGroup[m.BuddyGroupID] = append(namesByBuddyGroup[m.BuddyGroupID], name)
-		}
-	}
-	buddyByStudent := map[int64]GroupRef{}
-	for _, m := range buddyMemberships {
-		buddyByStudent[m.StudentID] = GroupRef{ID: m.BuddyGroupID, Name: strings.Join(namesByBuddyGroup[m.BuddyGroupID], " & ")}
-	}
-
-	out := make([]StudentListItem, len(students))
-	for i, st := range students {
-		out[i].Student = st
-		if g, ok := groupByStudent[st.ID]; ok {
-			out[i].Group = &g
-		}
-		if bg, ok := buddyByStudent[st.ID]; ok {
-			out[i].BuddyGroup = &bg
-		}
-	}
-	httpx.OK(w, out)
-	return nil
-}
-
-func (s *Server) handleImportStudents(w http.ResponseWriter, r *http.Request) error {
-	in, err := readCSVImport(r)
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
-		return nil
-	}
-	if !in.has("first_name", "last_name", "email") {
-		httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
-		return nil
-	}
-
-	result := importResult{Errors: []string{}}
-	err = s.db.InTx(func(tx *sqlx.Tx) error {
-		var defaultGroup int64
-		switch err := tx.QueryRow("SELECT id FROM groups WHERE is_default = 1").Scan(&defaultGroup); err {
-		case nil, sql.ErrNoRows:
-		default:
-			return err
-		}
-
-		for _, row := range in.rows {
-			first, last, email := row.get("first_name"), row.get("last_name"), row.get("email")
-			if first == "" || last == "" || email == "" {
-				result.skip(row, "missing required fields")
-				continue
-			}
-			membershipID := row.get("membership_id")
-
-			// Optional columns stay nil when blank, which keeps the current value. A number
-			// column holding anything but a whole number makes the row an error.
-			var opt importOptional
-			invalid := ""
-			for _, f := range []struct {
-				col string
-				dst **int
-			}{
-				{"attended_sessions", &opt.AttendedSessions},
-				{"no_show_count", &opt.NoShowCount},
-				{"active", &opt.Active},
-			} {
-				v := row.get(f.col)
-				if v == "" {
-					continue
-				}
-				n, err := strconv.Atoi(v)
-				if err != nil {
-					invalid = fmt.Sprintf("%s must be a whole number, got %q", f.col, v)
-					break
-				}
-				*f.dst = &n
-			}
-			if invalid != "" {
-				result.skip(row, "%s", invalid)
-				continue
-			}
-			if d := row.get("preferred_days"); d != "" {
-				opt.PreferredDays = &d
-			}
-
-			err := importStudentRow(tx, first, last, email, membershipID, opt, defaultGroup)
-			if isUniqueErr(err, "students.email") { // the email belongs to a deleted student
-				result.skip(row, "A student with this email already exists")
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			result.Imported++
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	httpx.OK(w, result)
-	return nil
 }
 
 // importOptional holds an import row's optional columns; nil means the cell was blank.
