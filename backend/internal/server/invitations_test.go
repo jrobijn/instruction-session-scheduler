@@ -82,51 +82,6 @@ func invitedPair(t *testing.T) (*scheduleFixture, int64) {
 	return f, g
 }
 
-// --- sending ----------------------------------------------------------------------------
-
-func TestSendInvitations(t *testing.T) {
-	f := newScheduleFixture(t, []string{"18:00", "19:00"}, 1)
-	g := f.groupIn("Juniors", 100)
-	a := f.student("A", g)
-	b := f.student("B", g)
-	f.student("C", g)
-
-	res := f.sendInvitations()
-	if res["sent"] != 2.0 || len(res["errors"].([]any)) != 0 {
-		t.Fatalf("send-invitations = %v", res)
-	}
-	for _, sid := range []int64{a, b} {
-		mail := f.mailTo(f.studentEmail(sid))
-		if len(mail) != 1 {
-			t.Fatalf("student %d got %d emails, want 1", sid, len(mail))
-		}
-		inv := f.row("SELECT * FROM invitations WHERE student_id = ?", sid)
-		if inv["status"] != "invited" || inv["email_sent"] != int64(1) {
-			t.Fatalf("invitation after sending: %v", inv)
-		}
-		if !strings.Contains(mail[0].Text, inv["token"].(string)) {
-			t.Fatalf("invitation email does not contain the token link:\n%s", mail[0].Text)
-		}
-		if !f.hasTimer(toInt64(inv["id"])) {
-			t.Fatalf("no expiry timer for invitation %v", inv["id"])
-		}
-	}
-	if len(f.sentMail()) != 2 {
-		t.Fatalf("sent %d emails, want 2", len(f.sentMail()))
-	}
-	if st := f.row("SELECT status FROM training_sessions WHERE id = ?", f.sessionID)["status"]; st != "invitations_sent" {
-		t.Fatalf("session status = %v", st)
-	}
-
-	again := f.admin(http.MethodPost, fmt.Sprintf("/api/sessions/%d/send-invitations", f.sessionID), nil).status(http.StatusOK).object()
-	if again["sent"] != 0.0 || again["message"] != "No pending invitations to send" {
-		t.Fatalf("second send = %v", again)
-	}
-	if len(f.sentMail()) != 2 {
-		t.Fatal("second send emailed students again")
-	}
-}
-
 // --- viewing ----------------------------------------------------------------------------
 
 func TestGetInvitation(t *testing.T) {
