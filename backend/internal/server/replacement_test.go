@@ -16,9 +16,9 @@ func TestReplacementPullsUpBuddyOfInvitedStudent(t *testing.T) {
 	d := f.row("SELECT id FROM students WHERE first_name = 'D'")["id"].(int64)
 	f.buddies(b, d)
 
-	res := f.invitationAction("A", "decline", nil).status(http.StatusOK).object()
-	if repl := res["replacement"].(map[string]any); repl["name"] != "D Test" {
-		t.Fatalf("replacement = %v, want D (pulled up by buddy B)", repl)
+	f.invitationAction("A", "decline", nil).status(http.StatusOK)
+	if st := f.statusOf("D"); st != "invited" {
+		t.Fatalf("D status = %s, want invited (pulled up by buddy B)", st)
 	}
 	var log map[string]any
 	json.Unmarshal([]byte(f.invitationOf("D")["decision_log"].(string)), &log)
@@ -34,9 +34,9 @@ func TestReplacementIgnoresBuddyWhoDeclined(t *testing.T) {
 	d := f.row("SELECT id FROM students WHERE first_name = 'D'")["id"].(int64)
 	f.buddies(a, d)
 
-	res := f.invitationAction("A", "decline", nil).status(http.StatusOK).object()
-	if repl := res["replacement"].(map[string]any); repl["name"] != "C Test" {
-		t.Fatalf("replacement = %v, want C (A declined, so D isn't pulled up)", repl)
+	f.invitationAction("A", "decline", nil).status(http.StatusOK)
+	if st := f.statusOf("C"); st != "invited" {
+		t.Fatalf("C status = %s, want invited (A declined, so D isn't pulled up)", st)
 	}
 }
 
@@ -57,9 +57,9 @@ func TestReplacementSkipsStudentsPreferringOtherTimeslots(t *testing.T) {
 	c := f.row("SELECT id FROM students WHERE first_name = 'C'")["id"].(int64)
 	f.preferTimeslots(c, f.timetable, f.timeslots[1]) // A's spot is 18:00
 
-	res := f.invitationAction("A", "decline", nil).status(http.StatusOK).object()
-	if repl := res["replacement"].(map[string]any); repl["name"] != "D Test" {
-		t.Fatalf("replacement = %v, want D", repl)
+	f.invitationAction("A", "decline", nil).status(http.StatusOK)
+	if st := f.statusOf("D"); st != "invited" {
+		t.Fatalf("D status = %s, want invited", st)
 	}
 }
 
@@ -71,9 +71,9 @@ func TestReplacementFallsBackToOtherGroup(t *testing.T) {
 	f.student("B1", b)
 	f.sendInvitations()
 
-	res := f.invitationAction("A1", "decline", nil).status(http.StatusOK).object()
-	if repl, _ := res["replacement"].(map[string]any); repl == nil || repl["name"] != "B1 Test" {
-		t.Fatalf("replacement = %v, want B1", res["replacement"])
+	f.invitationAction("A1", "decline", nil).status(http.StatusOK)
+	if st := f.statusOf("B1"); st != "invited" {
+		t.Fatalf("B1 status = %s, want invited", st)
 	}
 	var log map[string]any
 	json.Unmarshal([]byte(f.invitationOf("B1")["decision_log"].(string)), &log)
@@ -92,9 +92,9 @@ func TestReplacementSkipsGroupsOutsideTimetable(t *testing.T) {
 	f.student("Outsider", f.group("NotInTimetable"))
 	f.sendInvitations()
 
-	res := f.invitationAction("A1", "decline", nil).status(http.StatusOK).object()
-	if res["replacement"] != nil {
-		t.Fatalf("replacement = %v, want none", res["replacement"])
+	f.invitationAction("A1", "decline", nil).status(http.StatusOK)
+	if n := f.invitationCount(); n != 1 {
+		t.Fatalf("%d invitations, want only A1's: nobody eligible", n)
 	}
 }
 

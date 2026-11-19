@@ -112,7 +112,7 @@ func TestCreateSessionRejectsMalformedJSON(t *testing.T) {
 
 func TestListSessions(t *testing.T) {
 	f, _ := invitedPair(t) // 1 instructor x 2 timeslots, A and B invited
-	f.invitationAction("A", "confirm", nil).status(http.StatusOK)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
 	f.session("2029-12-01", 0)
 
 	list := f.admin(http.MethodGet, "/api/sessions", nil).status(http.StatusOK).array()
@@ -273,7 +273,7 @@ func TestRemoveInstructor(t *testing.T) {
 		t.Fatalf("%d invitations on the slot, want 2", len(onSlot))
 	}
 	confirmed, invited := onSlot[0]["first_name"].(string), onSlot[1]["first_name"].(string)
-	f.invitationAction(confirmed, "confirm", nil).status(http.StatusOK)
+	f.invitationAction(confirmed, "confirm", map[string]any{}).status(http.StatusOK)
 	// A scheduled (unsent) invitation on the same slot is deleted outright.
 	f.invitation(f.sessionID, f.student("E", g), f.timeslots[0], slot, g, "declined")
 	mailBefore := len(f.sentMail())
@@ -512,9 +512,8 @@ func TestAutoScheduleSlot(t *testing.T) {
 		wantError(http.StatusBadRequest, "Instructor is not assigned to this session")
 
 	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", fmt.Sprint(a["id"]), "admin-cancel"), nil).status(http.StatusOK)
-	res := f.admin(http.MethodPost, path, body).status(http.StatusOK).object()
-	if repl, _ := res["replacement"].(map[string]any); repl == nil || repl["name"] != "C Test" {
-		t.Fatalf("replacement = %v, want C", res["replacement"])
+	if res := f.admin(http.MethodPost, path, body).status(http.StatusOK).object(); res["replaced"] != true {
+		t.Fatalf("response = %v, want replaced", res)
 	}
 	c := f.invitationOf("C")
 	if c["status"] != "invited" || toInt64(c["group_id"]) != g || c["timeslot_id"] != a["timeslot_id"] {
@@ -529,8 +528,8 @@ func TestAutoScheduleSlot(t *testing.T) {
 
 func TestToggleNoShowAndComplete(t *testing.T) {
 	f, _ := invitedPair(t)
-	f.invitationAction("A", "confirm", nil).status(http.StatusOK)
-	f.invitationAction("B", "confirm", nil).status(http.StatusOK)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
+	f.invitationAction("B", "confirm", map[string]any{}).status(http.StatusOK)
 	toggle := func(name string) *response {
 		return f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", fmt.Sprint(f.invitationOf(name)["id"]), "toggle-no-show"), nil)
 	}
@@ -569,7 +568,7 @@ func TestToggleNoShowRequiresConfirmed(t *testing.T) {
 
 func TestCancelAndReactivateSession(t *testing.T) {
 	f, g := invitedPair(t)
-	f.invitationAction("A", "confirm", nil).status(http.StatusOK)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
 	// An unsent scheduled invitation is cancelled without an email.
 	unsent := f.student("E", g)
 	f.invitation(f.sessionID, unsent, f.timeslots[0], f.slots[0], 0, "scheduled")

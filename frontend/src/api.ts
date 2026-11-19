@@ -143,7 +143,7 @@ export const api = {
 
   // Public invitation
   getInvitation: (token: string) => request(`/invitations/${token}`),
-  confirmInvitation: (token: string, disciplineId: string | null) => request(`/invitations/${token}/confirm`, { method: 'POST', body: JSON.stringify({ discipline_id: disciplineId }) }),
+  confirmInvitation: (token: string, disciplineId: number | null) => request(`/invitations/${token}/confirm`, { method: 'POST', body: JSON.stringify({ discipline_id: disciplineId }) }),
   declineInvitation: (token: string) => request(`/invitations/${token}/decline`, { method: 'POST' }),
   cancelInvitation: (token: string) => request(`/invitations/${token}/cancel`, { method: 'POST' }),
 

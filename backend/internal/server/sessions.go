@@ -882,14 +882,14 @@ func (s *Server) sessionRoutes() {
 		s.db.QueryRow("SELECT id, group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN "+terminalStatuses+" ORDER BY responded_at DESC LIMIT 1",
 			id, timeslotID, slotID).Scan(&lastID, &lastGroup)
 
-		replacement, err := s.findAndInviteReplacement(vacatedSpot{
+		replaced, err := s.findAndInviteReplacement(vacatedSpot{
 			SessionID: session.ID, SessionDate: session.Date, TimeslotID: timeslotID, SlotID: slotID,
 			InvitationID: lastID, GroupID: lastGroup,
 		})
 		if err != nil {
 			return err
 		}
-		httpx.OK(w, map[string]any{"success": true, "replacement": replacement})
+		httpx.OK(w, map[string]any{"success": true, "replaced": replaced})
 		return nil
 	})
 

@@ -541,7 +541,7 @@ func TestGenerateScheduleRefusedAfterInvitationsSent(t *testing.T) {
 	for _, status := range []string{"invitations_sent", "completed", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
 			f, _ := invitedPair(t)
-			f.invitationAction("A", "confirm", nil).status(http.StatusOK)
+			f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
 			f.exec("UPDATE training_sessions SET status = ? WHERE id = ?", status, f.sessionID)
 			before := f.invitationRows()
 

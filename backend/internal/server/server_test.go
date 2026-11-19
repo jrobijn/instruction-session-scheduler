@@ -192,7 +192,7 @@ func TestSessionEventsStream(t *testing.T) {
 	sc := bufio.NewScanner(resp.Body)
 	sc.Scan()
 
-	f.invitationAction("A", "confirm", nil).status(http.StatusOK)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
 	ev, data := readEvent(t, sc)
 	if ev != "invitation_updated" || !strings.Contains(data, `"status":"confirmed"`) {
 		t.Fatalf("event %q data %s", ev, data)

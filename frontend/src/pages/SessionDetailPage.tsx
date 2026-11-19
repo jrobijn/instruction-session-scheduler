@@ -398,7 +398,7 @@ export default function SessionDetailPage() {
     if (!await confirm({ title: t.autoScheduleLabel, message: t.confirmAutoInvite, confirmLabel: t.autoScheduleLabel })) return;
     try {
       const result = await api.autoScheduleSlot(Number(id), timeslotId, instructorId);
-      if (!result.replacement) {
+      if (!result.replaced) {
         toast(t.noReplacementFound, 'info');
       }
       load();

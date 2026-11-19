@@ -30,44 +30,38 @@ func (v vacatedSpot) random() func() float64 {
 	return mrand.New(mrand.NewPCG(uint64(v.InvitationID), uint64(v.SlotID)<<32|uint64(v.TimeslotID))).Float64
 }
 
-// Replacement is the student invited for a vacated spot.
-type Replacement struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}
-
-// findAndInviteReplacement invites the next student in line for a vacated spot. Returns nil
-// when nobody is eligible.
-func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, error) {
+// findAndInviteReplacement invites the next student in line for a vacated spot. Reports
+// whether anyone was eligible.
+func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	sessionID, sessionDate := vacated.SessionID, vacated.SessionDate
 
 	// Without a timetable no group can be invited.
 	var timetableID int64
 	s.db.QueryRow("SELECT COALESCE(timetable_id, 0) FROM training_sessions WHERE id = ?", sessionID).Scan(&timetableID)
 	if timetableID == 0 {
-		return nil, nil
+		return false, nil
 	}
 
 	timetableGroups, err := s.timetableGroups(timetableID)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	eligible, err := eligibleQueue(s.db, s.clubLocation(), sessionID, sessionDate, timetableID)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	prefs, err := s.timeslotPrefs(timetableID)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	buddies, err := s.loadBuddies()
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	// The vacated invitation already has its final status, so it doesn't count here.
 	invitedIDs, err := db.Many[int64](s.db, "SELECT student_id FROM invitations WHERE session_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", sessionID)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	invited := map[int64]bool{}
 	for _, id := range invitedIDs {
@@ -87,7 +81,7 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 		Random:  vacated.random(),
 	})
 	if !found {
-		return nil, nil
+		return false, nil
 	}
 	replacement := pick.Member
 
@@ -102,7 +96,7 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 	if len(prefs[replacement.ID]) > 0 {
 		slots, err := s.timetableTimeslots(timetableID)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 		preferredTimeslots = prefs.startTimes(replacement.ID, slots)
 	}
@@ -136,12 +130,11 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 	var newID int64
 	if err := s.db.QueryRow("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
 		sessionID, replacement.ID, vacated.TimeslotID, vacated.SlotID, pick.GroupID, token, decisionLog).Scan(&newID); err != nil {
-		return nil, err
+		return false, err
 	}
 
-	name := replacement.FirstName + " " + replacement.LastName
 	s.mailer.SendInvitation(email.InvitationParams{
-		To: replacement.Email, StudentName: name, Date: sessionDate, Token: token,
+		To: replacement.Email, StudentName: replacement.FirstName + " " + replacement.LastName, Date: sessionDate, Token: token,
 		ClubName: s.clubName(), Locale: s.emailLocale(),
 	})
 	if _, err := s.db.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE id = ?", newID); err == nil {
@@ -150,12 +143,12 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (*Replacement, er
 
 	added, found, err := s.sessionInvitationByID(newID)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	if found {
 		s.hub.Broadcast(sessionChannel(sessionID), "invitation_added", added)
 	}
 	s.broadcastSessionCounts(sessionID)
 
-	return &Replacement{Name: name, Email: replacement.Email}, nil
+	return true, nil
 }

@@ -43,6 +43,11 @@ func (f *scheduleFixture) statusOf(firstName string) string {
 	return f.invitationOf(firstName)["status"].(string)
 }
 
+func (e *testEnv) invitationCount() int64 {
+	e.t.Helper()
+	return e.row("SELECT COUNT(*) AS n FROM invitations")["n"].(int64)
+}
+
 func (e *testEnv) notificationTypes() []string {
 	e.t.Helper()
 	var out []string
@@ -186,13 +191,13 @@ func TestConfirmInvitation(t *testing.T) {
 		t.Fatalf("A got %d emails, want invitation + confirmation", len(mail))
 	}
 
-	f.invitationAction("A", "confirm", nil).wantError(http.StatusBadRequest, "Invitation already confirmed")
+	f.invitationAction("A", "confirm", map[string]any{}).wantError(http.StatusBadRequest, "Invitation already confirmed")
 }
 
 func TestConfirmLastSpotNotifiesSessionFull(t *testing.T) {
 	f, _ := invitedPair(t)
-	f.invitationAction("A", "confirm", nil).status(http.StatusOK)
-	f.invitationAction("B", "confirm", nil).status(http.StatusOK)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
+	f.invitationAction("B", "confirm", map[string]any{}).status(http.StatusOK)
 	got := f.notificationTypes()
 	want := []string{"invitation_confirmed", "invitation_confirmed", "session_full"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
@@ -207,6 +212,33 @@ func TestConfirmRejectsDisciplineOfOtherGroup(t *testing.T) {
 		wantError(http.StatusBadRequest, "Selected discipline is not available for your group")
 	if st := f.statusOf("A"); st != "invited" {
 		t.Fatalf("status = %s, want invited", st)
+	}
+}
+
+// Only null or a missing field means "no discipline"; 0 is just an id that doesn't exist.
+func TestConfirmRejectsDisciplineZero(t *testing.T) {
+	f, _ := invitedPair(t)
+	f.invitationAction("A", "confirm", map[string]any{"discipline_id": 0}).
+		wantError(http.StatusBadRequest, "Selected discipline is not available for your group")
+	if st := f.statusOf("A"); st != "invited" {
+		t.Fatalf("status = %s, want invited", st)
+	}
+}
+
+// A body that doesn't decode must not confirm without the student's chosen discipline.
+func TestConfirmRejectsMalformedBody(t *testing.T) {
+	for name, body := range map[string]any{
+		"empty":        "",
+		"invalid json": "{",
+		"string id":    map[string]any{"discipline_id": "3"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := invitedPair(t)
+			f.invitationAction("A", "confirm", body).wantError(http.StatusBadRequest, "Invalid JSON body")
+			if st := f.statusOf("A"); st != "invited" {
+				t.Fatalf("status = %s, want invited", st)
+			}
+		})
 	}
 }
 
@@ -239,11 +271,11 @@ func TestInvitationActionsRefusedWhenClosed(t *testing.T) {
 				tc.setup(t, f)
 			}
 			if tc.action == "" {
-				f.public(http.MethodPost, "/api/invitations/unknown/confirm", nil).wantError(http.StatusNotFound, tc.msg)
+				f.public(http.MethodPost, "/api/invitations/unknown/confirm", map[string]any{}).wantError(http.StatusNotFound, tc.msg)
 				return
 			}
 			before := f.statusOf("A")
-			f.invitationAction("A", tc.action, nil).wantError(http.StatusBadRequest, tc.msg)
+			f.invitationAction("A", tc.action, map[string]any{}).wantError(http.StatusBadRequest, tc.msg)
 			if after := f.statusOf("A"); after != before {
 				t.Fatalf("status changed from %s to %s", before, after)
 			}
@@ -257,11 +289,7 @@ func TestDeclineInvitesReplacement(t *testing.T) {
 	f, g := invitedPair(t)
 	declined := f.invitationOf("A")
 
-	res := f.invitationAction("A", "decline", nil).status(http.StatusOK).object()
-	repl, _ := res["replacement"].(map[string]any)
-	if repl["name"] != "C Test" {
-		t.Fatalf("replacement = %v, want C (first in queue)", res["replacement"])
-	}
+	f.invitationAction("A", "decline", nil).status(http.StatusOK)
 	if st := f.statusOf("A"); st != "declined" {
 		t.Fatalf("A status = %s", st)
 	}
@@ -271,7 +299,7 @@ func TestDeclineInvitesReplacement(t *testing.T) {
 
 	c := f.invitationOf("C")
 	if c["status"] != "invited" || c["email_sent"] != int64(1) || toInt64(c["group_id"]) != g {
-		t.Fatalf("replacement invitation: %v", c)
+		t.Fatalf("replacement invitation: %v, want C (first in queue) invited", c)
 	}
 	if c["timeslot_id"] != declined["timeslot_id"] || c["slot_id"] != declined["slot_id"] {
 		t.Fatal("replacement did not take the vacated spot")
@@ -279,7 +307,7 @@ func TestDeclineInvitesReplacement(t *testing.T) {
 	if !f.hasTimer(toInt64(c["id"])) {
 		t.Fatal("replacement has no expiry timer")
 	}
-	if len(f.mailTo(repl["email"].(string))) != 1 {
+	if len(f.mailTo(f.row("SELECT email FROM students WHERE first_name = 'C'")["email"].(string))) != 1 {
 		t.Fatal("replacement was not emailed")
 	}
 	var log map[string]any
@@ -301,9 +329,10 @@ func TestDeclineInvitesReplacement(t *testing.T) {
 	if st := f.statusOf("D"); st != "invited" {
 		t.Fatalf("D status = %s, want invited", st)
 	}
-	res = f.invitationAction("D", "decline", nil).status(http.StatusOK).object()
-	if res["replacement"] != nil {
-		t.Fatalf("replacement = %v, want none left", res["replacement"])
+	before := f.invitationCount()
+	f.invitationAction("D", "decline", nil).status(http.StatusOK)
+	if f.invitationCount() != before {
+		t.Fatal("a replacement was invited, want none left")
 	}
 }
 
@@ -311,16 +340,16 @@ func TestDeclineInvitesReplacement(t *testing.T) {
 
 func TestCancelConfirmedInvitation(t *testing.T) {
 	f, _ := invitedPair(t)
-	f.invitationAction("A", "confirm", nil).status(http.StatusOK)
-	f.invitationAction("B", "confirm", nil).status(http.StatusOK)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
+	f.invitationAction("B", "confirm", map[string]any{}).status(http.StatusOK)
 	aEmail := f.row("SELECT email FROM students WHERE first_name = 'A'")["email"].(string)
 
-	res := f.invitationAction("A", "cancel", nil).status(http.StatusOK).object()
+	f.invitationAction("A", "cancel", nil).status(http.StatusOK)
 	if st := f.statusOf("A"); st != "cancelled" {
 		t.Fatalf("A status = %s", st)
 	}
-	if repl, _ := res["replacement"].(map[string]any); repl == nil || repl["name"] != "C Test" {
-		t.Fatalf("replacement = %v, want C", res["replacement"])
+	if st := f.statusOf("C"); st != "invited" {
+		t.Fatalf("C status = %s, want invited as replacement", st)
 	}
 	if n := len(f.mailTo(aEmail)); n != 3 {
 		t.Fatalf("A got %d emails, want invitation, confirmation and cancellation", n)

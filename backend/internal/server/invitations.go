@@ -169,10 +169,14 @@ func (s *Server) invitationRoutes() {
 	})
 
 	s.publicRoute("POST /api/invitations/{token}/confirm", func(w http.ResponseWriter, r *http.Request) error {
-		// Lenient: an unreadable body confirms without a discipline.
-		in, _ := decode[struct {
-			DisciplineID int64 `json:"discipline_id"` // 0 or null: none chosen
-		}](r)
+		type request struct {
+			DisciplineID *int64 `json:"discipline_id"` // null or missing: none chosen
+		}
+		in, err := decode[request](r)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
+		}
 		inv, found, err := s.invitationByToken(r.PathValue("token"))
 		if err != nil {
 			return err
@@ -193,17 +197,16 @@ func (s *Server) invitationRoutes() {
 			httpx.Error(w, http.StatusBadRequest, reason)
 			return nil
 		}
-		disciplineID := in.DisciplineID
 		invID, sessionID := inv.ID, inv.SessionID
 
 		// The discipline must belong to the invitation's group, or for manual invitations
 		// (no group) to the student's current group.
-		if disciplineID != 0 {
+		if in.DisciplineID != nil {
 			if _, found, err := db.One[int](s.db, `
 				SELECT 1 FROM discipline_groups
 				WHERE discipline_id = ?
 				  AND group_id = COALESCE(?, (SELECT group_id FROM student_groups WHERE student_id = ?))`,
-				disciplineID, inv.GroupID, inv.StudentID); err != nil {
+				*in.DisciplineID, inv.GroupID, inv.StudentID); err != nil {
 				return err
 			} else if !found {
 				httpx.Error(w, http.StatusBadRequest, "Selected discipline is not available for your group")
@@ -211,25 +214,19 @@ func (s *Server) invitationRoutes() {
 			}
 		}
 
-		var storedDiscipline *int64
-		if disciplineID != 0 {
-			storedDiscipline = &disciplineID
-		}
-		if _, err := s.db.Exec("UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?", storedDiscipline, invID); err != nil {
+		if _, err := s.db.Exec("UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?", in.DisciplineID, invID); err != nil {
 			return err
 		}
 		s.cancelInvitationExpiry(invID)
 
 		var discName, discAbbr *string
-		var storedID *int64
-		s.db.QueryRow("SELECT discipline_id FROM invitations WHERE id = ?", invID).Scan(&storedID)
-		if storedID != nil && *storedID != 0 {
-			s.db.QueryRow("SELECT name, abbreviation FROM disciplines WHERE id = ?", *storedID).Scan(&discName, &discAbbr)
+		if in.DisciplineID != nil {
+			s.db.QueryRow("SELECT name, abbreviation FROM disciplines WHERE id = ?", *in.DisciplineID).Scan(&discName, &discAbbr)
 		}
 		s.broadcastSessionInvitation(sessionID, invID, map[string]any{
 			"status": "confirmed", "discipline_name": discName, "discipline_abbreviation": discAbbr,
 		})
-		s.broadcastInvitation(r.PathValue("token"), "confirmed")
+		s.broadcastInvitation(inv.Token, "confirmed")
 		s.broadcastSessionCounts(sessionID)
 
 		s.CreateNotification(NewNotification{
@@ -243,13 +240,13 @@ func (s *Server) invitationRoutes() {
 		}
 
 		var disciplineName string
-		if disciplineID != 0 {
-			s.db.QueryRow("SELECT name FROM disciplines WHERE id = ?", disciplineID).Scan(&disciplineName)
+		if discName != nil {
+			disciplineName = *discName
 		}
 		s.mailer.SendConfirmation(email.SessionParams{
 			To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
 			StartTime: inv.StartTime, DisciplineName: disciplineName, ClubName: s.clubName(), Locale: s.emailLocale(),
-		}, r.PathValue("token"))
+		}, inv.Token)
 
 		httpx.OK(w, map[string]any{"success": true, "message": "Your attendance has been confirmed!"})
 		return nil
@@ -282,7 +279,7 @@ func (s *Server) invitationRoutes() {
 		}
 
 		s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "cancelled"})
-		s.broadcastInvitation(r.PathValue("token"), "cancelled")
+		s.broadcastInvitation(inv.Token, "cancelled")
 		s.broadcastSessionCounts(sessionID)
 		s.CreateNotification(NewNotification{
 			Type: "invitation_cancelled", InvitationID: invID, SessionID: sessionID,
@@ -298,11 +295,10 @@ func (s *Server) invitationRoutes() {
 		})
 
 		// The decision log records the status the invitation had when it was loaded.
-		replacement, err := s.findAndInviteReplacement(inv.vacated())
-		if err != nil {
+		if _, err := s.findAndInviteReplacement(inv.vacated()); err != nil {
 			return err
 		}
-		httpx.OK(w, map[string]any{"success": true, "message": "Your participation has been cancelled.", "replacement": replacement})
+		httpx.OK(w, map[string]any{"success": true, "message": "Your participation has been cancelled."})
 		return nil
 	})
 
@@ -334,7 +330,7 @@ func (s *Server) invitationRoutes() {
 		s.cancelInvitationExpiry(invID)
 
 		s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "declined"})
-		s.broadcastInvitation(r.PathValue("token"), "declined")
+		s.broadcastInvitation(inv.Token, "declined")
 		s.broadcastSessionCounts(sessionID)
 
 		s.CreateNotification(NewNotification{
@@ -342,11 +338,10 @@ func (s *Server) invitationRoutes() {
 			StudentName: inv.StudentName, SessionDate: inv.SessionDate, TimeslotStartTime: inv.StartTime,
 		})
 
-		replacement, err := s.findAndInviteReplacement(inv.vacated())
-		if err != nil {
+		if _, err := s.findAndInviteReplacement(inv.vacated()); err != nil {
 			return err
 		}
-		httpx.OK(w, map[string]any{"success": true, "message": "Your decline has been recorded.", "replacement": replacement})
+		httpx.OK(w, map[string]any{"success": true, "message": "Your decline has been recorded."})
 		return nil
 	})
 }

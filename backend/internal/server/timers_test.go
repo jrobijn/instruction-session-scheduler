@@ -64,7 +64,7 @@ func TestExpiryIgnoredWhenNoLongerPending(t *testing.T) {
 		setup func(f *scheduleFixture)
 		want  string
 	}{
-		{"confirmed", func(f *scheduleFixture) { f.invitationAction("A", "confirm", nil).status(http.StatusOK) }, "confirmed"},
+		{"confirmed", func(f *scheduleFixture) { f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK) }, "confirmed"},
 		{"session cancelled", func(f *scheduleFixture) {
 			f.exec("UPDATE training_sessions SET status = 'cancelled'")
 		}, "invited"},

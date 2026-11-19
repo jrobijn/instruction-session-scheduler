@@ -117,7 +117,7 @@ func TestDeleteStudent(t *testing.T) {
 	a, b := f.studentID("A"), f.studentID("B")
 	aEmail, bEmail := f.studentEmail(a), f.studentEmail(b)
 	aInv := toInt64(f.invitationOf("A")["id"])
-	f.invitationAction("B", "confirm", nil).status(http.StatusOK)
+	f.invitationAction("B", "confirm", map[string]any{}).status(http.StatusOK)
 
 	// A also has an unsent invitation for a later session and a confirmed one for a past,
 	// completed session.

@@ -60,7 +60,7 @@ func TestDeleteInstructorRemovesThemFromSessions(t *testing.T) {
 		return f.rows("SELECT inv.*, s.email FROM invitations inv JOIN students s ON s.id = inv.student_id WHERE inv.slot_id = ?", slot)
 	}
 	goneInvs := onSlot(f.slots[0])
-	f.invitationAction(f.row("SELECT first_name FROM students WHERE id = ?", goneInvs[0]["student_id"])["first_name"].(string), "confirm", nil).
+	f.invitationAction(f.row("SELECT first_name FROM students WHERE id = ?", goneInvs[0]["student_id"])["first_name"].(string), "confirm", map[string]any{}).
 		status(http.StatusOK)
 
 	// A later draft session with an unsent invitation, and a completed past session.
