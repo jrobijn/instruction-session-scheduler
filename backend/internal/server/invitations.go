@@ -123,30 +123,17 @@ type PublicInvitation struct {
 	ExpiresAt      *string `json:"expires_at"`
 }
 
-// closedReason applies the checks shared by the public invitation actions, which need the
-// invitation to have requiredStatus. It returns why the action is not allowed (to answer
-// with a 400), or "" if it is.
-func (s *Server) closedReason(inv invitationDetails, requiredStatus string) string {
-	if inv.SessionStatus == "completed" {
-		return "This session has already passed"
+// invitationExpired reports whether an invitation stored as 'invited' can no longer be
+// answered, and if so why. The expiry timer may not have updated the stored status yet.
+func (s *Server) invitationExpired(inv invitationDetails) (reason string, expired bool) {
+	switch effectiveStatus(inv.timing(), s.expiryMinutes(), s.clubLocation(), nowFunc()) {
+	case "invited":
+		return "", false
+	case "invalidated":
+		return "This time slot has already started", true
+	default:
+		return "This invitation has expired", true
 	}
-	if inv.Status != requiredStatus {
-		if requiredStatus == "confirmed" {
-			return fmt.Sprintf("Cannot cancel — invitation is %s", inv.Status)
-		}
-		return fmt.Sprintf("Invitation already %s", inv.Status)
-	}
-	if requiredStatus == "invited" {
-		// The expiry timer may not have fired yet.
-		switch effectiveStatus(inv.timing(), s.expiryMinutes(), s.clubLocation(), nowFunc()) {
-		case "invited":
-		case "invalidated":
-			return "This time slot has already started"
-		default:
-			return "This invitation has expired"
-		}
-	}
-	return ""
 }
 
 func (s *Server) invitationRoutes() {
@@ -194,8 +181,16 @@ func (s *Server) invitationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		if msg := s.closedReason(inv, "invited"); msg != "" {
-			httpx.Error(w, http.StatusBadRequest, msg)
+		if inv.SessionStatus == "completed" {
+			httpx.Error(w, http.StatusBadRequest, "This session has already passed")
+			return nil
+		}
+		if inv.Status != "invited" {
+			httpx.Error(w, http.StatusBadRequest, fmt.Sprintf("Invitation already %s", inv.Status))
+			return nil
+		}
+		if reason, expired := s.invitationExpired(inv); expired {
+			httpx.Error(w, http.StatusBadRequest, reason)
 			return nil
 		}
 		disciplineID := in.DisciplineID
@@ -269,8 +264,12 @@ func (s *Server) invitationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		if msg := s.closedReason(inv, "confirmed"); msg != "" {
-			httpx.Error(w, http.StatusBadRequest, msg)
+		if inv.SessionStatus == "completed" {
+			httpx.Error(w, http.StatusBadRequest, "This session has already passed")
+			return nil
+		}
+		if inv.Status != "confirmed" {
+			httpx.Error(w, http.StatusBadRequest, fmt.Sprintf("Cannot cancel — invitation is %s", inv.Status))
 			return nil
 		}
 		invID, sessionID := inv.ID, inv.SessionID
@@ -316,8 +315,16 @@ func (s *Server) invitationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		if msg := s.closedReason(inv, "invited"); msg != "" {
-			httpx.Error(w, http.StatusBadRequest, msg)
+		if inv.SessionStatus == "completed" {
+			httpx.Error(w, http.StatusBadRequest, "This session has already passed")
+			return nil
+		}
+		if inv.Status != "invited" {
+			httpx.Error(w, http.StatusBadRequest, fmt.Sprintf("Invitation already %s", inv.Status))
+			return nil
+		}
+		if reason, expired := s.invitationExpired(inv); expired {
+			httpx.Error(w, http.StatusBadRequest, reason)
 			return nil
 		}
 		invID, sessionID := inv.ID, inv.SessionID
