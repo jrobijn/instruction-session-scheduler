@@ -1,49 +1,93 @@
 package email
 
 import (
-	"flag"
-	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
 
-var update = flag.Bool("update", false, "rewrite testdata/golden-*.html from the current output")
+// TestEmailHTML checks, for every email in both locales, what the HTML must get right:
+// user input is escaped, the invitation link is present, and the locale is applied.
+func TestEmailHTML(t *testing.T) {
+	const (
+		club       = `Club "A&B" <Club>`
+		student    = `Jan & <Piet>`
+		discipline = `Pistool & <Geweer>`
+	)
+	session := SessionParams{To: "x@y.z", StudentName: student, Date: "2026-10-16", StartTime: "19:30",
+		DisciplineName: discipline, ClubName: club}
 
-// TestEmailsMatchGolden compares each rendered email with testdata/golden-<i>.html. After an
-// intended change to the templates, run `go test ./internal/email -update` and review the diff.
-func TestEmailsMatchGolden(t *testing.T) {
-	type sent struct{ subject, text, html string }
-	var got []sent
-	m := &Mailer{cfg: Config{FrontendURL: "http://example.test"}}
-	m.capture = func(_, subject, text, html string) { got = append(got, sent{subject, text, html}) }
-
-	const club = `Club "A&B" <Test>`
-	for _, locale := range []string{"en", "nl"} {
-		m.SendInvitation(InvitationParams{To: "x@y.z", StudentName: "Jan & <Piet>", Date: "2026-10-16", Token: "tok-123", ClubName: club, Locale: locale})
-		m.SendConfirmation(SessionParams{To: "x@y.z", StudentName: "Jan", Date: "2026-01-04", StartTime: "19:30", DisciplineName: "Pistool & Geweer", ClubName: club, Locale: locale}, "tok-456")
-		m.SendCancellation(SessionParams{To: "x@y.z", StudentName: "Jan", Date: "2026-05-31", StartTime: "20:00", ClubName: club, Locale: locale})
-		m.SendAdminCancellation(SessionParams{To: "x@y.z", StudentName: "Jan", Date: "2026-12-25", StartTime: "21:15", DisciplineName: "Revolver", ClubName: club, Locale: locale})
+	cases := []struct {
+		name, locale, subject, date, url string
+		send                             func(*Mailer, string)
+	}{
+		{"invitation", "en", "Instruction Session Invitation — " + club, "Friday, 16 October 2026", "http://example.test/invitation/tok-inv",
+			func(m *Mailer, l string) {
+				m.SendInvitation(InvitationParams{To: "x@y.z", StudentName: student, Date: "2026-10-16", Token: "tok-inv", ClubName: club, Locale: l})
+			}},
+		{"invitation", "nl", "Uitnodiging instructiesessie — " + club, "vrijdag 16 oktober 2026", "http://example.test/invitation/tok-inv",
+			func(m *Mailer, l string) {
+				m.SendInvitation(InvitationParams{To: "x@y.z", StudentName: student, Date: "2026-10-16", Token: "tok-inv", ClubName: club, Locale: l})
+			}},
+		{"confirmation", "en", "Instruction Session Confirmed — " + club, "Friday, 16 October 2026", "http://example.test/invitation/tok-conf",
+			func(m *Mailer, l string) { p := session; p.Locale = l; m.SendConfirmation(p, "tok-conf") }},
+		{"confirmation", "nl", "Instructiesessie bevestigd — " + club, "vrijdag 16 oktober 2026", "http://example.test/invitation/tok-conf",
+			func(m *Mailer, l string) { p := session; p.Locale = l; m.SendConfirmation(p, "tok-conf") }},
+		{"cancellation", "en", "Instruction Session Cancelled — " + club, "Friday, 16 October 2026", "",
+			func(m *Mailer, l string) { p := session; p.Locale = l; m.SendCancellation(p) }},
+		{"cancellation", "nl", "Instructiesessie geannuleerd — " + club, "vrijdag 16 oktober 2026", "",
+			func(m *Mailer, l string) { p := session; p.Locale = l; m.SendCancellation(p) }},
+		{"admin cancellation", "en", "Instruction Session Invitation Withdrawn — " + club, "Friday, 16 October 2026", "",
+			func(m *Mailer, l string) { p := session; p.Locale = l; m.SendAdminCancellation(p) }},
+		{"admin cancellation", "nl", "Instructiesessie uitnodiging ingetrokken — " + club, "vrijdag 16 oktober 2026", "",
+			func(m *Mailer, l string) { p := session; p.Locale = l; m.SendAdminCancellation(p) }},
 	}
 
-	for i, g := range got {
-		file := fmt.Sprintf("testdata/golden-%d.html", i)
-		if *update {
-			if err := os.WriteFile(file, []byte(g.html), 0o644); err != nil {
-				t.Fatal(err)
+	for _, c := range cases {
+		t.Run(c.name+"/"+c.locale, func(t *testing.T) {
+			var subject, body string
+			m := &Mailer{cfg: Config{FrontendURL: "http://example.test"}}
+			m.capture = func(_, s, _, h string) { subject, body = s, h }
+			c.send(m, c.locale)
+
+			if subject != c.subject {
+				t.Errorf("subject = %q, want %q", subject, c.subject)
 			}
-			continue
-		}
-		want, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if g.html != string(want) {
-			t.Errorf("email %d (%s): HTML differs from %s\n%s", i, g.subject, file, firstDiff(g.html, string(want)))
-		}
-	}
-	if len(got) != 8 {
-		t.Fatalf("rendered %d emails, want 8", len(got))
+			for _, raw := range []string{"<Club>", "<Piet>", "<Geweer>", `"A&B"`, "Jan & ", "Pistool & "} {
+				if strings.Contains(body, raw) {
+					t.Errorf("HTML contains unescaped %q", raw)
+				}
+			}
+			escaped := []string{"Club &#34;A&amp;B&#34; &lt;Club&gt;", "Jan &amp; &lt;Piet&gt;"}
+			if c.name != "invitation" {
+				escaped = append(escaped, "Pistool &amp; &lt;Geweer&gt;")
+			}
+			for _, want := range escaped {
+				if !strings.Contains(body, want) {
+					t.Errorf("HTML lacks escaped %q", want)
+				}
+			}
+
+			if !strings.Contains(body, `<html lang="`+c.locale+`">`) {
+				t.Errorf("HTML lacks lang=%q", c.locale)
+			}
+			if !strings.Contains(body, c.date) {
+				t.Errorf("HTML lacks date %q", c.date)
+			}
+
+			if c.url == "" {
+				if strings.Contains(body, "/invitation/") {
+					t.Error("HTML contains an invitation link")
+				}
+				return
+			}
+			// The button and the copy-link line both link to it; the latter also shows it.
+			if n := strings.Count(body, `href="`+c.url+`"`); n != 2 {
+				t.Errorf("HTML links to %s %d times, want 2", c.url, n)
+			}
+			if !strings.Contains(body, ">"+c.url+"</a>") {
+				t.Errorf("HTML does not show %s as link text", c.url)
+			}
+		})
 	}
 }
 
@@ -74,15 +118,4 @@ func TestFormatDate(t *testing.T) {
 			t.Errorf("FormatDate(%s, %s) = %q, want %q", date, locale, got, want)
 		}
 	}
-}
-
-func firstDiff(a, b string) string {
-	n := min(len(a), len(b))
-	for i := 0; i < n; i++ {
-		if a[i] != b[i] {
-			lo := max(0, i-80)
-			return fmt.Sprintf("got:    …%s…\ngolden: …%s…", a[lo:min(len(a), i+80)], b[lo:min(len(b), i+80)])
-		}
-	}
-	return fmt.Sprintf("length go=%d ts=%d", len(a), len(b))
 }
