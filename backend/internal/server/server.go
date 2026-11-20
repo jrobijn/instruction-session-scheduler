@@ -68,34 +68,7 @@ func (s *Server) routes() {
 	m := s.mux
 
 	s.authRoutes()
-
-	// SSE streams are long-lived, so they bypass wrap and must not hold s.mu.
-	m.HandleFunc("GET /api/sessions/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
-		s.hub.Serve(w, r, sessionsListChannel)
-	}))
-	m.HandleFunc("GET /api/sessions/{id}/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
-		id, ok := pathID(r, "id")
-		if !ok {
-			httpx.Error(w, http.StatusNotFound, "Not found")
-			return
-		}
-		s.hub.Serve(w, r, sessionChannel(id))
-	}))
-	m.HandleFunc("GET /api/notifications/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
-		s.hub.Serve(w, r, notificationsChannel)
-	}))
-	m.HandleFunc("GET /api/invitations/{token}/events", func(w http.ResponseWriter, r *http.Request) {
-		token := r.PathValue("token")
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE token = ?", token); err != nil {
-			s.internalError(w, err)
-			return
-		} else if !found {
-			httpx.Error(w, http.StatusNotFound, "Not found")
-			return
-		}
-		s.hub.Serve(w, r, invitationChannel(token))
-	})
-
+	s.eventRoutes()
 	s.settingsRoutes()
 	s.notificationRoutes()
 	s.buddyGroupRoutes()
