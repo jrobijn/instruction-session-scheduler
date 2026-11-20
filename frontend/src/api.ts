@@ -10,7 +10,7 @@ export function onAuthError(cb: () => void) {
 async function request(path: string, options: RequestInit = {}): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as Record<string, string>) };
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     authErrorCallback?.();
   }
   const data = await res.json();
@@ -20,7 +20,7 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
 
 async function requestCsv(path: string): Promise<string> {
   const res = await fetch(`${API_BASE}${path}`);
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     authErrorCallback?.();
   }
   if (!res.ok) {

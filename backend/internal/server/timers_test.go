@@ -16,8 +16,9 @@ func (e *testEnv) timerCount() int {
 // expire runs the expiry callback the way a firing timer does.
 func (e *testEnv) expire(invitationID int64) {
 	e.t.Helper()
-	var err error
-	e.srv.locked(func() { err = e.srv.expireInvitation(invitationID) })
+	e.srv.mu.Lock()
+	err := e.srv.expireInvitation(invitationID)
+	e.srv.mu.Unlock()
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -93,7 +94,9 @@ func TestExpiryTimerFires(t *testing.T) {
 	id := toInt64(f.invitationOf("A")["id"])
 	// Invited long ago: the deadline has passed, so the timer fires right away.
 	f.exec("UPDATE invitations SET invited_at = '2000-01-01 00:00:00' WHERE id = ?", id)
-	f.srv.locked(func() { f.srv.scheduleInvitationExpiry(id, time.Time{}) })
+	f.srv.mu.Lock()
+	f.srv.scheduleInvitationExpiry(id, time.Time{})
+	f.srv.mu.Unlock()
 
 	deadline := time.Now().Add(5 * time.Second)
 	for f.statusOf("A") == "invited" {

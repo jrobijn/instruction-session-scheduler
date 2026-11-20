@@ -30,11 +30,11 @@ func (s *Server) scheduleInvitationExpiry(invitationID int64, at time.Time) {
 		if !current { // cancelled or rescheduled after firing
 			return
 		}
-		s.locked(func() {
-			if err := s.expireInvitation(invitationID); err != nil {
-				log.Printf("Error processing expiry for invitation %d: %v", invitationID, err)
-			}
-		})
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if err := s.expireInvitation(invitationID); err != nil {
+			log.Printf("Error processing expiry for invitation %d: %v", invitationID, err)
+		}
 	})
 	t.timers[invitationID] = timer
 }
