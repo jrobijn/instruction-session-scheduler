@@ -13,8 +13,8 @@ import (
 
 const defaultTimeZone = "Europe/Amsterdam"
 
-// expiryMinutes reads invitation_expiry_minutes. Non-numeric values behave like 0 (no
-// time-based expiry), which is how NaN behaves in every comparison of the TS code.
+// expiryMinutes reads invitation_expiry_minutes. Non-numeric values (NaN included) mean 0:
+// no time-based expiry.
 func (s *Server) expiryMinutes() float64 {
 	v, err := strconv.ParseFloat(strings.TrimSpace(db.Setting(s.db, "invitation_expiry_minutes", "120")), 64)
 	if err != nil || math.IsNaN(v) {

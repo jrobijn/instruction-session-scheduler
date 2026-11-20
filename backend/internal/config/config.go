@@ -40,7 +40,7 @@ func Load() Config {
 		JWTSecret:     jwtSecret,
 		DBPath:        firstNonEmpty(os.Getenv("DB_PATH"), "data.db"),
 		PublicDir:     firstNonEmpty(os.Getenv("PUBLIC_DIR"), "public"),
-		Production:    os.Getenv("NODE_ENV") == "production" || os.Getenv("APP_ENV") == "production",
+		Production:    os.Getenv("APP_ENV") == "production",
 
 		SMTPHost:   os.Getenv("SMTP_HOST"),
 		SMTPPort:   firstNonEmpty(os.Getenv("SMTP_PORT"), "587"),

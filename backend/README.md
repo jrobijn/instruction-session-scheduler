@@ -26,7 +26,7 @@ Environment variables (read from `.env` if present; real environment variables w
 | `JWT_SECRET` | Signing key for the login cookie | `ADMIN_PASSWORD` |
 | `DB_PATH` | SQLite database file, relative to the working directory | `data.db` |
 | `PUBLIC_DIR` | Built frontend to serve | `public` |
-| `APP_ENV=production` | Marks the login cookie `Secure` (`NODE_ENV=production` also works) | — |
+| `APP_ENV=production` | Marks the login cookie `Secure` | — |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Mail server; without `SMTP_HOST`/`SMTP_USER`, emails are only logged | port `587` |
 | `EMAIL_PREVIEW_DIR` | Without SMTP: also save each email's HTML here | — |
 

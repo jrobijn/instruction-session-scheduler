@@ -3,7 +3,7 @@ package email
 import "fmt"
 
 // Strings holds the translated email texts.
-// Format strings take their arguments in the order of the TS functions' parameters.
+// Each field's comment lists its format arguments in order.
 type Strings struct {
 	Greeting                 string // name
 	InvitationBody           string // clubName, date

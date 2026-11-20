@@ -28,9 +28,10 @@ type Server struct {
 	mux    *http.ServeMux
 	timers *expiryTimers
 
-	// mu serializes request handlers and timer callbacks. The TS backend runs on a single
-	// event loop with a synchronous SQLite driver, so its multi-statement read-modify-write
-	// sequences never interleave; this lock preserves that. SSE streams do not hold it.
+	// mu serializes request handlers and timer callbacks. Handlers do multi-statement
+	// read-modify-write sequences (capacity checks, invitation state transitions) without
+	// transactions, and timers race with handlers on the same rows; holding mu for the whole
+	// handler makes each one atomic. SSE streams do not hold it.
 	mu sync.Mutex
 
 	// onExpirySettingsChanged is called after invitation_expiry_minutes or timezone changes,
@@ -76,7 +77,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	m.HandleFunc("GET /api/auth/me", s.handleMe)
 
-	// SSE streams authenticate via cookie themselves (same as the TS backend).
+	// SSE streams authenticate via cookie themselves.
 	m.HandleFunc("GET /api/sessions/events", s.admin(func(w http.ResponseWriter, r *http.Request) {
 		s.hub.Serve(w, r, sessionsListChannel)
 	}))
@@ -111,7 +112,7 @@ func (s *Server) routes() {
 	m.HandleFunc("/", s.handleStatic)
 }
 
-// admin wraps a handler with the requireAdmin check from index.ts.
+// admin wraps a handler, rejecting requests without a valid admin auth cookie.
 func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(authCookie)
@@ -129,8 +130,8 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 
 // handlerFunc is an http.HandlerFunc that may return an error. Handlers write every
 // response themselves, client errors included (httpx.Error, then return nil); a returned
-// error is always unexpected and becomes a 500 (like an uncaught exception in an Express
-// handler). A handler that returns an error must not have written a response.
+// error is always unexpected and becomes a 500. A handler that returns an error must not
+// have written a response.
 type handlerFunc func(w http.ResponseWriter, r *http.Request) error
 
 func (s *Server) wrap(fn handlerFunc) http.HandlerFunc {
@@ -162,7 +163,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Strict equality like the TS version: an unset ADMIN_PASSWORD never matches a sent password.
+	// An unset ADMIN_PASSWORD never matches, not even an empty sent password.
 	if in.Password == nil || s.cfg.AdminPassword == "" || *in.Password != s.cfg.AdminPassword {
 		httpx.Error(w, http.StatusUnauthorized, "Invalid password")
 		return

@@ -1,5 +1,4 @@
 // Package auth implements the minimal HS256 JWT handling the admin login needs.
-// Tokens are interchangeable with those issued by the TypeScript backend (jsonwebtoken).
 package auth
 
 import (

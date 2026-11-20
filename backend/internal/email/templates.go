@@ -1,6 +1,7 @@
 package email
 
 import (
+	"html"
 	"strings"
 )
 
@@ -25,13 +26,13 @@ type detailRow struct {
 
 func renderLayout(locale, title, clubName, content string) string {
 	return `<!DOCTYPE html>
-<html lang="` + escape(locale) + `">
+<html lang="` + html.EscapeString(locale) + `">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>` + escape(title) + `</title>
+<title>` + html.EscapeString(title) + `</title>
 </head>
 <body style="margin: 0; padding: 0; background: ` + theme.page + `;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background: ` + theme.page + `;">
@@ -40,7 +41,7 @@ func renderLayout(locale, title, clubName, content string) string {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background: ` + theme.surface + `; border: 1px solid ` + theme.border + `; border-radius: 3px;">
         <tr>
           <td style="background: ` + theme.gunmetal + `; border-bottom: 3px solid ` + theme.accent + `; border-radius: 3px 3px 0 0; padding: 16px 24px; font-family: ` + theme.fontDisplay + `; font-size: 18px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: ` + theme.onGunmetal + `;">
-            ` + escape(clubName) + `
+            ` + html.EscapeString(clubName) + `
           </td>
         </tr>
         <tr>
@@ -57,7 +58,7 @@ func renderLayout(locale, title, clubName, content string) string {
 }
 
 func renderHeading(text string) string {
-	return `<h1 style="margin: 0 0 16px; font-family: ` + theme.fontDisplay + `; font-size: 22px; font-weight: 700; line-height: 1.3; letter-spacing: 0.01em; color: ` + theme.text + `;">` + escape(text) + `</h1>`
+	return `<h1 style="margin: 0 0 16px; font-family: ` + theme.fontDisplay + `; font-size: 22px; font-weight: 700; line-height: 1.3; letter-spacing: 0.01em; color: ` + theme.text + `;">` + html.EscapeString(text) + `</h1>`
 }
 
 // renderParagraph expects html to be escaped already.
@@ -78,8 +79,8 @@ func renderDetails(rows []detailRow, tone string) string {
 		}
 		rowsHTML.WriteString(`
       <tr>
-        <td style="padding: 4px 16px 4px 0; white-space: nowrap; vertical-align: baseline; font-family: ` + theme.fontDisplay + `; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: ` + theme.muted + `;">` + escape(strings.TrimSuffix(r.label, ":")) + `</td>
-        <td style="padding: 4px 0; vertical-align: baseline; font-family: ` + font + `; font-size: ` + size + `; color: ` + theme.text + `;">` + escape(r.value) + `</td>
+        <td style="padding: 4px 16px 4px 0; white-space: nowrap; vertical-align: baseline; font-family: ` + theme.fontDisplay + `; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: ` + theme.muted + `;">` + html.EscapeString(strings.TrimSuffix(r.label, ":")) + `</td>
+        <td style="padding: 4px 0; vertical-align: baseline; font-family: ` + font + `; font-size: ` + size + `; color: ` + theme.text + `;">` + html.EscapeString(r.value) + `</td>
       </tr>`)
 	}
 	return `
@@ -102,18 +103,18 @@ func renderButton(url, label, variant string) string {
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;">
       <tr>
         <td style="background: ` + background + `; border: 1px solid ` + border + `; border-radius: 2px;">
-          <a href="` + escape(url) + `" style="display: inline-block; padding: 12px 24px; font-family: ` + theme.fontBody + `; font-size: 15px; font-weight: 600; color: ` + color + `; text-decoration: none;">` + escape(label) + `</a>
+          <a href="` + html.EscapeString(url) + `" style="display: inline-block; padding: 12px 24px; font-family: ` + theme.fontBody + `; font-size: 15px; font-weight: 600; color: ` + color + `; text-decoration: none;">` + html.EscapeString(label) + `</a>
         </td>
       </tr>
     </table>`
 }
 
 func renderCopyLink(label, url string) string {
-	return `<p style="margin: 0 0 20px; font-size: 13px; color: ` + theme.muted + `; word-break: break-all;">` + escape(label) + ` <a href="` + escape(url) + `" style="color: ` + theme.accentText + `;">` + escape(url) + `</a></p>`
+	return `<p style="margin: 0 0 20px; font-size: 13px; color: ` + theme.muted + `; word-break: break-all;">` + html.EscapeString(label) + ` <a href="` + html.EscapeString(url) + `" style="color: ` + theme.accentText + `;">` + html.EscapeString(url) + `</a></p>`
 }
 
 func renderSignoff(closing, clubName string) string {
-	return `<p style="margin: 0; padding-top: 16px; border-top: 1px solid ` + theme.border + `;">` + escape(closing) + `<br/><strong>` + escape(clubName) + `</strong></p>`
+	return `<p style="margin: 0; padding-top: 16px; border-top: 1px solid ` + theme.border + `;">` + html.EscapeString(closing) + `<br/><strong>` + html.EscapeString(clubName) + `</strong></p>`
 }
 
 func sessionRows(s Strings, formattedDate, startTime, discipline string) []detailRow {

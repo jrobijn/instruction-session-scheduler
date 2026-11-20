@@ -7,7 +7,7 @@ import (
 )
 
 var configVars = []string{
-	"PORT", "FRONTEND_URL", "ADMIN_PASSWORD", "JWT_SECRET", "DB_PATH", "PUBLIC_DIR", "NODE_ENV", "APP_ENV",
+	"PORT", "FRONTEND_URL", "ADMIN_PASSWORD", "JWT_SECRET", "DB_PATH", "PUBLIC_DIR", "APP_ENV",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "EMAIL_PREVIEW_DIR",
 }
 
@@ -47,10 +47,9 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 	t.Setenv("JWT_SECRET", "jwt")
 	t.Setenv("SMTP_SECURE", "1")
-	t.Setenv("APP_ENV", "")
-	t.Setenv("NODE_ENV", "production")
+	t.Setenv("APP_ENV", "staging")
 	c = Load()
-	if c.JWTSecret != "jwt" || c.SMTPSecure || !c.Production {
+	if c.JWTSecret != "jwt" || c.SMTPSecure || c.Production {
 		t.Fatalf("config = %+v", c)
 	}
 }

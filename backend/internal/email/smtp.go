@@ -106,9 +106,8 @@ func buildMessage(from, to *mail.Address, subject, text, htmlBody string) ([]byt
 }
 
 // tlsConfig uses Go's default TLS settings (TLS 1.2 and newer, Go's default cipher suites);
-// the club's mail server negotiates TLS 1.2 with ECDHE and AES-GCM. The TS backend's
-// SMTP_TLS_CIPHERS is not supported. The backend README shows how to see what the
-// server negotiates.
+// the club's mail server negotiates TLS 1.2 with ECDHE and AES-GCM. The backend README shows
+// how to see what the server negotiates.
 func (m *Mailer) tlsConfig() *tls.Config {
 	return &tls.Config{ServerName: m.cfg.Host, RootCAs: m.rootCAs}
 }

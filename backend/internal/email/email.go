@@ -4,6 +4,7 @@ package email
 import (
 	"crypto/x509"
 	"fmt"
+	"html"
 	"log"
 	"os"
 	"path/filepath"
@@ -24,8 +25,8 @@ type Config struct {
 type Mailer struct {
 	cfg     Config
 	enabled bool
-	// sending allows one SMTP connection at a time, like the TS backend's nodemailer pool
-	// with maxConnections: 1, so a batch of invitations does not open parallel logins.
+	// sending allows one SMTP connection at a time, so a batch of invitations does not open
+	// parallel logins on the club's mail server.
 	sending sync.Mutex
 	// capture, when set (tests), receives every email instead of it being sent or logged.
 	capture func(to, subject, text, html string)
@@ -47,8 +48,8 @@ func NewCapturing(cfg Config, capture func(to, subject, text, html string)) *Mai
 	return &Mailer{cfg: cfg, capture: capture}
 }
 
-// deliver sends in the background, like the TS version whose sendMail callback only logs
-// failures: callers never see SMTP errors. send makes the emails go out one after another.
+// deliver sends in the background and only logs failures: callers never see SMTP errors.
+// send makes the emails go out one after another.
 func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []string) {
 	if m.capture != nil {
 		m.capture(to, subject, text, htmlBody)
@@ -95,8 +96,8 @@ func (m *Mailer) SendInvitation(p InvitationParams) {
 
 	body := renderLayout(locale, subject, p.ClubName, strings.Join([]string{
 		renderHeading(f(s.Greeting, p.StudentName)),
-		renderParagraph(f(s.InvitationBody, escape(p.ClubName), escape(date))),
-		renderParagraph(escape(s.InvitationCta)),
+		renderParagraph(f(s.InvitationBody, html.EscapeString(p.ClubName), html.EscapeString(date))),
+		renderParagraph(html.EscapeString(s.InvitationCta)),
 		renderButton(url, s.RespondButton, "primary"),
 		renderCopyLink(s.CopyLink, url),
 		renderSignoff(s.BestRegards, p.ClubName),
@@ -124,9 +125,9 @@ func (m *Mailer) SendConfirmation(p SessionParams, token string) {
 
 	body := renderLayout(locale, subject, p.ClubName, strings.Join([]string{
 		renderHeading(f(s.Greeting, p.StudentName)),
-		renderParagraph(f(s.ConfirmationBody, escape(p.ClubName))),
+		renderParagraph(f(s.ConfirmationBody, html.EscapeString(p.ClubName))),
 		renderDetails(sessionRows(s, date, p.StartTime, p.DisciplineName), "success"),
-		renderParagraph(escape(s.CancelExplanation)),
+		renderParagraph(html.EscapeString(s.CancelExplanation)),
 		renderButton(url, s.CancelButton, "secondary"),
 		renderCopyLink(s.CopyLink, url),
 		renderSignoff(s.SeeYou, p.ClubName),
@@ -143,14 +144,14 @@ func (m *Mailer) SendConfirmation(p SessionParams, token string) {
 func (m *Mailer) SendCancellation(p SessionParams) {
 	locale := orEN(p.Locale)
 	s := For(locale)
-	m.sendCancellationLike(p, f(s.CancellationSubject, p.ClubName), f(s.CancellationBody, escape(p.ClubName)),
+	m.sendCancellationLike(p, f(s.CancellationSubject, p.ClubName), f(s.CancellationBody, html.EscapeString(p.ClubName)),
 		stripHTML(f(s.CancellationBody, p.ClubName)), "📧 [Cancellation Email Preview]")
 }
 
 func (m *Mailer) SendAdminCancellation(p SessionParams) {
 	locale := orEN(p.Locale)
 	s := For(locale)
-	m.sendCancellationLike(p, f(s.AdminCancellationSubject, p.ClubName), f(s.AdminCancellationBody, escape(p.ClubName)),
+	m.sendCancellationLike(p, f(s.AdminCancellationSubject, p.ClubName), f(s.AdminCancellationBody, html.EscapeString(p.ClubName)),
 		stripHTML(f(s.AdminCancellationBody, p.ClubName)), "📧 [Admin Cancellation Email Preview]")
 }
 
@@ -191,22 +192,17 @@ func sessionText(s Strings, date, startTime, discipline string) string {
 	return t
 }
 
-// FormatDate renders a YYYY-MM-DD date like toLocaleDateString(en-GB | nl-NL,
-// {weekday, year, month: 'long', day}) does in Node.
+// FormatDate renders a YYYY-MM-DD date in long form, e.g. "Friday, 16 October 2026" (en)
+// or "vrijdag 16 oktober 2026" (nl). A date that does not parse is returned unchanged.
 func FormatDate(date, locale string) string {
 	d, err := time.Parse(time.DateOnly, date)
 	if err != nil {
-		return "Invalid Date"
+		return date
 	}
 	if locale == "nl" {
 		return fmt.Sprintf("%s %d %s %d", nlWeekdays[d.Weekday()], d.Day(), nlMonths[d.Month()-1], d.Year())
 	}
 	return fmt.Sprintf("%s, %d %s %d", enWeekdays[d.Weekday()], d.Day(), enMonths[d.Month()-1], d.Year())
-}
-
-// escape matches email.ts escapeHtml (&, <, >, "; not ').
-func escape(s string) string {
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;").Replace(s)
 }
 
 var tags = regexp.MustCompile(`<[^>]*>`)

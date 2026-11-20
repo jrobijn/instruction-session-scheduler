@@ -1,15 +1,18 @@
 package email
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
 )
 
-// testdata/golden-*.html were rendered by backend/src/email.ts with the same inputs as
-// below (FRONTEND_URL=http://example.test), in this order, for locale en then nl.
-func TestEmailsMatchTS(t *testing.T) {
+var update = flag.Bool("update", false, "rewrite testdata/golden-*.html from the current output")
+
+// TestEmailsMatchGolden compares each rendered email with testdata/golden-<i>.html. After an
+// intended change to the templates, run `go test ./internal/email -update` and review the diff.
+func TestEmailsMatchGolden(t *testing.T) {
 	type sent struct{ subject, text, html string }
 	var got []sent
 	m := &Mailer{cfg: Config{FrontendURL: "http://example.test"}}
@@ -24,12 +27,19 @@ func TestEmailsMatchTS(t *testing.T) {
 	}
 
 	for i, g := range got {
-		want, err := os.ReadFile(fmt.Sprintf("testdata/golden-%d.html", i))
+		file := fmt.Sprintf("testdata/golden-%d.html", i)
+		if *update {
+			if err := os.WriteFile(file, []byte(g.html), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		want, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if g.html != string(want) {
-			t.Errorf("email %d (%s): HTML differs from TS render\n%s", i, g.subject, firstDiff(g.html, string(want)))
+			t.Errorf("email %d (%s): HTML differs from %s\n%s", i, g.subject, file, firstDiff(g.html, string(want)))
 		}
 	}
 	if len(got) != 8 {
@@ -51,12 +61,12 @@ func TestEmailText(t *testing.T) {
 }
 
 func TestFormatDate(t *testing.T) {
-	// Expected values from Node's toLocaleDateString.
 	cases := map[string]string{
 		"en|2026-10-16": "Friday, 16 October 2026",
 		"en|2026-01-04": "Sunday, 4 January 2026",
 		"nl|2026-10-16": "vrijdag 16 oktober 2026",
 		"nl|2026-05-31": "zondag 31 mei 2026",
+		"en|not-a-date": "not-a-date",
 	}
 	for in, want := range cases {
 		locale, date, _ := strings.Cut(in, "|")
@@ -71,7 +81,7 @@ func firstDiff(a, b string) string {
 	for i := 0; i < n; i++ {
 		if a[i] != b[i] {
 			lo := max(0, i-80)
-			return fmt.Sprintf("go: …%s…\nts: …%s…", a[lo:min(len(a), i+80)], b[lo:min(len(b), i+80)])
+			return fmt.Sprintf("got:    …%s…\ngolden: …%s…", a[lo:min(len(a), i+80)], b[lo:min(len(b), i+80)])
 		}
 	}
 	return fmt.Sprintf("length go=%d ts=%d", len(a), len(b))
