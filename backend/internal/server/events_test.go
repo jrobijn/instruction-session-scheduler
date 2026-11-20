@@ -10,6 +10,36 @@ import (
 	"time"
 )
 
+// openStream subscribes to an SSE stream on a real test server and returns a scanner over
+// it once the subscription is in place. cookie may be nil for public streams. The stream
+// is closed before the server, because closing the server waits for open requests.
+func (e *testEnv) openStream(path string, cookie *http.Cookie) *bufio.Scanner {
+	e.t.Helper()
+	ts := httptest.NewServer(e.handler)
+	e.t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	e.t.Cleanup(cancel)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+path, nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.t.Cleanup(func() { resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		e.t.Fatalf("GET %s = %d", path, resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		e.t.Fatalf("Content-Type = %q", ct)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Scan() // the initial blank line confirms the subscription is in place
+	return sc
+}
+
 // readEvent reads the stream until an "event:" line and returns it with its data line.
 func readEvent(t *testing.T, sc *bufio.Scanner) (string, string) {
 	t.Helper()
@@ -25,25 +55,9 @@ func readEvent(t *testing.T, sc *bufio.Scanner) (string, string) {
 
 func TestInvitationEventsStream(t *testing.T) {
 	f, _ := invitedPair(t)
-	ts := httptest.NewServer(f.handler)
-	defer ts.Close()
-
 	f.public(http.MethodGet, "/api/invitations/unknown/events", nil).wantError(http.StatusNotFound, "Not found")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/invitations/"+f.tokenOf("A")+"/events", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
-		t.Fatalf("Content-Type = %q", ct)
-	}
-	sc := bufio.NewScanner(resp.Body)
-	sc.Scan() // the initial blank line confirms the subscription is in place
-
+	sc := f.openStream("/api/invitations/"+f.tokenOf("A")+"/events", nil)
 	f.invitationAction("A", "decline", nil).status(http.StatusOK)
 	ev, data := readEvent(t, sc)
 	if ev != "invitation_updated" || data != `{"status":"declined"}` {
@@ -53,26 +67,34 @@ func TestInvitationEventsStream(t *testing.T) {
 
 func TestSessionEventsStream(t *testing.T) {
 	f, _ := invitedPair(t)
-	ts := httptest.NewServer(f.handler)
-	defer ts.Close()
-
 	f.admin(http.MethodGet, "/api/sessions/abc/events", nil).wantError(http.StatusNotFound, "Not found")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+sessionPath(f.sessionID, "events"), nil)
-	req.AddCookie(f.cookie)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	sc := bufio.NewScanner(resp.Body)
-	sc.Scan()
-
+	sc := f.openStream(sessionPath(f.sessionID, "events"), f.cookie)
 	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
 	ev, data := readEvent(t, sc)
 	if ev != "invitation_updated" || !strings.Contains(data, `"status":"confirmed"`) {
+		t.Fatalf("event %q data %s", ev, data)
+	}
+}
+
+func TestSessionsListEventsStream(t *testing.T) {
+	f, _ := invitedPair(t)
+
+	sc := f.openStream("/api/sessions/events", f.cookie)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
+	ev, data := readEvent(t, sc)
+	if ev != "session_counts_updated" || !strings.Contains(data, `"confirmed_count":1`) {
+		t.Fatalf("event %q data %s", ev, data)
+	}
+}
+
+func TestNotificationsEventsStream(t *testing.T) {
+	f, _ := invitedPair(t)
+
+	sc := f.openStream("/api/notifications/events", f.cookie)
+	f.expire(toInt64(f.invitationOf("A")["id"]))
+	ev, data := readEvent(t, sc)
+	if ev != "new_notification" || !strings.Contains(data, `"type":"invitation_expired"`) || !strings.Contains(data, `"unread_count":1`) {
 		t.Fatalf("event %q data %s", ev, data)
 	}
 }
