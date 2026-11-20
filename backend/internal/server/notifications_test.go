@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 	"testing"
 )
@@ -9,16 +8,16 @@ import (
 func TestNotifications(t *testing.T) {
 	e := newTestEnv(t)
 	sid := e.session(sessionDate, 0)
-	for i := range 25 {
-		e.srv.CreateNotification(NewNotification{Type: "invitation_declined", SessionID: sid, StudentName: fmt.Sprintf("S%d", i), SessionDate: sessionDate})
+	for range 25 {
+		e.srv.notifySession("session_full", sid, sessionDate)
 	}
 
 	page := e.admin(http.MethodGet, "/api/notifications", nil).status(http.StatusOK).object()
 	if page["total"] != 25.0 || page["page"] != 1.0 || page["limit"] != 20.0 || len(page["notifications"].([]any)) != 20 {
 		t.Fatalf("page 1 = total %v page %v limit %v", page["total"], page["page"], page["limit"])
 	}
-	if first := page["notifications"].([]any)[0].(map[string]any); first["student_name"] != "S24" {
-		t.Fatalf("newest first: got %v", first["student_name"])
+	if first := page["notifications"].([]any)[0].(map[string]any); first["id"] != 25.0 {
+		t.Fatalf("newest first: got id %v", first["id"])
 	}
 	page2 := e.admin(http.MethodGet, "/api/notifications?page=2&limit=20", nil).status(http.StatusOK).object()
 	if len(page2["notifications"].([]any)) != 5 {
@@ -48,27 +47,31 @@ func TestNotifications(t *testing.T) {
 	}
 }
 
-// A zero SessionID is stored as NULL like the other optional fields (it used to be stored as
-// 0, which the foreign key rejected, so the notification was silently dropped).
-func TestCreateNotificationWithoutSession(t *testing.T) {
-	e := newTestEnv(t)
-	e.srv.CreateNotification(NewNotification{Type: "session_full", SessionDate: sessionDate})
-	n := e.row("SELECT * FROM notifications")
-	if n == nil || n["session_id"] != nil || n["invitation_id"] != nil {
-		t.Fatalf("notification = %v, want one with NULL session_id", n)
+func TestNotifyInvitationStoresInvitationDetails(t *testing.T) {
+	f, _ := invitedPair(t)
+	invID := toInt64(f.invitationOf("A")["id"])
+	inv, _, err := f.srv.invitationByID(invID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.srv.notifyInvitation("invitation_declined", inv)
+	n := f.row("SELECT * FROM notifications")
+	if n == nil || toInt64(n["invitation_id"]) != invID || toInt64(n["session_id"]) != f.sessionID ||
+		n["student_name"] != "A Test" || n["session_date"] != sessionDate || n["timeslot_start_time"] != "18:00" {
+		t.Fatalf("notification = %v", n)
 	}
 }
 
-func TestCreateNotificationStoresNulls(t *testing.T) {
+func TestNotifySessionStoresNulls(t *testing.T) {
 	e := newTestEnv(t)
 	sid := e.session(sessionDate, 0)
-	e.srv.CreateNotification(NewNotification{Type: "session_full", SessionID: sid, SessionDate: sessionDate})
+	e.srv.notifySession("session_full", sid, sessionDate)
 	n := e.row("SELECT * FROM notifications")
 	if n == nil || n["invitation_id"] != nil || n["timeslot_start_time"] != nil || n["student_name"] != "" {
 		t.Fatalf("notification = %v", n)
 	}
 	// An invalid type is logged, not raised.
-	e.srv.CreateNotification(NewNotification{Type: "nonsense", SessionID: sid, SessionDate: sessionDate})
+	e.srv.notifySession("nonsense", sid, sessionDate)
 	if len(e.rows("SELECT 1 FROM notifications")) != 1 {
 		t.Fatal("invalid notification stored")
 	}

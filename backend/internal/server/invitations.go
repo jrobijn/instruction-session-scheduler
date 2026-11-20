@@ -180,10 +180,7 @@ func (s *Server) expireInvitation(invitationID int64) error {
 	s.broadcastSessionInvitation(sessionID, invitationID, map[string]any{"status": newStatus})
 	s.broadcastInvitation(inv.Token, newStatus)
 	s.broadcastSessionCounts(sessionID)
-	s.CreateNotification(NewNotification{
-		Type: "invitation_expired", InvitationID: invitationID, SessionID: sessionID,
-		StudentName: inv.StudentName, SessionDate: inv.SessionDate, TimeslotStartTime: inv.StartTime,
-	})
+	s.notifyInvitation("invitation_expired", inv)
 
 	if !slotStarted {
 		// inv still carries status 'invited', which the decision log records as the reason.
@@ -286,14 +283,11 @@ func (s *Server) invitationRoutes() {
 		s.broadcastInvitation(inv.Token, "confirmed")
 		s.broadcastSessionCounts(sessionID)
 
-		s.CreateNotification(NewNotification{
-			Type: "invitation_confirmed", InvitationID: invID, SessionID: sessionID,
-			StudentName: inv.StudentName, SessionDate: inv.SessionDate, TimeslotStartTime: inv.StartTime,
-		})
+		s.notifyInvitation("invitation_confirmed", inv)
 		if full, err := s.sessionFull(sessionID); err != nil {
 			return err
 		} else if full {
-			s.CreateNotification(NewNotification{Type: "session_full", SessionID: sessionID, SessionDate: inv.SessionDate})
+			s.notifySession("session_full", sessionID, inv.SessionDate)
 		}
 
 		var disciplineName string
@@ -340,10 +334,7 @@ func (s *Server) invitationRoutes() {
 		s.broadcastInvitation(inv.Token, "declined")
 		s.broadcastSessionCounts(sessionID)
 
-		s.CreateNotification(NewNotification{
-			Type: "invitation_declined", InvitationID: invID, SessionID: sessionID,
-			StudentName: inv.StudentName, SessionDate: inv.SessionDate, TimeslotStartTime: inv.StartTime,
-		})
+		s.notifyInvitation("invitation_declined", inv)
 
 		if _, err := s.findAndInviteReplacement(inv.vacated()); err != nil {
 			return err
@@ -381,12 +372,9 @@ func (s *Server) invitationRoutes() {
 		s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "cancelled"})
 		s.broadcastInvitation(inv.Token, "cancelled")
 		s.broadcastSessionCounts(sessionID)
-		s.CreateNotification(NewNotification{
-			Type: "invitation_cancelled", InvitationID: invID, SessionID: sessionID,
-			StudentName: inv.StudentName, SessionDate: inv.SessionDate, TimeslotStartTime: inv.StartTime,
-		})
+		s.notifyInvitation("invitation_cancelled", inv)
 		if wasFull {
-			s.CreateNotification(NewNotification{Type: "session_no_longer_full", SessionID: sessionID, SessionDate: inv.SessionDate})
+			s.notifySession("session_no_longer_full", sessionID, inv.SessionDate)
 		}
 
 		s.mailer.SendCancellation(email.SessionParams{

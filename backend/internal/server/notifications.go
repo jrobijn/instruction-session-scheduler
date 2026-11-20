@@ -21,17 +21,6 @@ type Notification struct {
 	CreatedAt         string  `db:"created_at" json:"created_at"`
 }
 
-// NewNotification is the input of createNotification in notifications.ts. Zero values are
-// stored as NULL (an empty string for StudentName), matching the `|| null` defaults there.
-type NewNotification struct {
-	Type              string
-	InvitationID      int64
-	SessionID         int64
-	StudentName       string
-	SessionDate       string
-	TimeslotStartTime string
-}
-
 func (s *Server) notificationRoutes() {
 	s.adminRoute("GET /api/notifications", func(w http.ResponseWriter, r *http.Request) error {
 		page := 1
@@ -44,8 +33,8 @@ func (s *Server) notificationRoutes() {
 		}
 		offset := (page - 1) * limit
 
-		total, err := s.unreadOrTotal("SELECT COUNT(*) FROM notifications")
-		if err != nil {
+		var total int64
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM notifications").Scan(&total); err != nil {
 			return err
 		}
 		notifications, err := db.Many[Notification](s.db, `
@@ -102,36 +91,33 @@ func (s *Server) notificationRoutes() {
 	})
 }
 
-func (s *Server) unreadOrTotal(query string) (int64, error) {
+func (s *Server) unreadCount() (int64, error) {
 	var n int64
-	err := s.db.QueryRow(query).Scan(&n)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM notifications WHERE read = 0").Scan(&n)
 	return n, err
 }
 
-func (s *Server) unreadCount() (int64, error) {
-	return s.unreadOrTotal("SELECT COUNT(*) FROM notifications WHERE read = 0")
+// notifyInvitation records a notification about a student's invitation, such as invitation_confirmed.
+func (s *Server) notifyInvitation(typ string, inv invitationDetails) {
+	s.createNotification(typ, inv.ID, inv.SessionID, inv.StudentName, inv.SessionDate, inv.StartTime)
 }
 
-// CreateNotification inserts a notification and broadcasts it to SSE listeners.
+// notifySession records a notification about a whole session, such as session_full. It has no
+// invitation, student or timeslot, so those columns are NULL (student_name is empty).
+func (s *Server) notifySession(typ string, sessionID int64, sessionDate string) {
+	s.createNotification(typ, nil, sessionID, "", sessionDate, nil)
+}
+
+// createNotification inserts a notification and broadcasts it to SSE listeners.
 // It logs instead of failing: notifications are a side effect of the caller's real work.
-func (s *Server) CreateNotification(n NewNotification) {
-	var invitationID, sessionID, startTime any
-	if n.InvitationID != 0 {
-		invitationID = n.InvitationID
-	}
-	if n.SessionID != 0 {
-		sessionID = n.SessionID
-	}
-	if n.TimeslotStartTime != "" {
-		startTime = n.TimeslotStartTime
-	}
+func (s *Server) createNotification(typ string, invitationID any, sessionID int64, studentName, sessionDate string, startTime any) {
 	notification, err := db.Get[Notification](s.db, `
 		INSERT INTO notifications (type, invitation_id, session_id, student_name, session_date, timeslot_start_time)
 		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at`,
-		n.Type, invitationID, sessionID, n.StudentName, n.SessionDate, startTime)
+		typ, invitationID, sessionID, studentName, sessionDate, startTime)
 	if err != nil {
-		log.Printf("create notification %s for session %d: %v", n.Type, n.SessionID, err)
+		log.Printf("create notification %s for session %d: %v", typ, sessionID, err)
 		return
 	}
 	count, err := s.unreadCount()
