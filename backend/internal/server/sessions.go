@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
-	"github.com/jrobijn/instruction-session-scheduler/backend/internal/email"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
@@ -514,7 +513,15 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		id := session.ID
-		pending, err := s.unsentSessionInvitations(id)
+		type unsentInvitation struct {
+			ID          int64  `db:"id"`
+			StudentName string `db:"student_name"` // for the error report
+		}
+		pending, err := db.Many[unsentInvitation](s.db, `
+			SELECT inv.id, s.first_name || ' ' || s.last_name AS student_name
+			FROM invitations inv
+			JOIN students s ON s.id = inv.student_id
+			WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'`, id)
 		if err != nil {
 			return err
 		}
@@ -522,19 +529,13 @@ func (s *Server) sessionRoutes() {
 			httpx.OK(w, map[string]any{"message": "No pending invitations to send", "sent": 0})
 			return nil
 		}
-		clubName, locale := s.clubName(), s.emailLocale()
 		sent := 0
 		errs := []map[string]string{}
 		for _, inv := range pending {
-			s.mailer.SendInvitation(email.InvitationParams{
-				To: inv.StudentEmail, StudentName: inv.StudentName, Date: session.Date,
-				Token: inv.Token, ClubName: clubName, Locale: locale,
-			})
-			if _, err := s.db.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE id = ?", inv.ID); err != nil {
+			if err := s.sendInvitation(inv.ID); err != nil {
 				errs = append(errs, map[string]string{"student": inv.StudentName, "error": err.Error()})
 				continue
 			}
-			s.scheduleExpiryForInvitation(inv.ID)
 			sent++
 		}
 		if sent > 0 {
@@ -663,7 +664,7 @@ func (s *Server) sessionRoutes() {
 				AND s.deleted_at IS NULL
 				AND (s.first_name || ' ' || s.last_name LIKE ? OR s.email LIKE ?)
 				AND s.id NOT IN (
-					SELECT student_id FROM invitations WHERE session_id = ? AND status NOT IN `+terminalStatuses+`
+					SELECT student_id FROM invitations WHERE session_id = ? AND status IN ('scheduled', 'invited', 'confirmed')
 				)
 			ORDER BY s.last_name ASC, s.first_name ASC
 			LIMIT 15`, like, like, session.ID)
@@ -709,21 +710,22 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND student_id = ? AND status NOT IN "+terminalStatuses, id, studentID); err != nil {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND student_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", id, studentID); err != nil {
 			return err
 		} else if found {
 			httpx.Error(w, http.StatusConflict, "Student already has an active invitation for this session")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN "+terminalStatuses, id, timeslotID, slotID); err != nil {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", id, timeslotID, slotID); err != nil {
 			return err
 		} else if found {
 			httpx.Error(w, http.StatusConflict, "This slot is already occupied")
 			return nil
 		}
 		token := uuid.NewString()
-		if _, err := s.db.Exec("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token) VALUES (?, ?, ?, ?, ?)",
-			id, studentID, timeslotID, slotID, token); err != nil {
+		var newID int64
+		if err := s.db.QueryRow("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token) VALUES (?, ?, ?, ?, ?) RETURNING id",
+			id, studentID, timeslotID, slotID, token).Scan(&newID); err != nil {
 			return err
 		}
 		if status == "draft" {
@@ -733,20 +735,8 @@ func (s *Server) sessionRoutes() {
 		}
 		// After invitations went out, a manually added student is invited right away.
 		if status == "invitations_sent" {
-			var first, last, to string
-			if err := s.db.QueryRow("SELECT first_name, last_name, email FROM students WHERE id = ?", studentID).Scan(&first, &last, &to); err != nil {
-				log.Printf("Failed to send invitation email for manually added student: %v", err)
-			} else {
-				s.mailer.SendInvitation(email.InvitationParams{
-					To: to, StudentName: first + " " + last, Date: session.Date, Token: token, ClubName: s.clubName(), Locale: s.emailLocale(),
-				})
-				if _, err := s.db.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE token = ?", token); err != nil {
-					return err
-				}
-				var newID int64
-				if s.db.QueryRow("SELECT id FROM invitations WHERE token = ?", token).Scan(&newID) == nil {
-					s.scheduleExpiryForInvitation(newID)
-				}
+			if err := s.sendInvitation(newID); err != nil {
+				return err
 			}
 		}
 		httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
@@ -814,7 +804,7 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		inv, found, err := s.sessionInvitation(session.ID, invID)
+		st, found, err := db.One[string](s.db, "SELECT status FROM invitations WHERE id = ? AND session_id = ?", invID, session.ID)
 		if err != nil {
 			return err
 		}
@@ -822,13 +812,12 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		switch st := inv.Status; st {
-		case "declined", "expired", "invalidated", "cancelled", "admin_cancelled":
+		if st != "scheduled" && st != "invited" && st != "confirmed" {
 			httpx.Error(w, http.StatusBadRequest, "Cannot cancel — invitation is already "+st)
 			return nil
 		}
-		invID, sessionID := inv.ID, session.ID
-		if err := s.adminCancelInvitation(inv); err != nil {
+		sessionID := session.ID
+		if err := s.adminCancelInvitation(invID); err != nil {
 			return err
 		}
 		s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "admin_cancelled"})
@@ -870,7 +859,7 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN "+terminalStatuses, id, timeslotID, slotID); err != nil {
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", id, timeslotID, slotID); err != nil {
 			return err
 		} else if found {
 			httpx.Error(w, http.StatusConflict, "This slot is already occupied")
@@ -879,7 +868,7 @@ func (s *Server) sessionRoutes() {
 		// Keep the group of the most recent vacated invitation for this spot, if there is one.
 		var lastID int64
 		var lastGroup *int64
-		s.db.QueryRow("SELECT id, group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status IN "+terminalStatuses+" ORDER BY responded_at DESC LIMIT 1",
+		s.db.QueryRow("SELECT id, group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('scheduled', 'invited', 'confirmed') ORDER BY responded_at DESC LIMIT 1",
 			id, timeslotID, slotID).Scan(&lastID, &lastGroup)
 
 		replaced, err := s.findAndInviteReplacement(vacatedSpot{
@@ -911,35 +900,28 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		id := session.ID
-		if err := s.cancelAllSessionTimers(id); err != nil {
-			return err
-		}
-		active, err := s.activeSessionInvitations(id)
+		open, err := db.Many[struct {
+			ID     int64  `db:"id"`
+			Status string `db:"status"`
+		}](s.db, "SELECT id, status FROM invitations WHERE session_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", id)
 		if err != nil {
 			return err
 		}
-		if _, err := s.db.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE session_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", id); err != nil {
-			return err
+		cancelled := 0 // invitations the students knew about
+		for _, inv := range open {
+			if err := s.adminCancelInvitation(inv.ID); err != nil {
+				return err
+			}
+			if inv.Status != "scheduled" {
+				cancelled++
+			}
 		}
 		if _, err := s.db.Exec("UPDATE training_sessions SET status = 'cancelled' WHERE id = ?", id); err != nil {
 			return err
 		}
-		if len(active) > 0 {
-			clubName, locale := s.clubName(), s.emailLocale()
-			for _, inv := range active {
-				s.mailer.SendAdminCancellation(email.SessionParams{
-					To: inv.StudentEmail, StudentName: inv.StudentName, Date: session.Date,
-					StartTime: inv.StartTime, DisciplineName: inv.DisciplineName, ClubName: clubName, Locale: locale,
-				})
-			}
-		}
-		httpx.OK(w, map[string]any{"success": true, "cancelled_invitations": len(active)})
-		sessionID := session.ID
-		s.broadcastSessionReload(sessionID)
-		s.broadcastSessionCounts(sessionID)
-		for _, inv := range active {
-			s.broadcastInvitation(inv.Token, "admin_cancelled")
-		}
+		httpx.OK(w, map[string]any{"success": true, "cancelled_invitations": cancelled})
+		s.broadcastSessionReload(id)
+		s.broadcastSessionCounts(id)
 		return nil
 	})
 
@@ -984,31 +966,14 @@ func (s *Server) loadSession(r *http.Request) (Session, bool, error) {
 	return s.getSession(id)
 }
 
-// adminCancelInvitation cancels an invitation on the admin's behalf: its expiry timer stops,
-// the student's invitation page updates and, if the invitation was emailed, the student is
-// told. Session-wide broadcasts are left to the caller, which may cancel several invitations
-// at once.
-func (s *Server) adminCancelInvitation(inv invitationDetails) error {
-	if _, err := s.db.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?", inv.ID); err != nil {
-		return err
-	}
-	s.cancelInvitationExpiry(inv.ID)
-	s.broadcastInvitation(inv.Token, "admin_cancelled")
-	if inv.EmailSent != 0 {
-		s.mailer.SendAdminCancellation(email.SessionParams{
-			To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
-			StartTime: inv.StartTime, DisciplineName: inv.DisciplineName,
-			ClubName: s.clubName(), Locale: s.emailLocale(),
-		})
-	}
-	return nil
-}
-
 // removeSlot takes an instructor's slot out of a session: active invitations on it are
 // admin-cancelled, unsent ones deleted, and older ones kept as history. It returns the number
 // of cancelled invitations.
 func (s *Server) removeSlot(sessionID int64, slotID int64) (int, error) {
-	affected, err := s.slotInvitations(slotID)
+	affected, err := db.Many[struct {
+		ID     int64  `db:"id"`
+		Status string `db:"status"`
+	}](s.db, "SELECT id, status FROM invitations WHERE slot_id = ?", slotID)
 	if err != nil {
 		return 0, err
 	}
@@ -1017,7 +982,7 @@ func (s *Server) removeSlot(sessionID int64, slotID int64) (int, error) {
 		switch inv.Status {
 		case "invited", "confirmed":
 			cancelled++
-			if err := s.adminCancelInvitation(inv); err != nil {
+			if err := s.adminCancelInvitation(inv.ID); err != nil {
 				return 0, err
 			}
 		case "scheduled":

@@ -531,6 +531,15 @@ func TestAdminCancelInvitation(t *testing.T) {
 	}
 	f.admin(http.MethodPost, path, nil).wantError(http.StatusBadRequest, "Cannot cancel — invitation is already admin_cancelled")
 	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", "999", "admin-cancel"), nil).wantError(http.StatusNotFound, "Invitation not found")
+
+	// An invitation of another session is not found through this session.
+	other := f.session("2030-06-10", 0)
+	otherInv := f.invitation(other, f.studentID("C"), f.timeslots[0], f.assign(other, f.instructor("Other")), 0, "invited")
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", fmt.Sprint(otherInv), "admin-cancel"), nil).
+		wantError(http.StatusNotFound, "Invitation not found")
+	if st := f.row("SELECT status FROM invitations WHERE id = ?", otherInv)["status"]; st != "invited" {
+		t.Fatalf("other session's invitation status = %v, want invited", st)
+	}
 }
 
 func TestAdminCancelUnsentInvitationSendsNoEmail(t *testing.T) {
@@ -615,7 +624,14 @@ func TestCancelAndReactivateSession(t *testing.T) {
 	// An unsent scheduled invitation is cancelled without an email.
 	unsent := f.student("E", g)
 	f.invitation(f.sessionID, unsent, f.timeslots[0], f.slots[0], 0, "scheduled")
-	mailBefore := len(f.sentMail())
+	mailBefore := map[string]int{}
+	for _, n := range []string{"A", "B", "E"} {
+		mailBefore[n] = len(f.mailTo(f.studentEmail(f.studentID(n))))
+	}
+	invB := toInt64(f.invitationOf("B")["id"])
+	if !f.hasTimer(invB) {
+		t.Fatal("B's invitation has no expiry timer before cancelling")
+	}
 
 	f.admin(http.MethodPost, sessionPath(f.sessionID, "reactivate"), nil).wantError(http.StatusBadRequest, "Only cancelled sessions can be reactivated")
 
@@ -628,8 +644,13 @@ func TestCancelAndReactivateSession(t *testing.T) {
 			t.Errorf("%s status = %s", n, st)
 		}
 	}
-	if n := len(f.sentMail()) - mailBefore; n != 2 {
-		t.Errorf("sent %d emails, want 2 (A and B, not E)", n)
+	for n, want := range map[string]int{"A": 1, "B": 1, "E": 0} {
+		if got := len(f.mailTo(f.studentEmail(f.studentID(n)))) - mailBefore[n]; got != want {
+			t.Errorf("%s got %d cancellation emails, want %d", n, got, want)
+		}
+	}
+	if f.hasTimer(invB) {
+		t.Error("B's expiry timer still runs after cancelling")
 	}
 	if f.sessionStatus(f.sessionID) != "cancelled" {
 		t.Fatal("session not cancelled")

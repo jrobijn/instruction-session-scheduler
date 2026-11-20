@@ -31,7 +31,7 @@ func (s *Server) scheduleInvitationExpiry(invitationID int64, at time.Time) {
 			return
 		}
 		s.locked(func() {
-			if err := s.processExpiredInvitation(invitationID); err != nil {
+			if err := s.expireInvitation(invitationID); err != nil {
 				log.Printf("Error processing expiry for invitation %d: %v", invitationID, err)
 			}
 		})
@@ -56,26 +56,6 @@ func (s *Server) clearAllTimers() {
 	for id, timer := range t.timers {
 		timer.Stop()
 		delete(t.timers, id)
-	}
-}
-
-// scheduleExpiryForInvitation (re)schedules the timer of an invited invitation.
-func (s *Server) scheduleExpiryForInvitation(invitationID int64) {
-	timing, found, err := db.One[invitationTiming](s.db, `
-		SELECT inv.status, inv.invited_at, ts.date AS session_date, tslot.start_time
-		FROM invitations inv
-		JOIN training_sessions ts ON ts.id = inv.session_id
-		JOIN timeslots tslot ON tslot.id = inv.timeslot_id
-		WHERE inv.id = ? AND inv.status = 'invited'`, invitationID)
-	if err != nil {
-		log.Printf("schedule expiry for invitation %d: %v", invitationID, err)
-		return
-	}
-	if !found {
-		return
-	}
-	if deadline, ok := invitationDeadline(timing.InvitedAt, timing.SessionDate, timing.StartTime, s.expiryMinutes(), s.clubLocation()); ok {
-		s.scheduleInvitationExpiry(invitationID, deadline)
 	}
 }
 
@@ -115,40 +95,4 @@ func (s *Server) rehydrateTimers() {
 		}
 	}
 	log.Printf("Rehydrated %d invitation expiry timer(s)", len(pending))
-}
-
-// processExpiredInvitation runs when an invitation's expiry timer fires.
-func (s *Server) processExpiredInvitation(invitationID int64) error {
-	inv, found, err := s.awaitingInvitation(invitationID)
-	if err != nil || !found {
-		return err // nil: already handled (confirmed, declined, ...)
-	}
-	if st := inv.SessionStatus; st == "completed" || st == "cancelled" {
-		return nil
-	}
-	sessionID := inv.SessionID
-	start, ok := slotStart(inv.SessionDate, inv.StartTime, s.clubLocation())
-	slotStarted := ok && !nowFunc().Before(start)
-	newStatus := "expired"
-	if slotStarted {
-		newStatus = "invalidated"
-	}
-	if _, err := s.db.Exec("UPDATE invitations SET status = ?, responded_at = datetime('now') WHERE id = ?", newStatus, invitationID); err != nil {
-		return err
-	}
-
-	s.broadcastSessionInvitation(sessionID, invitationID, map[string]any{"status": newStatus})
-	s.broadcastInvitation(inv.Token, newStatus)
-	s.broadcastSessionCounts(sessionID)
-	s.CreateNotification(NewNotification{
-		Type: "invitation_expired", InvitationID: invitationID, SessionID: sessionID,
-		StudentName: inv.StudentName, SessionDate: inv.SessionDate, TimeslotStartTime: inv.StartTime,
-	})
-
-	if !slotStarted {
-		// inv still carries status 'invited', which the decision log records as the reason.
-		_, err := s.findAndInviteReplacement(inv.vacated())
-		return err
-	}
-	return nil
 }

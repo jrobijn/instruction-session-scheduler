@@ -341,7 +341,7 @@ func (s *Server) groupRoutes() {
 			SELECT sg.student_id, bgm.buddy_group_id,
 				(SELECT COUNT(*) FROM invitations i
 					JOIN training_sessions ts ON ts.id = i.session_id
-					WHERE i.student_id = sg.student_id AND i.status IN ('confirmed', 'invited', 'scheduled')
+					WHERE i.student_id = sg.student_id AND i.status IN ('scheduled', 'invited', 'confirmed')
 						AND ts.status != 'completed') AS active_invitations
 			FROM student_groups sg
 			LEFT JOIN buddy_group_members bgm ON bgm.student_id = sg.student_id

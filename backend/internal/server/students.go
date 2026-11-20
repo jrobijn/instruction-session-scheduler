@@ -282,7 +282,7 @@ func (s *Server) studentRoutes() {
 			FROM invitations i
 			JOIN training_sessions ts ON ts.id = i.session_id
 			JOIN timeslots tsl ON tsl.id = i.timeslot_id
-			WHERE i.student_id = ? AND i.status IN ('confirmed', 'invited', 'scheduled')
+			WHERE i.student_id = ? AND i.status IN ('scheduled', 'invited', 'confirmed')
 				AND ts.status != 'completed'
 			ORDER BY ts.date ASC, tsl.start_time ASC`, id)
 		if err != nil {
@@ -445,13 +445,20 @@ func (s *Server) studentRoutes() {
 		}
 		// Open invitations for sessions that haven't taken place are admin-cancelled, as if
 		// the admin cancelled each one; completed sessions are history and stay as they are.
-		open, err := s.openStudentInvitations(id)
+		open, err := db.Many[struct {
+			ID        int64 `db:"id"`
+			SessionID int64 `db:"session_id"`
+		}](s.db, `
+			SELECT inv.id, inv.session_id
+			FROM invitations inv
+			JOIN training_sessions ts ON ts.id = inv.session_id
+			WHERE inv.student_id = ? AND inv.status IN ('scheduled', 'invited', 'confirmed') AND ts.status != 'completed'`, id)
 		if err != nil {
 			return err
 		}
 		var sessions []int64
 		for _, inv := range open {
-			if err := s.adminCancelInvitation(inv); err != nil {
+			if err := s.adminCancelInvitation(inv.ID); err != nil {
 				return err
 			}
 			if sid := inv.SessionID; !slices.Contains(sessions, sid) {

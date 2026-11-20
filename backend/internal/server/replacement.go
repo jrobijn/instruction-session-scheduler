@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
-	"github.com/jrobijn/instruction-session-scheduler/backend/internal/email"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/scheduling"
 )
 
@@ -133,12 +132,8 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 		return false, err
 	}
 
-	s.mailer.SendInvitation(email.InvitationParams{
-		To: replacement.Email, StudentName: replacement.FirstName + " " + replacement.LastName, Date: sessionDate, Token: token,
-		ClubName: s.clubName(), Locale: s.emailLocale(),
-	})
-	if _, err := s.db.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = datetime('now') WHERE id = ?", newID); err == nil {
-		s.scheduleExpiryForInvitation(newID)
+	if err := s.sendInvitation(newID); err != nil {
+		return false, err
 	}
 
 	added, found, err := s.sessionInvitationByID(newID)
