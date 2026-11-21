@@ -1039,9 +1039,6 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Only cancelled sessions can be reactivated")
 			return nil
 		}
-		if err := s.cancelAllSessionTimers(id); err != nil {
-			return err
-		}
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ?", id); err != nil {
 				return err

@@ -59,17 +59,6 @@ func (s *Server) clearAllTimers() {
 	}
 }
 
-func (s *Server) cancelAllSessionTimers(sessionID any) error {
-	ids, err := db.Many[int64](s.db, "SELECT id FROM invitations WHERE session_id = ? AND status = 'invited'", sessionID)
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		s.cancelInvitationExpiry(id)
-	}
-	return nil
-}
-
 // rehydrateTimers schedules timers for every pending invitation (startup, setting changes).
 func (s *Server) rehydrateTimers() {
 	s.clearAllTimers()
