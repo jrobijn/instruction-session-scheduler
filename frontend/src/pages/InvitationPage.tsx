@@ -83,7 +83,7 @@ export default function InvitationPage() {
 
   const handleConfirm = async () => {
     try {
-      await api.confirmInvitation(token!, selectedDiscipline ? Number(selectedDiscipline) : undefined);
+      await api.confirmInvitation(token!, selectedDiscipline ? Number(selectedDiscipline) : null);
       setInvitation({ ...invitation!, status: 'confirmed' });
       setActionDone('confirmed');
     } catch (err: any) {

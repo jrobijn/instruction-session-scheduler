@@ -1,0 +1,752 @@
+package server
+
+import (
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+func sessionPath(id int64, rest ...string) string {
+	p := fmt.Sprintf("/api/sessions/%d", id)
+	if len(rest) > 0 {
+		p += "/" + strings.Join(rest, "/")
+	}
+	return p
+}
+
+func (e *testEnv) sessionStatus(id int64) string {
+	e.t.Helper()
+	return e.row("SELECT status FROM training_sessions WHERE id = ?", id)["status"].(string)
+}
+
+func (e *testEnv) studentID(firstName string) int64 {
+	e.t.Helper()
+	return e.row("SELECT id FROM students WHERE first_name = ?", firstName)["id"].(int64)
+}
+
+func (e *testEnv) instructorOfSlot(slotID int64) int64 {
+	e.t.Helper()
+	return e.row("SELECT instructor_id FROM session_slots WHERE id = ?", slotID)["instructor_id"].(int64)
+}
+
+// --- create, list, get, update, delete --------------------------------------------------
+
+func TestCreateSession(t *testing.T) {
+	e := newTestEnv(t)
+	e.admin(http.MethodPost, "/api/sessions", map[string]any{}).wantError(http.StatusBadRequest, "Date is required")
+
+	// Without a timetable the active, saved default is used.
+	tt, _ := e.timetable("18:00")
+	e.exec("UPDATE timetables SET is_default = 1 WHERE id = ?", tt)
+	got := e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": sessionDate, "notes": "Bring water"}).status(http.StatusCreated).object()
+	if got["status"] != "draft" || toInt64(got["timetable_id"]) != tt || got["notes"] != "Bring water" {
+		t.Fatalf("created session = %v", got)
+	}
+	if dow := e.row("SELECT day_of_week FROM training_sessions WHERE id = ?", got["id"])["day_of_week"]; dow != int64(1) {
+		t.Fatalf("day_of_week = %v, want 1", dow)
+	}
+
+	e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": sessionDate}).
+		wantError(http.StatusConflict, "A training session already exists for this date")
+
+	explicit, _ := e.timetable("09:00")
+	got = e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": "2030-01-08", "timetable_id": explicit}).status(http.StatusCreated).object()
+	if toInt64(got["timetable_id"]) != explicit {
+		t.Fatalf("timetable_id = %v, want %d", got["timetable_id"], explicit)
+	}
+
+	// A draft default timetable is not used.
+	e.exec("UPDATE timetables SET status = 'draft' WHERE id = ?", tt)
+	got = e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": "2030-01-09"}).status(http.StatusCreated).object()
+	if got["timetable_id"] != nil {
+		t.Fatalf("timetable_id = %v, want none", got["timetable_id"])
+	}
+}
+
+func TestSessionDateValidation(t *testing.T) {
+	e := newTestEnv(t)
+	for _, date := range []string{"next monday", "2030-02-30", "07-01-2030"} {
+		e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": date}).wantError(http.StatusBadRequest, "Invalid date")
+	}
+	e.admin(http.MethodPost, "/api/sessions", map[string]any{"date": 20300107}).wantError(http.StatusBadRequest, "Invalid JSON body")
+	if n := len(e.rows("SELECT 1 FROM training_sessions")); n != 0 {
+		t.Fatalf("%d sessions created from invalid dates", n)
+	}
+
+	id := e.session(sessionDate, 0)
+	e.session("2030-01-08", 0)
+	e.admin(http.MethodPut, sessionPath(id), map[string]any{"date": "soon"}).wantError(http.StatusBadRequest, "Invalid date")
+	e.admin(http.MethodPut, sessionPath(id), map[string]any{"date": "2030-01-08"}).
+		wantError(http.StatusConflict, "A training session already exists for this date")
+
+	// Moving a session also updates its day of the week.
+	got := e.admin(http.MethodPut, sessionPath(id), map[string]any{"date": "2030-01-12"}).status(http.StatusOK).object()
+	if got["date"] != "2030-01-12" {
+		t.Fatalf("moved session = %v", got)
+	}
+	if dow := e.row("SELECT day_of_week FROM training_sessions WHERE id = ?", id)["day_of_week"]; dow != int64(6) {
+		t.Fatalf("day_of_week = %v, want 6", dow)
+	}
+}
+
+func TestCreateSessionRejectsMalformedJSON(t *testing.T) {
+	e := newTestEnv(t)
+	e.admin(http.MethodPost, "/api/sessions", "{not json").wantError(http.StatusBadRequest, "Invalid JSON body")
+}
+
+func TestListSessions(t *testing.T) {
+	f, _ := invitedPair(t) // 1 instructor x 2 timeslots, A and B invited
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
+	f.session("2029-12-01", 0)
+
+	list := f.admin(http.MethodGet, "/api/sessions", nil).status(http.StatusOK).array()
+	if len(list) != 2 || list[0]["date"] != sessionDate {
+		t.Fatalf("sessions = %v, want newest first", list)
+	}
+	for k, want := range map[string]any{
+		"instructor_count": 1.0, "invitation_count": 2.0, "confirmed_count": 1.0, "total_slots": 2.0, "timetable_name": "Timetable",
+	} {
+		if list[0][k] != want {
+			t.Errorf("%s = %v, want %v", k, list[0][k], want)
+		}
+	}
+	if list[1]["total_slots"] != 0.0 || list[1]["timetable_name"] != nil {
+		t.Errorf("session without timetable = %v", list[1])
+	}
+}
+
+func TestGetSession(t *testing.T) {
+	f, _ := invitedPair(t)
+	f.buddies(f.studentID("A"), f.studentID("B"))
+	f.exec("UPDATE invitations SET invited_at = '2030-01-01 12:30:00' WHERE student_id = ?", f.studentID("A"))
+	f.exec("UPDATE invitations SET invited_at = '2030-01-01 10:00:00' WHERE student_id = ?", f.studentID("B"))
+	pinClock(t, utc("2030-01-01 13:00:00"))
+
+	got := f.admin(http.MethodGet, sessionPath(f.sessionID), nil).status(http.StatusOK).object()
+	if n := len(got["instructors"].([]any)); n != 1 {
+		t.Fatalf("instructors = %d", n)
+	}
+	if n := len(got["timeslots"].([]any)); n != 2 {
+		t.Fatalf("timeslots = %d", n)
+	}
+	if got["invitation_expiry_minutes"] != 120.0 || got["timetable"] == nil || len(got["timetableGroups"].([]any)) != 1 {
+		t.Fatalf("session = %v", got)
+	}
+	invs := got["invitations"].([]any)
+	if len(invs) != 2 {
+		t.Fatalf("invitations = %d", len(invs))
+	}
+	byName := map[string]map[string]any{}
+	for _, i := range invs {
+		inv := i.(map[string]any)
+		byName[inv["student_name"].(string)] = inv
+	}
+	if byName["A Test"]["buddy_group_name"] != "A & B" {
+		t.Errorf("buddy_group_name = %v", byName["A Test"]["buddy_group_name"])
+	}
+	// Like GET /api/invitations/{token}: no deadline once the invitation is effectively
+	// expired, even if its timer has not fired yet.
+	if byName["B Test"]["status"] != "expired" || byName["B Test"]["expires_at"] != nil {
+		t.Errorf("B = status %v, expires_at %v; want effective status expired", byName["B Test"]["status"], byName["B Test"]["expires_at"])
+	}
+	if byName["A Test"]["status"] != "invited" || byName["A Test"]["expires_at"] != "2030-01-01T14:30:00.000Z" {
+		t.Errorf("A = status %v, expires_at %v", byName["A Test"]["status"], byName["A Test"]["expires_at"])
+	}
+
+	f.admin(http.MethodGet, "/api/sessions/999", nil).wantError(http.StatusNotFound, "Training session not found")
+}
+
+func TestUpdateSession(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	f.student("A", g)
+
+	got := f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"notes": "New notes"}).status(http.StatusOK).object()
+	if got["notes"] != "New notes" || got["date"] != sessionDate || toInt64(got["timetable_id"]) != f.timetable {
+		t.Fatalf("updated = %v", got)
+	}
+
+	// The general update ignores timetable_id and status; both have their own endpoints.
+	other, _ := f.testEnv.timetable("09:00")
+	got = f.admin(http.MethodPut, sessionPath(f.sessionID), map[string]any{"timetable_id": other, "status": "completed"}).status(http.StatusOK).object()
+	if toInt64(got["timetable_id"]) != f.timetable || got["status"] != "draft" {
+		t.Fatalf("timetable_id = %v, status = %v; want unchanged %d, draft", got["timetable_id"], got["status"], f.timetable)
+	}
+
+	f.admin(http.MethodPut, "/api/sessions/999", map[string]any{}).wantError(http.StatusNotFound, "Training session not found")
+}
+
+func TestChangeSessionTimetable(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	f.student("A", g)
+	path := sessionPath(f.sessionID, "timetable")
+
+	// Setting the current timetable of a scheduled session keeps its schedule.
+	f.generate().status(http.StatusOK)
+	scheduled := len(f.invitationRows())
+	if scheduled == 0 {
+		t.Fatal("no invitations scheduled")
+	}
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": f.timetable}).status(http.StatusOK)
+	if n := len(f.invitationRows()); n != scheduled || f.sessionStatus(f.sessionID) != "scheduled" {
+		t.Fatalf("after same timetable: %d invitations (want %d), status %s", n, scheduled, f.sessionStatus(f.sessionID))
+	}
+
+	// Changing the timetable of a scheduled session clears its schedule.
+	other, _ := f.testEnv.timetable("09:00")
+	got := f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK).object()
+	if toInt64(got["timetable_id"]) != other {
+		t.Fatalf("timetable_id = %v, want %d", got["timetable_id"], other)
+	}
+	if n := len(f.invitationRows()); n != 0 || f.sessionStatus(f.sessionID) != "draft" {
+		t.Fatalf("after timetable change: %d invitations, status %s", n, f.sessionStatus(f.sessionID))
+	}
+
+	// Null removes the timetable.
+	got = f.admin(http.MethodPut, path, map[string]any{"timetable_id": nil}).status(http.StatusOK).object()
+	if got["timetable_id"] != nil {
+		t.Fatalf("timetable_id = %v after null, want none", got["timetable_id"])
+	}
+
+	// Same timetable again is not a change.
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK)
+	f.exec("UPDATE training_sessions SET status = 'invitations_sent'")
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK)
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": f.timetable}).
+		wantError(http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": nil}).
+		wantError(http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
+}
+
+func TestDeleteSession(t *testing.T) {
+	f, _ := invitedPair(t)
+	f.admin(http.MethodDelete, sessionPath(f.sessionID), nil).status(http.StatusOK)
+	if n := len(f.rows("SELECT 1 FROM invitations")); n != 0 {
+		t.Fatalf("%d invitations survive the session", n)
+	}
+	f.admin(http.MethodDelete, sessionPath(f.sessionID), nil).wantError(http.StatusNotFound, "Training session not found")
+}
+
+// --- instructors ------------------------------------------------------------------------
+
+func TestAssignInstructor(t *testing.T) {
+	e := newTestEnv(t)
+	tt, _ := e.timetable("18:00")
+	sid := e.session(sessionDate, tt)
+	in := e.instructor("Smith")
+	path := sessionPath(sid, "instructors")
+
+	e.admin(http.MethodPost, path, map[string]any{}).wantError(http.StatusBadRequest, "instructor_id is required")
+	e.admin(http.MethodPost, path, map[string]any{"instructor_id": in}).status(http.StatusCreated)
+	e.admin(http.MethodPost, path, map[string]any{"instructor_id": in}).wantError(http.StatusConflict, "Instructor already assigned to this session")
+	e.admin(http.MethodPost, path, map[string]any{"instructor_id": 999}).wantError(http.StatusBadRequest, "Invalid instructor")
+	e.admin(http.MethodPost, "/api/sessions/999/instructors", map[string]any{"instructor_id": in}).wantError(http.StatusNotFound, "Training session not found")
+
+	// Re-assigning a removed instructor revives the same slot.
+	slot := e.row("SELECT id FROM session_slots WHERE session_id = ?", sid)["id"]
+	e.admin(http.MethodDelete, sessionPath(sid, "instructors", fmt.Sprint(in)), nil).status(http.StatusOK)
+	e.admin(http.MethodPost, path, map[string]any{"instructor_id": in}).status(http.StatusCreated)
+	rows := e.rows("SELECT id, removed FROM session_slots WHERE session_id = ?", sid)
+	if len(rows) != 1 || rows[0]["id"] != slot || rows[0]["removed"] != int64(0) {
+		t.Fatalf("slots after re-assign = %v", rows)
+	}
+}
+
+func TestRemoveInstructor(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00", "19:00"}, 2)
+	g := f.groupIn("Juniors", 100)
+	for _, n := range []string{"A", "B", "C", "D"} {
+		f.student(n, g)
+	}
+	f.sendInvitations()
+	slot := f.slots[0]
+	instructor := f.instructorOfSlot(slot)
+	onSlot := f.rows("SELECT s.first_name FROM invitations inv JOIN students s ON s.id = inv.student_id WHERE inv.slot_id = ? ORDER BY s.first_name", slot)
+	if len(onSlot) != 2 {
+		t.Fatalf("%d invitations on the slot, want 2", len(onSlot))
+	}
+	confirmed, invited := onSlot[0]["first_name"].(string), onSlot[1]["first_name"].(string)
+	f.invitationAction(confirmed, "confirm", map[string]any{}).status(http.StatusOK)
+	// A scheduled (unsent) invitation on the same slot is deleted outright.
+	f.invitation(f.sessionID, f.student("E", g), f.timeslots[0], slot, g, "declined")
+	mailBefore := len(f.sentMail())
+
+	res := f.admin(http.MethodDelete, sessionPath(f.sessionID, "instructors", fmt.Sprint(instructor)), nil).status(http.StatusOK).object()
+	if res["cancelled"] != 2.0 {
+		t.Fatalf("cancelled = %v, want 2", res["cancelled"])
+	}
+	for _, n := range []string{confirmed, invited} {
+		if st := f.statusOf(n); st != "admin_cancelled" {
+			t.Errorf("%s status = %s, want admin_cancelled", n, st)
+		}
+	}
+	if st := f.statusOf("E"); st != "declined" {
+		t.Errorf("history invitation status = %s, want it kept as declined", st)
+	}
+	if n := len(f.sentMail()) - mailBefore; n != 2 {
+		t.Errorf("sent %d cancellation emails, want 2", n)
+	}
+	if f.timerCount() != 2 {
+		t.Errorf("%d timers, want 2 (only the other instructor's invitations)", f.timerCount())
+	}
+	if r := f.row("SELECT removed FROM session_slots WHERE id = ?", slot); r["removed"] != int64(1) {
+		t.Fatal("slot not marked removed")
+	}
+
+	f.admin(http.MethodDelete, sessionPath(f.sessionID, "instructors", fmt.Sprint(instructor)), nil).wantError(http.StatusNotFound, "Assignment not found")
+	f.exec("UPDATE training_sessions SET status = 'completed'")
+	f.admin(http.MethodDelete, sessionPath(f.sessionID, "instructors", fmt.Sprint(f.instructorOfSlot(f.slots[1]))), nil).
+		wantError(http.StatusBadRequest, "Cannot modify a completed session")
+}
+
+func TestRemoveInstructorDeletesScheduledInvitations(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	f.student("A", g)
+	f.generate().status(http.StatusOK)
+
+	f.admin(http.MethodDelete, sessionPath(f.sessionID, "instructors", fmt.Sprint(f.instructorOfSlot(f.slots[0]))), nil).status(http.StatusOK)
+	if n := len(f.invitationRows()); n != 0 {
+		t.Fatalf("%d invitations left", n)
+	}
+	if len(f.sentMail()) != 0 {
+		t.Fatal("unsent invitations should not trigger emails")
+	}
+}
+
+func TestReplaceInstructor(t *testing.T) {
+	f, _ := invitedPair(t)
+	slot := f.slots[0]
+	old := f.instructorOfSlot(slot)
+	replacement := f.instructor("Replacement")
+	path := sessionPath(f.sessionID, "instructors", fmt.Sprint(old), "replace")
+
+	f.admin(http.MethodPost, path, map[string]any{}).wantError(http.StatusBadRequest, "new_instructor_id is required")
+	f.admin(http.MethodPost, path, map[string]any{"new_instructor_id": old}).wantError(http.StatusBadRequest, "New instructor must be different")
+	f.admin(http.MethodPost, path, map[string]any{"new_instructor_id": 999}).wantError(http.StatusBadRequest, "New instructor not found")
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "instructors", "999", "replace"), map[string]any{"new_instructor_id": replacement}).
+		wantError(http.StatusNotFound, "Original instructor not assigned to this session")
+
+	f.admin(http.MethodPost, path, map[string]any{"new_instructor_id": replacement}).status(http.StatusOK)
+	if got := f.instructorOfSlot(slot); got != replacement {
+		t.Fatalf("slot instructor = %d, want %d", got, replacement)
+	}
+	// Invitations stay on the slot and so move to the new instructor.
+	if toInt64(f.invitationOf("A")["slot_id"]) != slot || f.statusOf("A") != "invited" {
+		t.Fatal("invitations were not kept on the slot")
+	}
+
+	other := f.instructor("Other")
+	f.assign(f.sessionID, other)
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "instructors", fmt.Sprint(replacement), "replace"), map[string]any{"new_instructor_id": other}).
+		wantError(http.StatusConflict, "New instructor is already assigned to this session")
+}
+
+func TestReplaceInstructorMergesRemovedSlot(t *testing.T) {
+	f, g := invitedPair(t)
+	slot := f.slots[0]
+	old := f.instructorOfSlot(slot)
+	// The new instructor used to be assigned and has history on their removed slot.
+	returning := f.instructor("Returning")
+	removedSlot := f.assign(f.sessionID, returning)
+	f.exec("UPDATE session_slots SET removed = 1 WHERE id = ?", removedSlot)
+	history := f.invitation(f.sessionID, f.student("E", g), f.timeslots[0], removedSlot, g, "admin_cancelled")
+
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "instructors", fmt.Sprint(old), "replace"), map[string]any{"new_instructor_id": returning}).status(http.StatusOK)
+	if f.row("SELECT 1 FROM session_slots WHERE id = ?", removedSlot) != nil {
+		t.Fatal("removed slot should be merged away")
+	}
+	if got := toInt64(f.row("SELECT slot_id FROM invitations WHERE id = ?", history)["slot_id"]); got != slot {
+		t.Fatalf("history invitation on slot %d, want %d", got, slot)
+	}
+	if f.instructorOfSlot(slot) != returning {
+		t.Fatal("slot not re-pointed")
+	}
+}
+
+// --- sending, adding and removing invitations -------------------------------------------
+
+func TestSendInvitations(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00", "19:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	a := f.student("A", g)
+	b := f.student("B", g)
+	f.student("C", g)
+
+	res := f.sendInvitations()
+	if res["sent"] != 2.0 || len(res["errors"].([]any)) != 0 {
+		t.Fatalf("send-invitations = %v", res)
+	}
+	for _, sid := range []int64{a, b} {
+		mail := f.mailTo(f.studentEmail(sid))
+		if len(mail) != 1 {
+			t.Fatalf("student %d got %d emails, want 1", sid, len(mail))
+		}
+		inv := f.row("SELECT * FROM invitations WHERE student_id = ?", sid)
+		if inv["status"] != "invited" || inv["email_sent"] != int64(1) {
+			t.Fatalf("invitation after sending: %v", inv)
+		}
+		if !strings.Contains(mail[0].Text, inv["token"].(string)) {
+			t.Fatalf("invitation email does not contain the token link:\n%s", mail[0].Text)
+		}
+		if !f.hasTimer(toInt64(inv["id"])) {
+			t.Fatalf("no expiry timer for invitation %v", inv["id"])
+		}
+	}
+	if len(f.sentMail()) != 2 {
+		t.Fatalf("sent %d emails, want 2", len(f.sentMail()))
+	}
+	if st := f.row("SELECT status FROM training_sessions WHERE id = ?", f.sessionID)["status"]; st != "invitations_sent" {
+		t.Fatalf("session status = %v", st)
+	}
+
+	again := f.admin(http.MethodPost, sessionPath(f.sessionID, "send-invitations"), nil).status(http.StatusOK).object()
+	if again["sent"] != 0.0 || again["message"] != "No pending invitations to send" {
+		t.Fatalf("second send = %v", again)
+	}
+	if len(f.sentMail()) != 2 {
+		t.Fatal("second send emailed students again")
+	}
+}
+
+func TestAddInvitationManually(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00", "19:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	a, b := f.student("A", g), f.student("B", g)
+	instructor := f.instructorOfSlot(f.slots[0])
+	path := sessionPath(f.sessionID, "invitations")
+	body := func(student, timeslot int64) map[string]any {
+		return map[string]any{"student_id": student, "timeslot_id": timeslot, "instructor_id": instructor}
+	}
+
+	f.admin(http.MethodPost, path, map[string]any{"student_id": a}).
+		wantError(http.StatusBadRequest, "student_id, timeslot_id, and instructor_id are required")
+	f.admin(http.MethodPost, path, map[string]any{"student_id": a, "timeslot_id": f.timeslots[0], "instructor_id": 999}).
+		wantError(http.StatusBadRequest, "Instructor is not assigned to this session")
+
+	f.admin(http.MethodPost, path, body(a, f.timeslots[0])).status(http.StatusCreated)
+	if f.sessionStatus(f.sessionID) != "scheduled" {
+		t.Fatal("adding to a draft session should make it scheduled")
+	}
+	inv := f.invitationOf("A")
+	if inv["status"] != "scheduled" || inv["group_id"] != nil || len(f.sentMail()) != 0 {
+		t.Fatalf("manual invitation before sending: %v", inv)
+	}
+	f.admin(http.MethodPost, path, body(a, f.timeslots[1])).wantError(http.StatusConflict, "Student already has an active invitation for this session")
+	f.admin(http.MethodPost, path, body(b, f.timeslots[0])).wantError(http.StatusConflict, "This slot is already occupied")
+
+	// After invitations went out, a manually added student is invited immediately.
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "send-invitations"), nil).status(http.StatusOK)
+	f.admin(http.MethodPost, path, body(b, f.timeslots[1])).status(http.StatusCreated)
+	invB := f.invitationOf("B")
+	if invB["status"] != "invited" || len(f.mailTo(f.studentEmail(b))) != 1 || !f.hasTimer(toInt64(invB["id"])) {
+		t.Fatalf("manual invitation after sending: %v", invB)
+	}
+
+	f.exec("UPDATE training_sessions SET status = 'completed'")
+	f.admin(http.MethodPost, path, body(b, f.timeslots[1])).wantError(http.StatusBadRequest, "Can only add students before session is completed")
+}
+
+func TestAddInvitationReusesVacatedSlot(t *testing.T) {
+	f, g := invitedPair(t)
+	f.exec("UPDATE invitations SET status = 'declined' WHERE student_id = ?", f.studentID("A"))
+	e := f.student("E", g)
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations"), map[string]any{
+		"student_id": e, "timeslot_id": f.timeslots[0], "instructor_id": f.instructorOfSlot(f.slots[0]),
+	}).status(http.StatusCreated)
+	// A's declined invitation no longer blocks A, but the spot is now taken by E.
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations"), map[string]any{
+		"student_id": f.studentID("A"), "timeslot_id": f.timeslots[0], "instructor_id": f.instructorOfSlot(f.slots[0]),
+	}).wantError(http.StatusConflict, "This slot is already occupied")
+}
+
+func TestDeleteInvitation(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00", "19:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	f.student("A", g)
+	f.student("B", g)
+	f.generate().status(http.StatusOK)
+	a, b := toInt64(f.invitationOf("A")["id"]), toInt64(f.invitationOf("B")["id"])
+
+	f.admin(http.MethodDelete, sessionPath(f.sessionID, "invitations", fmt.Sprint(a)), nil).status(http.StatusOK)
+	if f.sessionStatus(f.sessionID) != "scheduled" {
+		t.Fatal("session should stay scheduled while invitations remain")
+	}
+	f.admin(http.MethodDelete, sessionPath(f.sessionID, "invitations", fmt.Sprint(a)), nil).wantError(http.StatusNotFound, "Invitation not found")
+	f.admin(http.MethodDelete, sessionPath(f.sessionID, "invitations", fmt.Sprint(b)), nil).status(http.StatusOK)
+	if f.sessionStatus(f.sessionID) != "draft" {
+		t.Fatal("session should revert to draft without invitations")
+	}
+
+	f.exec("UPDATE training_sessions SET status = 'invitations_sent'")
+	f.admin(http.MethodDelete, sessionPath(f.sessionID, "invitations", "1"), nil).
+		wantError(http.StatusBadRequest, "Can only remove students before invitations are sent")
+}
+
+func TestAvailableStudents(t *testing.T) {
+	f, g := invitedPair(t) // A, B invited; C, D waiting
+	f.exec("UPDATE invitations SET status = 'declined' WHERE student_id = ?", f.studentID("B"))
+	inactive := f.student("Inactive", g)
+	f.exec("UPDATE students SET active = 0 WHERE id = ?", inactive)
+	path := sessionPath(f.sessionID, "available-students") + "?q="
+
+	if got := f.admin(http.MethodGet, path+"T", nil).status(http.StatusOK).array(); len(got) != 0 {
+		t.Fatalf("one-character query returned %v", got)
+	}
+	var names []string
+	for _, s := range f.admin(http.MethodGet, path+"Test", nil).status(http.StatusOK).array() {
+		names = append(names, s["first_name"].(string))
+	}
+	if strings.Join(names, ",") != "B,C,D" {
+		t.Fatalf("available = %v, want B (declined), C and D", names)
+	}
+	if got := f.admin(http.MethodGet, path+"c.3%40example", nil).status(http.StatusOK).array(); len(got) != 1 || got[0]["first_name"] != "C" {
+		t.Fatalf("search by email = %v", got)
+	}
+}
+
+func TestAdminCancelInvitation(t *testing.T) {
+	f, _ := invitedPair(t)
+	inv := f.invitationOf("A")
+	path := sessionPath(f.sessionID, "invitations", fmt.Sprint(inv["id"]), "admin-cancel")
+	mailBefore := len(f.mailTo(f.studentEmail(f.studentID("A"))))
+
+	f.admin(http.MethodPost, path, nil).status(http.StatusOK)
+	if f.statusOf("A") != "admin_cancelled" || f.hasTimer(toInt64(inv["id"])) {
+		t.Fatal("invitation not admin-cancelled")
+	}
+	if n := len(f.mailTo(f.studentEmail(f.studentID("A")))) - mailBefore; n != 1 {
+		t.Fatalf("sent %d cancellation emails, want 1", n)
+	}
+	// Admin cancel does not invite a replacement.
+	if n := len(f.invitationRows()); n != 2 {
+		t.Fatalf("%d invitations, want 2", n)
+	}
+	f.admin(http.MethodPost, path, nil).wantError(http.StatusBadRequest, "Cannot cancel — invitation is already admin_cancelled")
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", "999", "admin-cancel"), nil).wantError(http.StatusNotFound, "Invitation not found")
+
+	// An invitation of another session is not found through this session.
+	other := f.session("2030-06-10", 0)
+	otherInv := f.invitation(other, f.studentID("C"), f.timeslots[0], f.assign(other, f.instructor("Other")), 0, "invited")
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", fmt.Sprint(otherInv), "admin-cancel"), nil).
+		wantError(http.StatusNotFound, "Invitation not found")
+	if st := f.row("SELECT status FROM invitations WHERE id = ?", otherInv)["status"]; st != "invited" {
+		t.Fatalf("other session's invitation status = %v, want invited", st)
+	}
+}
+
+func TestAdminCancelUnsentInvitationSendsNoEmail(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	f.student("A", f.groupIn("Juniors", 100))
+	f.generate().status(http.StatusOK)
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", fmt.Sprint(f.invitationOf("A")["id"]), "admin-cancel"), nil).status(http.StatusOK)
+	if len(f.sentMail()) != 0 {
+		t.Fatal("cancelling an unsent invitation emailed the student")
+	}
+}
+
+func TestAutoScheduleSlot(t *testing.T) {
+	f, g := invitedPair(t)
+	a := f.invitationOf("A")
+	path := sessionPath(f.sessionID, "auto-schedule-slot")
+	body := map[string]any{"timeslot_id": a["timeslot_id"], "instructor_id": f.instructorOfSlot(f.slots[0])}
+
+	f.admin(http.MethodPost, path, body).wantError(http.StatusConflict, "This slot is already occupied")
+	f.admin(http.MethodPost, path, map[string]any{}).wantError(http.StatusBadRequest, "timeslot_id and instructor_id are required")
+	f.admin(http.MethodPost, path, map[string]any{"timeslot_id": a["timeslot_id"], "instructor_id": 999}).
+		wantError(http.StatusBadRequest, "Instructor is not assigned to this session")
+
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", fmt.Sprint(a["id"]), "admin-cancel"), nil).status(http.StatusOK)
+	if res := f.admin(http.MethodPost, path, body).status(http.StatusOK).object(); res["replaced"] != true {
+		t.Fatalf("response = %v, want replaced", res)
+	}
+	c := f.invitationOf("C")
+	if c["status"] != "invited" || toInt64(c["group_id"]) != g || c["timeslot_id"] != a["timeslot_id"] {
+		t.Fatalf("auto-scheduled invitation = %v", c)
+	}
+
+	f.exec("UPDATE training_sessions SET status = 'scheduled'")
+	f.admin(http.MethodPost, path, body).wantError(http.StatusBadRequest, "Auto-scheduling is only available after invitations are sent")
+}
+
+// --- no-shows and completion ------------------------------------------------------------
+
+func TestToggleNoShowAndComplete(t *testing.T) {
+	f, _ := invitedPair(t)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
+	f.invitationAction("B", "confirm", map[string]any{}).status(http.StatusOK)
+	toggle := func(name string) *response {
+		return f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", fmt.Sprint(f.invitationOf(name)["id"]), "toggle-no-show"), nil)
+	}
+
+	if got := toggle("B").status(http.StatusOK).object(); got["no_show"] != 1.0 {
+		t.Fatalf("toggle = %v", got)
+	}
+	toggle("A").status(http.StatusOK)
+	if got := toggle("A").status(http.StatusOK).object(); got["no_show"] != 0.0 {
+		t.Fatalf("toggle back = %v", got)
+	}
+
+	res := f.admin(http.MethodPost, sessionPath(f.sessionID, "complete"), nil).status(http.StatusOK).object()
+	if res["students_credited"] != 2.0 {
+		t.Fatalf("complete = %v", res)
+	}
+	a := f.row("SELECT attended_sessions, no_show_count FROM students WHERE first_name = 'A'")
+	b := f.row("SELECT attended_sessions, no_show_count FROM students WHERE first_name = 'B'")
+	if a["attended_sessions"] != int64(1) || a["no_show_count"] != int64(0) || b["attended_sessions"] != int64(0) || b["no_show_count"] != int64(1) {
+		t.Fatalf("A = %v, B = %v", a, b)
+	}
+
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "complete"), nil).wantError(http.StatusBadRequest, "Session already completed")
+	toggle("A").wantError(http.StatusBadRequest, "Session already completed")
+}
+
+func TestToggleNoShowRequiresConfirmed(t *testing.T) {
+	f, _ := invitedPair(t)
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", fmt.Sprint(f.invitationOf("A")["id"]), "toggle-no-show"), nil).
+		wantError(http.StatusBadRequest, "Only confirmed invitations can be toggled")
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "invitations", "999", "toggle-no-show"), nil).
+		wantError(http.StatusNotFound, "Invitation not found")
+}
+
+// --- cancelling and reactivating sessions -----------------------------------------------
+
+func TestCancelAndReactivateSession(t *testing.T) {
+	f, g := invitedPair(t)
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
+	// An unsent scheduled invitation is cancelled without an email.
+	unsent := f.student("E", g)
+	f.invitation(f.sessionID, unsent, f.timeslots[0], f.slots[0], 0, "scheduled")
+	mailBefore := map[string]int{}
+	for _, n := range []string{"A", "B", "E"} {
+		mailBefore[n] = len(f.mailTo(f.studentEmail(f.studentID(n))))
+	}
+	invB := toInt64(f.invitationOf("B")["id"])
+	if !f.hasTimer(invB) {
+		t.Fatal("B's invitation has no expiry timer before cancelling")
+	}
+
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "reactivate"), nil).wantError(http.StatusBadRequest, "Only cancelled sessions can be reactivated")
+
+	res := f.admin(http.MethodPost, sessionPath(f.sessionID, "cancel"), nil).status(http.StatusOK).object()
+	if res["cancelled_invitations"] != 2.0 {
+		t.Fatalf("cancel = %v", res)
+	}
+	for _, n := range []string{"A", "B", "E"} {
+		if st := f.statusOf(n); st != "admin_cancelled" {
+			t.Errorf("%s status = %s", n, st)
+		}
+	}
+	for n, want := range map[string]int{"A": 1, "B": 1, "E": 0} {
+		if got := len(f.mailTo(f.studentEmail(f.studentID(n)))) - mailBefore[n]; got != want {
+			t.Errorf("%s got %d cancellation emails, want %d", n, got, want)
+		}
+	}
+	if f.hasTimer(invB) {
+		t.Error("B's expiry timer still runs after cancelling")
+	}
+	if f.sessionStatus(f.sessionID) != "cancelled" {
+		t.Fatal("session not cancelled")
+	}
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "cancel"), nil).wantError(http.StatusBadRequest, "Session is already cancelled")
+
+	res = f.admin(http.MethodPost, sessionPath(f.sessionID, "reactivate"), nil).status(http.StatusOK).object()
+	if res["new_status"] != "draft" || f.sessionStatus(f.sessionID) != "draft" || len(f.invitationRows()) != 0 {
+		t.Fatalf("reactivate = %v; invitations left: %d", res, len(f.invitationRows()))
+	}
+
+	f.exec("UPDATE training_sessions SET status = 'completed'")
+	f.admin(http.MethodPost, sessionPath(f.sessionID, "cancel"), nil).wantError(http.StatusBadRequest, "Cannot cancel a completed session")
+}
+
+func TestSessionRoutesRejectBadInput(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("Group")
+	st := e.student("Student", g)
+	in := e.instructor("Instructor")
+	tt, slots := e.timetable("10:00")
+	se := e.session("2030-06-03", tt)
+	inv := e.invitation(se, st, slots[0], e.assign(se, in), g, "invited")
+	p := fmt.Sprintf
+	e.wantRejected(
+		notFound("GET", "/api/sessions/x", nil, "Training session not found"),
+		notFound("GET", "/api/sessions/x/events", nil, "Not found"),
+		notFound("PUT", "/api/sessions/x", map[string]any{}, "Training session not found"),
+		notFound("DELETE", "/api/sessions/x", nil, "Training session not found"),
+		notFound("PUT", "/api/sessions/x/timetable", map[string]any{}, "Training session not found"),
+		notFound("POST", "/api/sessions/x/instructors", map[string]any{"instructor_id": in}, "Training session not found"),
+		notFound("DELETE", p("/api/sessions/x/instructors/%d", in), nil, "Training session not found"),
+		notFound("DELETE", p("/api/sessions/%d/instructors/x", se), nil, "Assignment not found"),
+		notFound("POST", p("/api/sessions/x/instructors/%d/replace", in), map[string]any{"new_instructor_id": in}, "Training session not found"),
+		notFound("POST", p("/api/sessions/%d/instructors/x/replace", se), map[string]any{"new_instructor_id": in}, "Original instructor not assigned to this session"),
+		notFound("POST", "/api/sessions/x/generate-schedule", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/send-invitations", nil, "Training session not found"),
+		notFound("POST", p("/api/sessions/x/invitations/%d/toggle-no-show", inv), nil, "Training session not found"),
+		notFound("POST", p("/api/sessions/%d/invitations/x/toggle-no-show", se), nil, "Invitation not found"),
+		notFound("POST", "/api/sessions/x/complete", nil, "Training session not found"),
+		notFound("GET", "/api/sessions/x/available-students", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/invitations", nil, "Training session not found"),
+		notFound("DELETE", p("/api/sessions/x/invitations/%d", inv), nil, "Training session not found"),
+		notFound("DELETE", p("/api/sessions/%d/invitations/x", se), nil, "Invitation not found"),
+		notFound("POST", p("/api/sessions/x/invitations/%d/admin-cancel", inv), nil, "Training session not found"),
+		notFound("POST", p("/api/sessions/%d/invitations/x/admin-cancel", se), nil, "Invitation not found"),
+		notFound("POST", "/api/sessions/x/auto-schedule-slot", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/cancel", nil, "Training session not found"),
+		notFound("POST", "/api/sessions/x/reactivate", nil, "Training session not found"),
+		badJSON("POST", "/api/sessions"),
+		badJSON("PUT", p("/api/sessions/%d", se)),
+		badJSON("PUT", p("/api/sessions/%d/timetable", se)),
+		badJSON("POST", p("/api/sessions/%d/instructors", se)),
+		badJSON("POST", p("/api/sessions/%d/instructors/%d/replace", se, in)),
+		badJSON("POST", p("/api/sessions/%d/invitations", se)),
+	)
+
+	// IDs of rows that don't exist (or don't fit the session) are bad requests, not FK failures.
+	_, otherSlots := e.timetable("11:00")
+	bad := func(method, path string, body any, msg string) rejected {
+		return rejected{method, path, body, http.StatusBadRequest, msg}
+	}
+	invitations := p("/api/sessions/%d/invitations", se)
+	e.wantRejected(
+		bad("POST", "/api/sessions", map[string]any{"date": "2030-06-10", "timetable_id": 999}, "Invalid timetable"),
+		bad("PUT", p("/api/sessions/%d/timetable", se), map[string]any{"timetable_id": 999}, "Invalid timetable"),
+		bad("PUT", p("/api/sessions/%d/timetable", se), map[string]any{"timetable_id": 0}, "Invalid timetable"),
+		bad("POST", invitations, map[string]any{"student_id": 999, "timeslot_id": slots[0], "instructor_id": in}, "Invalid student"),
+		bad("POST", invitations, map[string]any{"student_id": st, "timeslot_id": otherSlots[0], "instructor_id": in},
+			"Timeslot is not part of this session's timetable"),
+	)
+
+	// Auto-scheduling reads its body only once invitations are out.
+	e.exec("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?", se)
+	e.wantRejected(badJSON("POST", p("/api/sessions/%d/auto-schedule-slot", se)))
+
+	e.exec("UPDATE training_sessions SET status = 'completed' WHERE id = ?", se)
+	e.wantRejected(bad("POST", p("/api/sessions/%d/instructors", se), map[string]any{"instructor_id": e.instructor("Other")},
+		"Cannot modify a completed session"))
+}
+
+// Assigning instructors and deleting unsent invitations tell open session pages to reload.
+func TestSessionChangesBroadcastReload(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("Group")
+	tt, slots := e.timetable("10:00")
+	se := e.session(sessionDate, tt)
+	slot := e.assign(se, e.instructor("First"))
+	inv := e.invitation(se, e.student("A", g), slots[0], slot, g, "scheduled")
+	e.exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", se)
+
+	sc := e.openStream(sessionPath(se, "events"), e.cookie)
+	e.admin(http.MethodPost, sessionPath(se, "instructors"), map[string]any{"instructor_id": e.instructor("Second")}).status(http.StatusCreated)
+	if ev, _ := readEvent(t, sc); ev != "reload" {
+		t.Fatalf("after assigning: event %q, want reload", ev)
+	}
+	e.admin(http.MethodDelete, sessionPath(se, "invitations", fmt.Sprint(inv)), nil).status(http.StatusOK)
+	if ev, _ := readEvent(t, sc); ev != "reload" {
+		t.Fatalf("after deleting invitation: event %q, want reload", ev)
+	}
+	if st := e.sessionStatus(se); st != "draft" {
+		t.Fatalf("status = %s after deleting the last invitation, want draft", st)
+	}
+}

@@ -194,7 +194,7 @@ export default function SessionDetailPage() {
   // SSE: real-time updates
   useEffect(() => {
     if (!id) return;
-    const es = new EventSource(`${API_BASE}/sessions/${id}/events`, { withCredentials: true });
+    const es = new EventSource(`${API_BASE}/sessions/${id}/events`);
 
     es.addEventListener('invitation_updated', (e) => {
       const data = JSON.parse(e.data);
@@ -343,7 +343,7 @@ export default function SessionDetailPage() {
       if (!await confirm({ title: t.timetableSection, message: t.confirmTimetableChange })) return;
     }
     try {
-      await api.updateSession(String(id), { timetable_id: newTtId });
+      await api.setSessionTimetable(String(id), newTtId);
       load();
     } catch (err: any) {
       toast(err.message);
@@ -398,7 +398,7 @@ export default function SessionDetailPage() {
     if (!await confirm({ title: t.autoScheduleLabel, message: t.confirmAutoInvite, confirmLabel: t.autoScheduleLabel })) return;
     try {
       const result = await api.autoScheduleSlot(Number(id), timeslotId, instructorId);
-      if (!result.replacement) {
+      if (!result.replaced) {
         toast(t.noReplacementFound, 'info');
       }
       load();

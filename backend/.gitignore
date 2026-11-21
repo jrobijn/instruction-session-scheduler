@@ -1,0 +1,6 @@
+/backend
+*.db
+*.db-shm
+*.db-wal
+.env
+public/
