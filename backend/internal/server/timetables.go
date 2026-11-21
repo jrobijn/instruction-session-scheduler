@@ -30,8 +30,8 @@ type Timeslot struct {
 }
 
 // timetableTimeslots lists a timetable's timeslots, earliest first.
-func (s *Server) timetableTimeslots(timetableID int64) ([]Timeslot, error) {
-	return db.Many[Timeslot](s.db, "SELECT id, timetable_id, start_time FROM timeslots WHERE timetable_id = ? ORDER BY start_time ASC", timetableID)
+func timetableTimeslots(q db.Querier, timetableID int64) ([]Timeslot, error) {
+	return db.Many[Timeslot](q, "SELECT id, timetable_id, start_time FROM timeslots WHERE timetable_id = ? ORDER BY start_time ASC", timetableID)
 }
 
 // TimetableGroup is a group's share of a timetable's slots.
@@ -44,8 +44,8 @@ type TimetableGroup struct {
 }
 
 // timetableGroups lists a timetable's groups in their configured order.
-func (s *Server) timetableGroups(timetableID int64) ([]TimetableGroup, error) {
-	return db.Many[TimetableGroup](s.db, `
+func timetableGroups(q db.Querier, timetableID int64) ([]TimetableGroup, error) {
+	return db.Many[TimetableGroup](q, `
 		SELECT tg.group_id, tg.percentage, g.name AS group_name, g.color AS group_color, g.is_default
 		FROM timetable_groups tg
 		JOIN groups g ON g.id = tg.group_id
@@ -95,11 +95,11 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
-		timeslots, err := s.timetableTimeslots(id)
+		timeslots, err := timetableTimeslots(s.db, id)
 		if err != nil {
 			return err
 		}
-		groups, err := s.timetableGroups(id)
+		groups, err := timetableGroups(s.db, id)
 		if err != nil {
 			return err
 		}
@@ -518,15 +518,15 @@ func (s *Server) timetableRoutes() {
 }
 
 // timeslotPrefs holds, per student, the timeslots of one timetable they prefer. A student
-// without preferences may take any timeslot. Load it with Server.timeslotPrefs.
+// without preferences may take any timeslot. Load it with loadTimeslotPrefs.
 type timeslotPrefs map[int64]map[int64]bool
 
-func (s *Server) timeslotPrefs(timetableID int64) (timeslotPrefs, error) {
+func loadTimeslotPrefs(q db.Querier, timetableID int64) (timeslotPrefs, error) {
 	type preference struct {
 		StudentID  int64 `db:"student_id"`
 		TimeslotID int64 `db:"timeslot_id"`
 	}
-	preferences, err := db.Many[preference](s.db, "SELECT student_id, timeslot_id FROM student_preferred_timeslots WHERE timetable_id = ?", timetableID)
+	preferences, err := db.Many[preference](q, "SELECT student_id, timeslot_id FROM student_preferred_timeslots WHERE timetable_id = ?", timetableID)
 	if err != nil {
 		return nil, err
 	}

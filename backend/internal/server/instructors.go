@@ -213,13 +213,17 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
-		for _, slot := range slots {
-			if _, err := s.removeSlot(slot.SessionID, slot.SlotID); err != nil {
-				return err
+		err = s.inTx(func(t *txn) error {
+			for _, slot := range slots {
+				if _, err := t.removeSlot(slot.SessionID, slot.SlotID); err != nil {
+					return err
+				}
 			}
-		}
-		// Soft-delete: mark as deleted and deactivate.
-		if _, err := s.db.Exec("UPDATE instructors SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id); err != nil {
+			// Soft-delete: mark as deleted and deactivate.
+			_, err := t.q.Exec("UPDATE instructors SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id)
+			return err
+		})
+		if err != nil {
 			return err
 		}
 		httpx.Success(w)

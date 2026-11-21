@@ -151,12 +151,12 @@ func TestExpiryMinutesSetting(t *testing.T) {
 	e := newTestEnv(t)
 	for value, want := range map[string]float64{"120": 120, " 30 ": 30, "1.5": 1.5, "abc": 0, "NaN": 0, "": 120 /* empty falls back to the default */} {
 		e.setSetting("invitation_expiry_minutes", value)
-		if got := e.srv.expiryMinutes(); got != want {
+		if got := expiryMinutes(e.srv.db); got != want {
 			t.Errorf("expiryMinutes with %q = %v, want %v", value, got, want)
 		}
 	}
 	e.exec("DELETE FROM settings WHERE key = 'invitation_expiry_minutes'")
-	if got := e.srv.expiryMinutes(); got != 120 {
+	if got := expiryMinutes(e.srv.db); got != 120 {
 		t.Errorf("default expiryMinutes = %v, want 120", got)
 	}
 }
@@ -169,7 +169,7 @@ func TestClubLocationSetting(t *testing.T) {
 		"":                 "Europe/Amsterdam",
 	} {
 		e.setSetting("timezone", value)
-		if got := e.srv.clubLocation().String(); got != want {
+		if got := clubLocation(e.srv.db).String(); got != want {
 			t.Errorf("clubLocation with %q = %s, want %s", value, got, want)
 		}
 	}

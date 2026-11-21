@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,7 +18,7 @@ func (e *testEnv) timerCount() int {
 func (e *testEnv) expire(invitationID int64) {
 	e.t.Helper()
 	e.srv.mu.Lock()
-	err := e.srv.expireInvitation(invitationID)
+	err := e.srv.inTx(func(t *txn) error { return t.expireInvitation(invitationID) })
 	e.srv.mu.Unlock()
 	if err != nil {
 		e.t.Fatal(err)
@@ -43,6 +44,37 @@ func TestExpiredInvitationIsReplaced(t *testing.T) {
 	}
 	if got := f.notificationTypes(); len(got) != 1 || got[0] != "invitation_expired" {
 		t.Fatalf("notifications = %v", got)
+	}
+}
+
+// Expiring and inviting the replacement are one operation: if the replacement can't be saved,
+// the expiry is rolled back with it and none of their side effects happen, so the invitation
+// is expired again on the next restart (see rehydrateTimers) instead of leaving the spot empty.
+func TestExpiryRollsBackWhenReplacementFails(t *testing.T) {
+	f, _ := invitedPair(t)
+	a := toInt64(f.invitationOf("A")["id"])
+	mailBefore, before := len(f.sentMail()), f.invitationCount()
+	f.exec(`CREATE TRIGGER fail_replacement BEFORE INSERT ON invitations
+		BEGIN SELECT RAISE(ABORT, 'replacement failed'); END`)
+
+	f.srv.mu.Lock()
+	err := f.srv.inTx(func(t *txn) error { return t.expireInvitation(a) })
+	f.srv.mu.Unlock()
+	if err == nil || !strings.Contains(err.Error(), "replacement failed") {
+		t.Fatalf("err = %v, want the replacement's failure", err)
+	}
+
+	if st := f.statusOf("A"); st != "invited" {
+		t.Errorf("A status = %s, want invited", st)
+	}
+	if n := f.invitationCount(); n != before {
+		t.Errorf("%d invitations, want %d", n, before)
+	}
+	if got := f.notificationTypes(); len(got) != 0 {
+		t.Errorf("notifications = %v", got)
+	}
+	if n := len(f.sentMail()) - mailBefore; n != 0 {
+		t.Errorf("sent %d emails", n)
 	}
 }
 

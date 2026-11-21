@@ -15,16 +15,16 @@ const defaultTimeZone = "Europe/Amsterdam"
 
 // expiryMinutes reads invitation_expiry_minutes. Non-numeric values (NaN included) mean 0:
 // no time-based expiry.
-func (s *Server) expiryMinutes() float64 {
-	v, err := strconv.ParseFloat(strings.TrimSpace(db.Setting(s.db, "invitation_expiry_minutes", "120")), 64)
+func expiryMinutes(q db.Querier) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(db.Setting(q, "invitation_expiry_minutes", "120")), 64)
 	if err != nil || math.IsNaN(v) {
 		return 0
 	}
 	return v
 }
 
-func (s *Server) clubLocation() *time.Location {
-	tz := db.Setting(s.db, "timezone", defaultTimeZone)
+func clubLocation(q db.Querier) *time.Location {
+	tz := db.Setting(q, "timezone", defaultTimeZone)
 	if loc, err := time.LoadLocation(tz); err == nil {
 		return loc
 	}

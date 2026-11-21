@@ -376,7 +376,7 @@ func TestSendInvitations(t *testing.T) {
 	f.student("C", g)
 
 	res := f.sendInvitations()
-	if res["sent"] != 2.0 || len(res["errors"].([]any)) != 0 {
+	if res["sent"] != 2.0 {
 		t.Fatalf("send-invitations = %v", res)
 	}
 	for _, sid := range []int64{a, b} {

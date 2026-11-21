@@ -4,6 +4,7 @@ package server
 // to the next student in line.
 
 import (
+	"log"
 	mrand "math/rand/v2"
 
 	"github.com/google/uuid"
@@ -31,34 +32,34 @@ func (v vacatedSpot) random() func() float64 {
 
 // findAndInviteReplacement invites the next student in line for a vacated spot. Reports
 // whether anyone was eligible.
-func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
+func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	sessionID, sessionDate := vacated.SessionID, vacated.SessionDate
 
 	// Without a timetable no group can be invited.
-	session, found, err := s.getSession(sessionID)
+	session, found, err := getSession(t.q, sessionID)
 	if err != nil || !found || session.TimetableID == nil {
 		return false, err
 	}
 	timetableID := *session.TimetableID
 
-	timetableGroups, err := s.timetableGroups(timetableID)
+	timetableGroups, err := timetableGroups(t.q, timetableID)
 	if err != nil {
 		return false, err
 	}
-	eligible, err := eligibleQueue(s.db, s.clubLocation(), sessionID, sessionDate, timetableID)
+	eligible, err := eligibleQueue(t.q, clubLocation(t.q), sessionID, sessionDate, timetableID)
 	if err != nil {
 		return false, err
 	}
-	prefs, err := s.timeslotPrefs(timetableID)
+	prefs, err := loadTimeslotPrefs(t.q, timetableID)
 	if err != nil {
 		return false, err
 	}
-	buddies, err := s.loadBuddies()
+	buddies, err := loadBuddies(t.q)
 	if err != nil {
 		return false, err
 	}
 	// The vacated invitation already has its final status, so it doesn't count here.
-	invitedIDs, err := db.Many[int64](s.db, "SELECT student_id FROM invitations WHERE session_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", sessionID)
+	invitedIDs, err := db.Many[int64](t.q, "SELECT student_id FROM invitations WHERE session_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -85,7 +86,7 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	replacement := pick.Member
 
 	// Names for the decision log; a missing row (e.g. no vacated student) leaves them empty.
-	replacedName, _, err := db.One[string](s.db, "SELECT first_name || ' ' || last_name FROM students WHERE id = ?", vacated.StudentID)
+	replacedName, _, err := db.One[string](t.q, "SELECT first_name || ' ' || last_name FROM students WHERE id = ?", vacated.StudentID)
 	if err != nil {
 		return false, err
 	}
@@ -93,20 +94,20 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 		Name  string `db:"name"`
 		Color string `db:"color"`
 	}
-	group, _, err := db.One[groupLabel](s.db, "SELECT name, color FROM groups WHERE id = ?", pick.GroupID)
+	group, _, err := db.One[groupLabel](t.q, "SELECT name, color FROM groups WHERE id = ?", pick.GroupID)
 	if err != nil {
 		return false, err
 	}
 	var buddyName string
 	if pick.PulledUpBy != 0 {
-		if buddyName, _, err = db.One[string](s.db, "SELECT first_name || ' ' || last_name FROM students WHERE id = ?", pick.PulledUpBy); err != nil {
+		if buddyName, _, err = db.One[string](t.q, "SELECT first_name || ' ' || last_name FROM students WHERE id = ?", pick.PulledUpBy); err != nil {
 			return false, err
 		}
 	}
 
 	var preferredTimeslots []string
 	if len(prefs[replacement.ID]) > 0 {
-		slots, err := s.timetableTimeslots(timetableID)
+		slots, err := timetableTimeslots(t.q, timetableID)
 		if err != nil {
 			return false, err
 		}
@@ -130,7 +131,7 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 			GroupName:            group.Name,
 			GroupColor:           group.Color,
 			PreferredTimeslots:   preferredTimeslots,
-			PreferredDays:        preferredDays(replacement.PreferredDays, s.clubDays()),
+			PreferredDays:        preferredDays(replacement.PreferredDays, clubDays(t.q)),
 			BuddyPlacedNear:      buddyName,
 		},
 		ReplacedStudent:   replacedName,
@@ -138,24 +139,25 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 		SameGroupMatch:    pick.SameGroup,
 	})
 
-	newID, err := db.Get[int64](s.db, "INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+	newID, err := db.Get[int64](t.q, "INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
 		sessionID, replacement.ID, vacated.TimeslotID, vacated.SlotID, pick.GroupID, uuid.NewString(), decisionLog)
 	if err != nil {
 		return false, err
 	}
 
-	if err := s.sendInvitation(newID); err != nil {
+	if err := t.sendInvitation(newID); err != nil {
 		return false, err
 	}
 
-	added, found, err := s.sessionInvitationByID(newID)
-	if err != nil {
-		return false, err
-	}
-	if found {
-		s.hub.Broadcast(sessionChannel(sessionID), "invitation_added", added)
-	}
-	s.broadcastSessionCounts(sessionID)
+	t.afterCommit(func(s *Server) {
+		added, found, err := s.sessionInvitationByID(newID)
+		if err != nil {
+			log.Printf("broadcast replacement invitation %d: %v", newID, err)
+		} else if found {
+			s.hub.Broadcast(sessionChannel(sessionID), "invitation_added", added)
+		}
+		s.broadcastSessionCounts(sessionID)
+	})
 
 	return true, nil
 }

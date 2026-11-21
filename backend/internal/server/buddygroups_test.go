@@ -20,7 +20,7 @@ func TestLoadBuddies(t *testing.T) {
 	e.buddies(c, a, b) // added out of id order
 	e.buddies(f, d)
 
-	got, err := e.srv.loadBuddies()
+	got, err := loadBuddies(e.srv.db)
 	if err != nil {
 		t.Fatal(err)
 	}

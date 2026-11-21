@@ -8,9 +8,9 @@ import (
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
 
-func (s *Server) clubName() string    { return db.Setting(s.db, "club_name", "Sports Club") }
-func (s *Server) emailLocale() string { return db.Setting(s.db, "email_locale", "en") }
-func (s *Server) clubDays() string    { return db.Setting(s.db, "club_days", "0|1|2|3|4|5|6") }
+func clubName(q db.Querier) string    { return db.Setting(q, "club_name", "Sports Club") }
+func emailLocale(q db.Querier) string { return db.Setting(q, "email_locale", "en") }
+func clubDays(q db.Querier) string    { return db.Setting(q, "club_days", "0|1|2|3|4|5|6") }
 
 func (s *Server) settingsRoutes() {
 	s.adminRoute("GET /api/settings", func(w http.ResponseWriter, r *http.Request) error {

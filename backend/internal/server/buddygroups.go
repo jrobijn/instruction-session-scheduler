@@ -110,12 +110,12 @@ func (s *Server) buddyGroupRoutes() {
 }
 
 // loadBuddies loads everyone's buddies, in the order they were added to their buddy group.
-func (s *Server) loadBuddies() (scheduling.Buddies, error) {
+func loadBuddies(q db.Querier) (scheduling.Buddies, error) {
 	type membership struct {
 		BuddyGroupID int64 `db:"buddy_group_id"`
 		StudentID    int64 `db:"student_id"`
 	}
-	memberships, err := db.Many[membership](s.db, "SELECT buddy_group_id, student_id FROM buddy_group_members ORDER BY rowid")
+	memberships, err := db.Many[membership](q, "SELECT buddy_group_id, student_id FROM buddy_group_members ORDER BY rowid")
 	if err != nil {
 		return nil, err
 	}

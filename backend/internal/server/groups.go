@@ -360,7 +360,7 @@ func (s *Server) groupRoutes() {
 		seed, _, err := db.One[int64](s.db, `
 			SELECT id FROM training_sessions
 			WHERE status IN ('draft', 'scheduled') AND date >= ?
-			ORDER BY date LIMIT 1`, nowFunc().In(s.clubLocation()).Format(time.DateOnly))
+			ORDER BY date LIMIT 1`, nowFunc().In(clubLocation(s.db)).Format(time.DateOnly))
 		if err != nil {
 			return err
 		}

@@ -32,7 +32,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusNotFound, "Training session not found")
 		return nil
 	}
-	session, found, err := s.getSession(sessionID)
+	session, found, err := getSession(s.db, sessionID)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusBadRequest, "No instructors assigned for this session")
 		return nil
 	}
-	timeslots, err := s.timetableTimeslots(timetableID)
+	timeslots, err := timetableTimeslots(s.db, timetableID)
 	if err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	timetableGroups, err := s.timetableGroups(timetableID)
+	timetableGroups, err := timetableGroups(s.db, timetableID)
 	if err != nil {
 		return err
 	}
@@ -126,16 +126,16 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		timeslotCapacity[ti] = scheduling.Timeslot{ID: ts.ID, Capacity: len(freeSlots[ti])}
 	}
 
-	prefs, err := s.timeslotPrefs(timetableID)
+	prefs, err := loadTimeslotPrefs(s.db, timetableID)
 	if err != nil {
 		return err
 	}
-	buddies, err := s.loadBuddies()
+	buddies, err := loadBuddies(s.db)
 	if err != nil {
 		return err
 	}
-	clubDays := s.clubDays()
-	loc := s.clubLocation()
+	clubDays := clubDays(s.db)
+	loc := clubLocation(s.db)
 
 	// From here on everything runs in one transaction, so a failed regeneration leaves the
 	// current schedule in place. No queries on s.db until it is committed (see db.Open).

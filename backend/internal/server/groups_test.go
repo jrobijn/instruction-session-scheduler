@@ -174,7 +174,7 @@ func TestGroupMembersBreakTiesLikeNextSession(t *testing.T) {
 	for _, m := range f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array() {
 		overview = append(overview, m["first_name"].(string))
 	}
-	eligible, err := eligibleQueue(f.db, f.srv.clubLocation(), f.sessionID, sessionDate, f.timetable)
+	eligible, err := eligibleQueue(f.db, clubLocation(f.srv.db), f.sessionID, sessionDate, f.timetable)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -115,6 +115,35 @@ func TestDeleteInstructorRemovesThemFromSessions(t *testing.T) {
 	}
 }
 
+// Deleting an instructor is all or nothing: if the last write fails, their students keep their
+// invitations, timers and spots, and nobody is emailed about a cancellation that didn't happen.
+func TestDeleteInstructorRollsBackOnFailure(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00", "19:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	f.student("A", g)
+	f.student("B", g)
+	f.sendInvitations()
+	instructor := f.instructorOfSlot(f.slots[0])
+	mailBefore := len(f.sentMail())
+	f.exec(`CREATE TRIGGER fail_delete BEFORE UPDATE OF deleted_at ON instructors
+		BEGIN SELECT RAISE(ABORT, 'delete failed'); END`)
+
+	f.admin(http.MethodDelete, fmt.Sprintf("/api/instructors/%d", instructor), nil).
+		wantError(http.StatusInternalServerError, "Internal server error")
+
+	if f.row("SELECT removed FROM session_slots WHERE id = ?", f.slots[0])["removed"] != int64(0) {
+		t.Error("slot removed")
+	}
+	for _, inv := range f.invitationRows() {
+		if inv["status"] != "invited" || !f.hasTimer(toInt64(inv["id"])) {
+			t.Errorf("invitation %v = %s, timer %v", inv["id"], inv["status"], f.hasTimer(toInt64(inv["id"])))
+		}
+	}
+	if n := len(f.sentMail()) - mailBefore; n != 0 {
+		t.Errorf("sent %d emails", n)
+	}
+}
+
 func TestInstructorImportExport(t *testing.T) {
 	e := newTestEnv(t)
 	e.exec("INSERT INTO instructors (first_name, last_name, email) VALUES ('Old', 'Name', 'old@example.test')")

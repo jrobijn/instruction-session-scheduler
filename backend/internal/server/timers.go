@@ -32,7 +32,7 @@ func (s *Server) scheduleInvitationExpiry(invitationID int64, at time.Time) {
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if err := s.expireInvitation(invitationID); err != nil {
+		if err := s.inTx(func(t *txn) error { return t.expireInvitation(invitationID) }); err != nil {
 			log.Printf("Error processing expiry for invitation %d: %v", invitationID, err)
 		}
 	})
@@ -73,7 +73,7 @@ func (s *Server) cancelAllSessionTimers(sessionID any) error {
 // rehydrateTimers schedules timers for every pending invitation (startup, setting changes).
 func (s *Server) rehydrateTimers() {
 	s.clearAllTimers()
-	minutes, loc := s.expiryMinutes(), s.clubLocation()
+	minutes, loc := expiryMinutes(s.db), clubLocation(s.db)
 	type pendingInvitation struct {
 		ID int64 `db:"id"`
 		invitationTiming

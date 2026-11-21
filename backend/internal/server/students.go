@@ -468,16 +468,20 @@ func (s *Server) studentRoutes() {
 			return err
 		}
 		var sessions []int64
-		for _, inv := range open {
-			if err := s.adminCancelInvitation(inv.ID); err != nil {
-				return err
+		err = s.inTx(func(t *txn) error {
+			for _, inv := range open {
+				if err := t.adminCancelInvitation(inv.ID); err != nil {
+					return err
+				}
+				if sid := inv.SessionID; !slices.Contains(sessions, sid) {
+					sessions = append(sessions, sid)
+				}
 			}
-			if sid := inv.SessionID; !slices.Contains(sessions, sid) {
-				sessions = append(sessions, sid)
-			}
-		}
-		// Soft-delete: mark as deleted and deactivate.
-		if _, err := s.db.Exec("UPDATE students SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id); err != nil {
+			// Soft-delete: mark as deleted and deactivate.
+			_, err := t.q.Exec("UPDATE students SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id)
+			return err
+		})
+		if err != nil {
 			return err
 		}
 		for _, sid := range sessions {

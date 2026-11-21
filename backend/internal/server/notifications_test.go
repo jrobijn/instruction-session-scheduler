@@ -50,7 +50,7 @@ func TestNotifications(t *testing.T) {
 func TestNotifyInvitationStoresInvitationDetails(t *testing.T) {
 	f, _ := invitedPair(t)
 	invID := toInt64(f.invitationOf("A")["id"])
-	inv, _, err := f.srv.invitationByID(invID)
+	inv, _, err := invitationByID(f.srv.db, invID)
 	if err != nil {
 		t.Fatal(err)
 	}
