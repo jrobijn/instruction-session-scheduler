@@ -18,10 +18,6 @@ type Timetable struct {
 	Active    int64  `db:"active" json:"active"`
 }
 
-func (s *Server) getTimetable(id int64) (Timetable, bool, error) {
-	return db.One[Timetable](s.db, "SELECT id, name, status, is_default, active FROM timetables WHERE id = ?", id)
-}
-
 type Timeslot struct {
 	ID          int64  `db:"id" json:"id"`
 	TimetableID int64  `db:"timetable_id" json:"timetable_id"`
@@ -478,7 +474,7 @@ func (s *Server) loadTimetable(r *http.Request) (Timetable, bool, error) {
 	if !ok {
 		return Timetable{}, false, nil
 	}
-	return s.getTimetable(id)
+	return db.One[Timetable](s.db, "SELECT id, name, status, is_default, active FROM timetables WHERE id = ?", id)
 }
 
 // timeslotPrefs holds, per student, the timeslots of one timetable they prefer. A student

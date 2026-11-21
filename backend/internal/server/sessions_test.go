@@ -7,21 +7,6 @@ import (
 	"testing"
 )
 
-func TestSessionSameTimetable(t *testing.T) {
-	zero, three, four := int64(0), int64(3), int64(4)
-	for _, tc := range []struct {
-		timetable, id *int64
-		want          bool
-	}{
-		{nil, nil, true}, {nil, &zero, false}, {&three, nil, false},
-		{&three, &three, true}, {&three, &four, false},
-	} {
-		if got := (Session{TimetableID: tc.timetable}).sameTimetable(tc.id); got != tc.want {
-			t.Errorf("sameTimetable(%v, %v) = %v", tc.timetable, tc.id, got)
-		}
-	}
-}
-
 func sessionPath(id int64, rest ...string) string {
 	p := fmt.Sprintf("/api/sessions/%d", id)
 	if len(rest) > 0 {
@@ -198,8 +183,18 @@ func TestChangeSessionTimetable(t *testing.T) {
 	f.student("A", g)
 	path := sessionPath(f.sessionID, "timetable")
 
-	// Changing the timetable of a scheduled session clears its schedule.
+	// Setting the current timetable of a scheduled session keeps its schedule.
 	f.generate().status(http.StatusOK)
+	scheduled := len(f.invitationRows())
+	if scheduled == 0 {
+		t.Fatal("no invitations scheduled")
+	}
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": f.timetable}).status(http.StatusOK)
+	if n := len(f.invitationRows()); n != scheduled || f.sessionStatus(f.sessionID) != "scheduled" {
+		t.Fatalf("after same timetable: %d invitations (want %d), status %s", n, scheduled, f.sessionStatus(f.sessionID))
+	}
+
+	// Changing the timetable of a scheduled session clears its schedule.
 	other, _ := f.testEnv.timetable("09:00")
 	got := f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK).object()
 	if toInt64(got["timetable_id"]) != other {
@@ -707,7 +702,51 @@ func TestSessionRoutesRejectBadInput(t *testing.T) {
 		badJSON("POST", p("/api/sessions/%d/instructors/%d/replace", se, in)),
 		badJSON("POST", p("/api/sessions/%d/invitations", se)),
 	)
+
+	// IDs of rows that don't exist (or don't fit the session) are bad requests, not FK failures.
+	_, otherSlots := e.timetable("11:00")
+	bad := func(method, path string, body any, msg string) rejected {
+		return rejected{method, path, body, http.StatusBadRequest, msg}
+	}
+	invitations := p("/api/sessions/%d/invitations", se)
+	e.wantRejected(
+		bad("POST", "/api/sessions", map[string]any{"date": "2030-06-10", "timetable_id": 999}, "Invalid timetable"),
+		bad("PUT", p("/api/sessions/%d/timetable", se), map[string]any{"timetable_id": 999}, "Invalid timetable"),
+		bad("PUT", p("/api/sessions/%d/timetable", se), map[string]any{"timetable_id": 0}, "Invalid timetable"),
+		bad("POST", invitations, map[string]any{"student_id": 999, "timeslot_id": slots[0], "instructor_id": in}, "Invalid student"),
+		bad("POST", invitations, map[string]any{"student_id": st, "timeslot_id": otherSlots[0], "instructor_id": in},
+			"Timeslot is not part of this session's timetable"),
+	)
+
 	// Auto-scheduling reads its body only once invitations are out.
 	e.exec("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?", se)
 	e.wantRejected(badJSON("POST", p("/api/sessions/%d/auto-schedule-slot", se)))
+
+	e.exec("UPDATE training_sessions SET status = 'completed' WHERE id = ?", se)
+	e.wantRejected(bad("POST", p("/api/sessions/%d/instructors", se), map[string]any{"instructor_id": e.instructor("Other")},
+		"Cannot modify a completed session"))
+}
+
+// Assigning instructors and deleting unsent invitations tell open session pages to reload.
+func TestSessionChangesBroadcastReload(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("Group")
+	tt, slots := e.timetable("10:00")
+	se := e.session(sessionDate, tt)
+	slot := e.assign(se, e.instructor("First"))
+	inv := e.invitation(se, e.student("A", g), slots[0], slot, g, "scheduled")
+	e.exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", se)
+
+	sc := e.openStream(sessionPath(se, "events"), e.cookie)
+	e.admin(http.MethodPost, sessionPath(se, "instructors"), map[string]any{"instructor_id": e.instructor("Second")}).status(http.StatusCreated)
+	if ev, _ := readEvent(t, sc); ev != "reload" {
+		t.Fatalf("after assigning: event %q, want reload", ev)
+	}
+	e.admin(http.MethodDelete, sessionPath(se, "invitations", fmt.Sprint(inv)), nil).status(http.StatusOK)
+	if ev, _ := readEvent(t, sc); ev != "reload" {
+		t.Fatalf("after deleting invitation: event %q, want reload", ev)
+	}
+	if st := e.sessionStatus(se); st != "draft" {
+		t.Fatalf("status = %s after deleting the last invitation, want draft", st)
+	}
 }

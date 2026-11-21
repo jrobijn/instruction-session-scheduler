@@ -5,9 +5,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
@@ -18,27 +19,6 @@ type Session struct {
 	Status      string  `db:"status" json:"status"` // draft, scheduled, invitations_sent, completed or cancelled
 	TimetableID *int64  `db:"timetable_id" json:"timetable_id"`
 	Notes       *string `db:"notes" json:"notes"`
-}
-
-func (s *Server) getSession(id int64) (Session, bool, error) {
-	return db.One[Session](s.db, "SELECT id, date, status, timetable_id, notes FROM training_sessions WHERE id = ?", id)
-}
-
-// sameTimetable reports whether id (nil for none) is the session's timetable.
-func (t Session) sameTimetable(id *int64) bool {
-	if id == nil || t.TimetableID == nil {
-		return id == nil && t.TimetableID == nil
-	}
-	return *id == *t.TimetableID
-}
-
-type SessionListItem struct {
-	Session
-	TimetableName   *string `db:"timetable_name" json:"timetable_name"`
-	InstructorCount int64   `db:"instructor_count" json:"instructor_count"`
-	InvitationCount int64   `db:"invitation_count" json:"invitation_count"`
-	ConfirmedCount  int64   `db:"confirmed_count" json:"confirmed_count"`
-	TotalSlots      int64   `db:"total_slots" json:"total_slots"` // instructors x timeslots
 }
 
 // SessionInvitation is an invitation as listed on the session page.
@@ -78,17 +58,6 @@ func (inv *SessionInvitation) applyTiming(minutes float64, loc *time.Location, n
 	if inv.Status == "invited" {
 		inv.ExpiresAt = expiresAtISO(timing, minutes, loc)
 	}
-}
-
-// SessionDetail is a session with everything the session page shows.
-type SessionDetail struct {
-	Session
-	Timetable               *Timetable          `json:"timetable"`
-	Instructors             []Instructor        `json:"instructors"`
-	Timeslots               []Timeslot          `json:"timeslots"`
-	TimetableGroups         []TimetableGroup    `json:"timetableGroups"`
-	Invitations             []SessionInvitation `json:"invitations"`
-	InvitationExpiryMinutes float64             `json:"invitation_expiry_minutes"`
 }
 
 // selectSessionInvitations selects SessionInvitation rows; the queries below append a fixed
@@ -144,7 +113,15 @@ func (s *Server) sessionInvitationByID(invitationID int64) (SessionInvitation, b
 // Session routes (schedule generation lives in schedule.go).
 func (s *Server) sessionRoutes() {
 	s.adminRoute("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) error {
-		sessions, err := db.Many[SessionListItem](s.db, `
+		type listItem struct {
+			Session
+			TimetableName   *string `db:"timetable_name" json:"timetable_name"`
+			InstructorCount int64   `db:"instructor_count" json:"instructor_count"`
+			InvitationCount int64   `db:"invitation_count" json:"invitation_count"`
+			ConfirmedCount  int64   `db:"confirmed_count" json:"confirmed_count"`
+			TotalSlots      int64   `db:"total_slots" json:"total_slots"` // instructors x timeslots
+		}
+		sessions, err := db.Many[listItem](s.db, `
 			SELECT ts.id, ts.date, ts.status, ts.timetable_id, ts.notes,
 				(SELECT COUNT(*) FROM session_slots WHERE session_id = ts.id AND removed = 0) AS instructor_count,
 				(SELECT COUNT(*) FROM invitations WHERE session_id = ts.id) AS invitation_count,
@@ -171,7 +148,17 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
 		}
-		detail := SessionDetail{Session: session, Timeslots: []Timeslot{}, TimetableGroups: []TimetableGroup{}}
+		// The session with everything the session page shows.
+		type sessionDetail struct {
+			Session
+			Timetable               *Timetable          `json:"timetable"`
+			Instructors             []Instructor        `json:"instructors"`
+			Timeslots               []Timeslot          `json:"timeslots"`
+			TimetableGroups         []TimetableGroup    `json:"timetableGroups"`
+			Invitations             []SessionInvitation `json:"invitations"`
+			InvitationExpiryMinutes float64             `json:"invitation_expiry_minutes"`
+		}
+		detail := sessionDetail{Session: session, Timeslots: []Timeslot{}, TimetableGroups: []TimetableGroup{}}
 		if detail.Instructors, err = db.Many[Instructor](s.db, `
 			SELECT i.id, i.first_name, i.last_name, i.email, i.active FROM instructors i
 			JOIN session_slots si ON si.instructor_id = i.id
@@ -180,8 +167,8 @@ func (s *Server) sessionRoutes() {
 			return err
 		}
 
-		if ttID := session.TimetableID; ttID != nil && *ttID != 0 {
-			if t, found, err := s.getTimetable(*ttID); err != nil {
+		if ttID := session.TimetableID; ttID != nil {
+			if t, found, err := db.One[Timetable](s.db, "SELECT id, name, status, is_default, active FROM timetables WHERE id = ?", *ttID); err != nil {
 				return err
 			} else if found {
 				detail.Timetable = &t
@@ -217,19 +204,24 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Date is required")
 			return nil
 		}
-		var ttID *int64
-		if in.TimetableID != 0 {
-			ttID = &in.TimetableID
-		} else {
-			var id int64
-			if s.db.QueryRow("SELECT id FROM timetables WHERE is_default = 1 AND active = 1 AND status = 'saved'").Scan(&id) == nil && id != 0 {
-				ttID = &id
-			}
-		}
 		dow, valid := dayOfWeek(in.Date)
 		if !valid {
 			httpx.Error(w, http.StatusBadRequest, "Invalid date")
 			return nil
+		}
+		var ttID *int64
+		if in.TimetableID != 0 {
+			if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ?", in.TimetableID); err != nil {
+				return err
+			} else if !found {
+				httpx.Error(w, http.StatusBadRequest, "Invalid timetable")
+				return nil
+			}
+			ttID = &in.TimetableID
+		} else if id, found, err := db.One[int64](s.db, "SELECT id FROM timetables WHERE is_default = 1 AND active = 1 AND status = 'saved'"); err != nil {
+			return err
+		} else if found {
+			ttID = &id
 		}
 		row, err := db.Get[Session](s.db, "INSERT INTO training_sessions (date, day_of_week, notes, timetable_id) VALUES (?, ?, ?, ?) RETURNING id, date, status, timetable_id, notes",
 			in.Date, dow, in.Notes, ttID)
@@ -307,26 +299,37 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
 		}
-		id := session.ID
-		if !session.sameTimetable(in.TimetableID) {
-			switch session.Status {
-			case "invitations_sent", "completed":
-				httpx.Error(w, http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
+		cur, next := session.TimetableID, in.TimetableID
+		changed := (cur == nil) != (next == nil) || (cur != nil && *cur != *next)
+		if changed && (session.Status == "invitations_sent" || session.Status == "completed") {
+			httpx.Error(w, http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
+			return nil
+		}
+		if next != nil {
+			if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ?", *next); err != nil {
+				return err
+			} else if !found {
+				httpx.Error(w, http.StatusBadRequest, "Invalid timetable")
 				return nil
-			case "scheduled":
+			}
+		}
+		var row Session
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
+			if changed && session.Status == "scheduled" {
 				// Changing the timetable clears the schedule.
-				if _, err := s.db.Exec("DELETE FROM invitations WHERE session_id = ?", id); err != nil {
+				if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ?", session.ID); err != nil {
 					return err
 				}
-				if _, err := s.db.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ?", id); err != nil {
+				if _, err := tx.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ?", session.ID); err != nil {
 					return err
 				}
 			}
-		}
-		row, err := db.Get[Session](s.db, `
-			UPDATE training_sessions SET timetable_id = ? WHERE id = ?
-			RETURNING id, date, status, timetable_id, notes`,
-			in.TimetableID, id)
+			row, err = db.Get[Session](tx, `
+				UPDATE training_sessions SET timetable_id = ? WHERE id = ?
+				RETURNING id, date, status, timetable_id, notes`,
+				next, session.ID)
+			return err
+		})
 		if err != nil {
 			return err
 		}
@@ -374,27 +377,33 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
 		}
-		id := session.ID
-		// Re-assigning a removed instructor revives their slot (and its invitation history).
-		var removedSlot int64
-		if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, instructorID).Scan(&removedSlot) == nil {
-			if _, err := s.db.Exec("UPDATE session_slots SET removed = 0 WHERE id = ?", removedSlot); err != nil {
-				return err
-			}
-			httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
+		if session.Status == "completed" {
+			httpx.Error(w, http.StatusBadRequest, "Cannot modify a completed session")
 			return nil
 		}
-		_, err = s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", id, instructorID)
+		// Re-assigning a removed instructor revives their slot (and its invitation history).
+		removedSlot, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", session.ID, instructorID)
+		if err != nil {
+			return err
+		}
+		if found {
+			_, err = s.db.Exec("UPDATE session_slots SET removed = 0 WHERE id = ?", removedSlot)
+		} else {
+			_, err = s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", session.ID, instructorID)
+		}
 		switch {
 		case isUniqueErr(err, "session_slots.session_id", "session_slots.instructor_id"):
 			httpx.Error(w, http.StatusConflict, "Instructor already assigned to this session")
+			return nil
 		case err != nil && strings.Contains(err.Error(), "FOREIGN KEY"):
 			httpx.Error(w, http.StatusBadRequest, "Invalid instructor")
+			return nil
 		case err != nil:
 			return err
-		default:
-			httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
 		}
+		httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
+		s.broadcastSessionReload(session.ID)
+		s.broadcastSessionCounts(session.ID)
 		return nil
 	})
 
@@ -416,8 +425,11 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Assignment not found")
 			return nil
 		}
-		var slotID int64
-		if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", session.ID, instructorID).Scan(&slotID) != nil {
+		slotID, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", session.ID, instructorID)
+		if err != nil {
+			return err
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Assignment not found")
 			return nil
 		}
@@ -465,8 +477,11 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "New instructor must be different")
 			return nil
 		}
-		var oldSlot int64
-		if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, oldID).Scan(&oldSlot) != nil {
+		oldSlot, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, oldID)
+		if err != nil {
+			return err
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Original instructor not assigned to this session")
 			return nil
 		}
@@ -482,22 +497,29 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusConflict, "New instructor is already assigned to this session")
 			return nil
 		}
-		// A removed slot of the new instructor is merged into the old slot.
-		var removedSlot int64
-		if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, newID).Scan(&removedSlot) == nil {
-			if _, err := s.db.Exec("UPDATE invitations SET slot_id = ? WHERE slot_id = ?", oldSlot, removedSlot); err != nil {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
+			// A removed slot of the new instructor is merged into the old slot.
+			removedSlot, found, err := db.One[int64](tx, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, newID)
+			if err != nil {
 				return err
 			}
-			if _, err := s.db.Exec("DELETE FROM session_slots WHERE id = ?", removedSlot); err != nil {
-				return err
+			if found {
+				if _, err := tx.Exec("UPDATE invitations SET slot_id = ? WHERE slot_id = ?", oldSlot, removedSlot); err != nil {
+					return err
+				}
+				if _, err := tx.Exec("DELETE FROM session_slots WHERE id = ?", removedSlot); err != nil {
+					return err
+				}
 			}
-		}
-		// Re-pointing the slot moves all its invitations to the new instructor.
-		if _, err := s.db.Exec("UPDATE session_slots SET instructor_id = ? WHERE id = ?", newID, oldSlot); err != nil {
+			// Re-pointing the slot moves all its invitations to the new instructor.
+			_, err = tx.Exec("UPDATE session_slots SET instructor_id = ? WHERE id = ?", newID, oldSlot)
+			return err
+		})
+		if err != nil {
 			return err
 		}
 		httpx.Success(w)
-		s.broadcastSessionReload(session.ID)
+		s.broadcastSessionReload(id)
 		return nil
 	})
 
@@ -512,7 +534,6 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
 		}
-		id := session.ID
 		type unsentInvitation struct {
 			ID          int64  `db:"id"`
 			StudentName string `db:"student_name"` // for the error report
@@ -521,7 +542,7 @@ func (s *Server) sessionRoutes() {
 			SELECT inv.id, s.first_name || ' ' || s.last_name AS student_name
 			FROM invitations inv
 			JOIN students s ON s.id = inv.student_id
-			WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'`, id)
+			WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'`, session.ID)
 		if err != nil {
 			return err
 		}
@@ -539,7 +560,7 @@ func (s *Server) sessionRoutes() {
 			sent++
 		}
 		if sent > 0 {
-			if _, err := s.db.Exec("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?", id); err != nil {
+			if _, err := s.db.Exec("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?", session.ID); err != nil {
 				return err
 			}
 		}
@@ -608,33 +629,29 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Session already completed")
 			return nil
 		}
-		id := session.ID
 		type attendance struct {
 			StudentID int64 `db:"student_id"`
 			NoShow    int64 `db:"no_show"`
 		}
-		confirmed, err := db.Many[attendance](s.db, "SELECT student_id, no_show FROM invitations WHERE session_id = ? AND status = 'confirmed'", id)
-		if err != nil {
-			return err
-		}
-		tx, err := s.db.Begin()
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		for _, c := range confirmed {
-			column := "attended_sessions"
-			if c.NoShow != 0 {
-				column = "no_show_count"
-			}
-			if _, err := tx.Exec("UPDATE students SET "+column+" = "+column+" + 1 WHERE id = ?", c.StudentID); err != nil {
+		var confirmed []attendance
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
+			confirmed, err = db.Many[attendance](tx, "SELECT student_id, no_show FROM invitations WHERE session_id = ? AND status = 'confirmed'", session.ID)
+			if err != nil {
 				return err
 			}
-		}
-		if _, err := tx.Exec("UPDATE training_sessions SET status = 'completed' WHERE id = ?", id); err != nil {
+			for _, c := range confirmed {
+				column := "attended_sessions"
+				if c.NoShow != 0 {
+					column = "no_show_count"
+				}
+				if _, err := tx.Exec("UPDATE students SET "+column+" = "+column+" + 1 WHERE id = ?", c.StudentID); err != nil {
+					return err
+				}
+			}
+			_, err = tx.Exec("UPDATE training_sessions SET status = 'completed' WHERE id = ?", session.ID)
 			return err
-		}
-		if err := tx.Commit(); err != nil {
+		})
+		if err != nil {
 			return err
 		}
 		s.hub.Broadcast(sessionChannel(session.ID), "session_updated", map[string]any{"status": "completed"})
@@ -652,7 +669,7 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
-		if len(utf16.Encode([]rune(q))) < 2 {
+		if utf8.RuneCountInString(q) < 2 {
 			httpx.OK(w, []any{})
 			return nil
 		}
@@ -705,9 +722,24 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		id := session.ID
-		var slotID int64
-		if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID).Scan(&slotID) != nil {
+		slotID, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID)
+		if err != nil {
+			return err
+		}
+		if !found {
 			httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
+			return nil
+		}
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", studentID); err != nil {
+			return err
+		} else if !found {
+			httpx.Error(w, http.StatusBadRequest, "Invalid student")
+			return nil
+		}
+		if _, found, err := db.One[int](s.db, "SELECT 1 FROM timeslots WHERE id = ? AND timetable_id = ?", timeslotID, session.TimetableID); err != nil {
+			return err
+		} else if !found {
+			httpx.Error(w, http.StatusBadRequest, "Timeslot is not part of this session's timetable")
 			return nil
 		}
 		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ? AND student_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", id, studentID); err != nil {
@@ -722,16 +754,18 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusConflict, "This slot is already occupied")
 			return nil
 		}
-		token := uuid.NewString()
 		var newID int64
-		if err := s.db.QueryRow("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token) VALUES (?, ?, ?, ?, ?) RETURNING id",
-			id, studentID, timeslotID, slotID, token).Scan(&newID); err != nil {
-			return err
-		}
-		if status == "draft" {
-			if _, err := s.db.Exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", id); err != nil {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
+			newID, err = db.Get[int64](tx, "INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token) VALUES (?, ?, ?, ?, ?) RETURNING id",
+				id, studentID, timeslotID, slotID, uuid.NewString())
+			if err != nil || status != "draft" {
 				return err
 			}
+			_, err = tx.Exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", id)
+			return err
+		})
+		if err != nil {
+			return err
 		}
 		// After invitations went out, a manually added student is invited right away.
 		if status == "invitations_sent" {
@@ -740,9 +774,8 @@ func (s *Server) sessionRoutes() {
 			}
 		}
 		httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
-		sessionID := session.ID
-		s.broadcastSessionReload(sessionID)
-		s.broadcastSessionCounts(sessionID)
+		s.broadcastSessionReload(id)
+		s.broadcastSessionCounts(id)
 		return nil
 	})
 
@@ -765,24 +798,29 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		id := session.ID
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE id = ? AND session_id = ?", invID, id); err != nil {
+		var deleted int64
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
+			res, err := tx.Exec("DELETE FROM invitations WHERE id = ? AND session_id = ?", invID, id)
+			if err != nil {
+				return err
+			}
+			if deleted, err = res.RowsAffected(); err != nil || deleted == 0 {
+				return err
+			}
+			// With no invitations left the session reverts to draft.
+			_, err = tx.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ? AND NOT EXISTS (SELECT 1 FROM invitations WHERE session_id = ?)", id, id)
 			return err
-		} else if !found {
+		})
+		if err != nil {
+			return err
+		}
+		if deleted == 0 {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		if _, err := s.db.Exec("DELETE FROM invitations WHERE id = ? AND session_id = ?", invID, id); err != nil {
-			return err
-		}
-		// With no invitations left the session reverts to draft.
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM invitations WHERE session_id = ?", id); err != nil {
-			return err
-		} else if !found {
-			if _, err := s.db.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ?", id); err != nil {
-				return err
-			}
-		}
 		httpx.Success(w)
+		s.broadcastSessionReload(id)
+		s.broadcastSessionCounts(id)
 		return nil
 	})
 
@@ -816,12 +854,11 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Cannot cancel — invitation is already "+st)
 			return nil
 		}
-		sessionID := session.ID
 		if err := s.adminCancelInvitation(invID); err != nil {
 			return err
 		}
-		s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "admin_cancelled"})
-		s.broadcastSessionCounts(sessionID)
+		s.broadcastSessionInvitation(session.ID, invID, map[string]any{"status": "admin_cancelled"})
+		s.broadcastSessionCounts(session.ID)
 		httpx.Success(w)
 		return nil
 	})
@@ -854,8 +891,11 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		id := session.ID
-		var slotID int64
-		if s.db.QueryRow("SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID).Scan(&slotID) != nil {
+		slotID, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID)
+		if err != nil {
+			return err
+		}
+		if !found {
 			httpx.Error(w, http.StatusBadRequest, "Instructor is not assigned to this session")
 			return nil
 		}
@@ -866,14 +906,19 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		// Keep the group of the most recent vacated invitation for this spot, if there is one.
-		var lastID int64
-		var lastGroup *int64
-		s.db.QueryRow("SELECT id, group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('scheduled', 'invited', 'confirmed') ORDER BY responded_at DESC LIMIT 1",
-			id, timeslotID, slotID).Scan(&lastID, &lastGroup)
+		type vacated struct {
+			ID      int64  `db:"id"`
+			GroupID *int64 `db:"group_id"`
+		}
+		last, _, err := db.One[vacated](s.db, "SELECT id, group_id FROM invitations WHERE session_id = ? AND timeslot_id = ? AND slot_id = ? AND status NOT IN ('scheduled', 'invited', 'confirmed') ORDER BY responded_at DESC LIMIT 1",
+			id, timeslotID, slotID)
+		if err != nil {
+			return err
+		}
 
 		replaced, err := s.findAndInviteReplacement(vacatedSpot{
-			SessionID: session.ID, SessionDate: session.Date, TimeslotID: timeslotID, SlotID: slotID,
-			InvitationID: lastID, GroupID: lastGroup,
+			SessionID: id, SessionDate: session.Date, TimeslotID: timeslotID, SlotID: slotID,
+			InvitationID: last.ID, GroupID: last.GroupID,
 		})
 		if err != nil {
 			return err
@@ -942,16 +987,19 @@ func (s *Server) sessionRoutes() {
 		if err := s.cancelAllSessionTimers(id); err != nil {
 			return err
 		}
-		if _, err := s.db.Exec("DELETE FROM invitations WHERE session_id = ?", id); err != nil {
+		err = s.db.InTx(func(tx *sqlx.Tx) error {
+			if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ?", id); err != nil {
+				return err
+			}
+			_, err := tx.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ?", id)
 			return err
-		}
-		if _, err := s.db.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ?", id); err != nil {
+		})
+		if err != nil {
 			return err
 		}
 		httpx.OK(w, map[string]any{"success": true, "new_status": "draft"})
-		sessionID := session.ID
-		s.broadcastSessionReload(sessionID)
-		s.broadcastSessionCounts(sessionID)
+		s.broadcastSessionReload(id)
+		s.broadcastSessionCounts(id)
 		return nil
 	})
 }
@@ -963,7 +1011,7 @@ func (s *Server) loadSession(r *http.Request) (Session, bool, error) {
 	if !ok {
 		return Session{}, false, nil
 	}
-	return s.getSession(id)
+	return db.One[Session](s.db, "SELECT id, date, status, timetable_id, notes FROM training_sessions WHERE id = ?", id)
 }
 
 // removeSlot takes an instructor's slot out of a session: active invitations on it are
@@ -1033,24 +1081,15 @@ func (s *Server) broadcastSessionReload(sessionID int64) {
 }
 
 // sessionFull reports whether every instructor x timeslot spot of the session is confirmed.
+// A session without a timetable has no timeslots, so it is never full.
 func (s *Server) sessionFull(sessionID int64) (bool, error) {
-	var timetableID *int64
-	if err := s.db.QueryRow("SELECT timetable_id FROM training_sessions WHERE id = ?", sessionID).Scan(&timetableID); err != nil || timetableID == nil {
-		return false, nil
-	}
-	var instructors, timeslots, confirmed int64
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM session_slots WHERE session_id = ? AND removed = 0", sessionID).Scan(&instructors); err != nil {
-		return false, err
-	}
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM timeslots WHERE timetable_id = ?", *timetableID).Scan(&timeslots); err != nil {
-		return false, err
-	}
-	total := instructors * timeslots
-	if total == 0 {
-		return false, nil
-	}
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM invitations WHERE session_id = ? AND status = 'confirmed'", sessionID).Scan(&confirmed); err != nil {
-		return false, err
-	}
-	return confirmed >= total, nil
+	full, _, err := db.One[bool](s.db, `
+		SELECT total > 0 AND confirmed >= total FROM (
+			SELECT
+				(SELECT COUNT(*) FROM session_slots WHERE session_id = ts.id AND removed = 0) *
+					(SELECT COUNT(*) FROM timeslots WHERE timetable_id = ts.timetable_id) AS total,
+				(SELECT COUNT(*) FROM invitations WHERE session_id = ts.id AND status = 'confirmed') AS confirmed
+			FROM training_sessions ts WHERE ts.id = ?
+		)`, sessionID)
+	return full, err
 }
