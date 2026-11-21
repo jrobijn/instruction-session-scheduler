@@ -1093,7 +1093,7 @@ func (t *txn) removeSlot(sessionID int64, slotID int64) (int, error) {
 	return cancelled, nil
 }
 
-func (s *Server) sessionCounts(sessionID int64) (map[string]any, error) {
+func (s *Server) broadcastSessionCounts(sessionID int64) {
 	counts, err := db.Get[struct {
 		Total     int64 `db:"total"`
 		Confirmed int64 `db:"confirmed"`
@@ -1102,16 +1102,15 @@ func (s *Server) sessionCounts(sessionID int64) (map[string]any, error) {
 			(SELECT COUNT(*) FROM invitations WHERE session_id = ?) AS total,
 			(SELECT COUNT(*) FROM invitations WHERE session_id = ? AND status = 'confirmed') AS confirmed`,
 		sessionID, sessionID)
-	return map[string]any{"session_id": sessionID, "invitation_count": counts.Total, "confirmed_count": counts.Confirmed}, err
-}
-
-func (s *Server) broadcastSessionCounts(sessionID int64) {
-	counts, err := s.sessionCounts(sessionID)
 	if err != nil {
 		log.Printf("session counts %d: %v", sessionID, err)
 		return
 	}
-	s.hub.Broadcast(sessionsListChannel, "session_counts_updated", counts)
+	s.hub.Broadcast(sessionsListChannel, "session_counts_updated", map[string]any{
+		"session_id":       sessionID,
+		"invitation_count": counts.Total,
+		"confirmed_count":  counts.Confirmed,
+	})
 }
 
 // broadcastSessionInvitation pushes a partial invitation update to the admin session channel.
