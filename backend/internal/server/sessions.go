@@ -21,6 +21,11 @@ type Session struct {
 	Notes       *string `db:"notes" json:"notes"`
 }
 
+// getSession loads the training session with the given id, reporting whether there is one.
+func (s *Server) getSession(id int64) (Session, bool, error) {
+	return db.One[Session](s.db, "SELECT id, date, status, timetable_id, notes FROM training_sessions WHERE id = ?", id)
+}
+
 // SessionInvitation is an invitation as listed on the session page.
 type SessionInvitation struct {
 	ID                     int64   `db:"id" json:"id"`
@@ -140,7 +145,12 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("GET /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -163,12 +173,12 @@ func (s *Server) sessionRoutes() {
 			SELECT i.id, i.first_name, i.last_name, i.email, i.active FROM instructors i
 			JOIN session_slots si ON si.instructor_id = i.id
 			WHERE si.session_id = ? AND si.removed = 0
-			ORDER BY i.last_name ASC, i.first_name ASC`, session.ID); err != nil {
+			ORDER BY i.last_name ASC, i.first_name ASC`, id); err != nil {
 			return err
 		}
 
 		if ttID := session.TimetableID; ttID != nil {
-			if t, found, err := db.One[Timetable](s.db, "SELECT id, name, status, is_default, active FROM timetables WHERE id = ?", *ttID); err != nil {
+			if t, found, err := s.getTimetable(*ttID); err != nil {
 				return err
 			} else if found {
 				detail.Timetable = &t
@@ -181,7 +191,7 @@ func (s *Server) sessionRoutes() {
 			}
 		}
 
-		if detail.Invitations, err = s.sessionInvitations(session.ID); err != nil {
+		if detail.Invitations, err = s.sessionInvitations(id); err != nil {
 			return err
 		}
 		detail.InvitationExpiryMinutes = s.expiryMinutes()
@@ -246,11 +256,8 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
-		session, found, err := s.loadSession(r)
-		if err != nil {
-			return err
-		}
-		if !found {
+		id, ok := pathID(r, "id")
+		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
 		}
@@ -263,20 +270,24 @@ func (s *Server) sessionRoutes() {
 			}
 			dow = d
 		}
-		row, err := db.Get[Session](s.db, `
+		row, found, err := db.One[Session](s.db, `
 			UPDATE training_sessions SET
 				date = COALESCE(?, date),
 				day_of_week = COALESCE(?, day_of_week),
 				notes = COALESCE(?, notes)
 			WHERE id = ?
 			RETURNING id, date, status, timetable_id, notes`,
-			in.Date, dow, in.Notes, session.ID)
+			in.Date, dow, in.Notes, id)
 		if isUniqueErr(err, "training_sessions.date") {
 			httpx.Error(w, http.StatusConflict, "A training session already exists for this date")
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		if !found {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
 		}
 		httpx.OK(w, row)
 		return nil
@@ -291,7 +302,12 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -317,17 +333,17 @@ func (s *Server) sessionRoutes() {
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if changed && session.Status == "scheduled" {
 				// Changing the timetable clears the schedule.
-				if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ?", session.ID); err != nil {
+				if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ?", id); err != nil {
 					return err
 				}
-				if _, err := tx.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ?", session.ID); err != nil {
+				if _, err := tx.Exec("UPDATE training_sessions SET status = 'draft' WHERE id = ?", id); err != nil {
 					return err
 				}
 			}
 			row, err = db.Get[Session](tx, `
 				UPDATE training_sessions SET timetable_id = ? WHERE id = ?
 				RETURNING id, date, status, timetable_id, notes`,
-				next, session.ID)
+				next, id)
 			return err
 		})
 		if err != nil {
@@ -369,7 +385,12 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "instructor_id is required")
 			return nil
 		}
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -382,14 +403,14 @@ func (s *Server) sessionRoutes() {
 			return nil
 		}
 		// Re-assigning a removed instructor revives their slot (and its invitation history).
-		removedSlot, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", session.ID, instructorID)
+		removedSlot, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 1", id, instructorID)
 		if err != nil {
 			return err
 		}
 		if found {
 			_, err = s.db.Exec("UPDATE session_slots SET removed = 0 WHERE id = ?", removedSlot)
 		} else {
-			_, err = s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", session.ID, instructorID)
+			_, err = s.db.Exec("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?)", id, instructorID)
 		}
 		switch {
 		case isUniqueErr(err, "session_slots.session_id", "session_slots.instructor_id"):
@@ -402,13 +423,18 @@ func (s *Server) sessionRoutes() {
 			return err
 		}
 		httpx.JSON(w, http.StatusCreated, map[string]bool{"success": true})
-		s.broadcastSessionReload(session.ID)
-		s.broadcastSessionCounts(session.ID)
+		s.broadcastSessionReload(id)
+		s.broadcastSessionCounts(id)
 		return nil
 	})
 
 	s.adminRoute("DELETE /api/sessions/{id}/instructors/{instructorId}", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -425,7 +451,7 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Assignment not found")
 			return nil
 		}
-		slotID, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", session.ID, instructorID)
+		slotID, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID)
 		if err != nil {
 			return err
 		}
@@ -433,7 +459,7 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Assignment not found")
 			return nil
 		}
-		cancelled, err := s.removeSlot(session.ID, slotID)
+		cancelled, err := s.removeSlot(id, slotID)
 		if err != nil {
 			return err
 		}
@@ -455,7 +481,12 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "new_instructor_id is required")
 			return nil
 		}
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -467,7 +498,6 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify a completed session")
 			return nil
 		}
-		id := session.ID
 		oldID, ok := pathID(r, "instructorId")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Original instructor not assigned to this session")
@@ -526,7 +556,12 @@ func (s *Server) sessionRoutes() {
 	s.adminRoute("POST /api/sessions/{id}/generate-schedule", s.handleGenerateSchedule)
 
 	s.adminRoute("POST /api/sessions/{id}/send-invitations", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM training_sessions WHERE id = ?", id)
 		if err != nil {
 			return err
 		}
@@ -542,7 +577,7 @@ func (s *Server) sessionRoutes() {
 			SELECT inv.id, s.first_name || ' ' || s.last_name AS student_name
 			FROM invitations inv
 			JOIN students s ON s.id = inv.student_id
-			WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'`, session.ID)
+			WHERE inv.session_id = ? AND inv.email_sent = 0 AND inv.status = 'scheduled'`, id)
 		if err != nil {
 			return err
 		}
@@ -560,17 +595,22 @@ func (s *Server) sessionRoutes() {
 			sent++
 		}
 		if sent > 0 {
-			if _, err := s.db.Exec("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?", session.ID); err != nil {
+			if _, err := s.db.Exec("UPDATE training_sessions SET status = 'invitations_sent' WHERE id = ?", id); err != nil {
 				return err
 			}
 		}
-		s.broadcastSessionReload(session.ID)
+		s.broadcastSessionReload(id)
 		httpx.OK(w, map[string]any{"sent": sent, "errors": errs})
 		return nil
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/invitations/{invitationId}/toggle-no-show", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -592,7 +632,7 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		inv, found, err := db.One[noShowState](s.db, "SELECT id, status, no_show FROM invitations WHERE id = ? AND session_id = ?", invID, session.ID)
+		inv, found, err := db.One[noShowState](s.db, "SELECT id, status, no_show FROM invitations WHERE id = ? AND session_id = ?", invID, id)
 		if err != nil {
 			return err
 		}
@@ -611,13 +651,18 @@ func (s *Server) sessionRoutes() {
 		if _, err := s.db.Exec("UPDATE invitations SET no_show = ? WHERE id = ?", newValue, inv.ID); err != nil {
 			return err
 		}
-		s.broadcastSessionInvitation(session.ID, inv.ID, map[string]any{"no_show": newValue})
+		s.broadcastSessionInvitation(id, inv.ID, map[string]any{"no_show": newValue})
 		httpx.OK(w, map[string]any{"success": true, "no_show": newValue})
 		return nil
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/complete", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -635,7 +680,7 @@ func (s *Server) sessionRoutes() {
 		}
 		var confirmed []attendance
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
-			confirmed, err = db.Many[attendance](tx, "SELECT student_id, no_show FROM invitations WHERE session_id = ? AND status = 'confirmed'", session.ID)
+			confirmed, err = db.Many[attendance](tx, "SELECT student_id, no_show FROM invitations WHERE session_id = ? AND status = 'confirmed'", id)
 			if err != nil {
 				return err
 			}
@@ -648,19 +693,24 @@ func (s *Server) sessionRoutes() {
 					return err
 				}
 			}
-			_, err = tx.Exec("UPDATE training_sessions SET status = 'completed' WHERE id = ?", session.ID)
+			_, err = tx.Exec("UPDATE training_sessions SET status = 'completed' WHERE id = ?", id)
 			return err
 		})
 		if err != nil {
 			return err
 		}
-		s.hub.Broadcast(sessionChannel(session.ID), "session_updated", map[string]any{"status": "completed"})
+		s.hub.Broadcast(sessionChannel(id), "session_updated", map[string]any{"status": "completed"})
 		httpx.OK(w, map[string]any{"success": true, "students_credited": len(confirmed)})
 		return nil
 	})
 
 	s.adminRoute("GET /api/sessions/{id}/available-students", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM training_sessions WHERE id = ?", id)
 		if err != nil {
 			return err
 		}
@@ -684,7 +734,7 @@ func (s *Server) sessionRoutes() {
 					SELECT student_id FROM invitations WHERE session_id = ? AND status IN ('scheduled', 'invited', 'confirmed')
 				)
 			ORDER BY s.last_name ASC, s.first_name ASC
-			LIMIT 15`, like, like, session.ID)
+			LIMIT 15`, like, like, id)
 		if err != nil {
 			return err
 		}
@@ -693,7 +743,12 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/invitations", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -721,7 +776,6 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "student_id, timeslot_id, and instructor_id are required")
 			return nil
 		}
-		id := session.ID
 		slotID, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID)
 		if err != nil {
 			return err
@@ -780,7 +834,12 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/sessions/{id}/invitations/{invitationId}", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -788,7 +847,7 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
 		}
-		if st := session.Status; st != "draft" && st != "scheduled" {
+		if session.Status != "draft" && session.Status != "scheduled" {
 			httpx.Error(w, http.StatusBadRequest, "Can only remove students before invitations are sent")
 			return nil
 		}
@@ -797,7 +856,6 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		id := session.ID
 		var deleted int64
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			res, err := tx.Exec("DELETE FROM invitations WHERE id = ? AND session_id = ?", invID, id)
@@ -825,7 +883,12 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/invitations/{invitationId}/admin-cancel", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -842,7 +905,7 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
-		st, found, err := db.One[string](s.db, "SELECT status FROM invitations WHERE id = ? AND session_id = ?", invID, session.ID)
+		st, found, err := db.One[string](s.db, "SELECT status FROM invitations WHERE id = ? AND session_id = ?", invID, id)
 		if err != nil {
 			return err
 		}
@@ -857,14 +920,19 @@ func (s *Server) sessionRoutes() {
 		if err := s.adminCancelInvitation(invID); err != nil {
 			return err
 		}
-		s.broadcastSessionInvitation(session.ID, invID, map[string]any{"status": "admin_cancelled"})
-		s.broadcastSessionCounts(session.ID)
+		s.broadcastSessionInvitation(id, invID, map[string]any{"status": "admin_cancelled"})
+		s.broadcastSessionCounts(id)
 		httpx.Success(w)
 		return nil
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/auto-schedule-slot", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -890,7 +958,6 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "timeslot_id and instructor_id are required")
 			return nil
 		}
-		id := session.ID
 		slotID, found, err := db.One[int64](s.db, "SELECT id FROM session_slots WHERE session_id = ? AND instructor_id = ? AND removed = 0", id, instructorID)
 		if err != nil {
 			return err
@@ -928,7 +995,12 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/cancel", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -944,7 +1016,6 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Session is already cancelled")
 			return nil
 		}
-		id := session.ID
 		open, err := db.Many[struct {
 			ID     int64  `db:"id"`
 			Status string `db:"status"`
@@ -971,7 +1042,12 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/reactivate", func(w http.ResponseWriter, r *http.Request) error {
-		session, found, err := s.loadSession(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Training session not found")
+			return nil
+		}
+		session, found, err := s.getSession(id)
 		if err != nil {
 			return err
 		}
@@ -983,7 +1059,6 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Only cancelled sessions can be reactivated")
 			return nil
 		}
-		id := session.ID
 		if err := s.cancelAllSessionTimers(id); err != nil {
 			return err
 		}
@@ -1002,16 +1077,6 @@ func (s *Server) sessionRoutes() {
 		s.broadcastSessionCounts(id)
 		return nil
 	})
-}
-
-// loadSession fetches the training session named by the {id} path value, reporting whether
-// there is one.
-func (s *Server) loadSession(r *http.Request) (Session, bool, error) {
-	id, ok := pathID(r, "id")
-	if !ok {
-		return Session{}, false, nil
-	}
-	return db.One[Session](s.db, "SELECT id, date, status, timetable_id, notes FROM training_sessions WHERE id = ?", id)
 }
 
 // removeSlot takes an instructor's slot out of a session: active invitations on it are

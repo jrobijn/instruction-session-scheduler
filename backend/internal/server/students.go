@@ -28,11 +28,17 @@ type Student struct {
 	CooldownUntil    *string `db:"cooldown_until" json:"cooldown_until"`
 }
 
-// everyDay is the preferred_days value for a student available on every weekday; it matches
-// the students.preferred_days column default.
-const everyDay = "0|1|2|3|4|5|6"
+// getStudent loads the (non-deleted) student with the given id, reporting whether there is one.
+func (s *Server) getStudent(id int64) (Student, bool, error) {
+	return db.One[Student](s.db, `
+		SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
+			preferred_days, active, cooldown_until
+		FROM students
+		WHERE id = ? AND deleted_at IS NULL`, id)
+}
 
-func (s *Server) listStudents() ([]Student, error) {
+// getStudents lists all (non-deleted) students by name.
+func (s *Server) getStudents() ([]Student, error) {
 	return db.Many[Student](s.db, `
 		SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
 			preferred_days, active, cooldown_until
@@ -41,14 +47,9 @@ func (s *Server) listStudents() ([]Student, error) {
 		ORDER BY last_name ASC, first_name ASC`)
 }
 
-// getStudent loads a (non-deleted) student; found is false if there is none.
-func (s *Server) getStudent(id int64) (Student, bool, error) {
-	return db.One[Student](s.db, `
-		SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
-			preferred_days, active, cooldown_until
-		FROM students
-		WHERE id = ? AND deleted_at IS NULL`, id)
-}
+// everyDay is the preferred_days value for a student available on every weekday; it matches
+// the students.preferred_days column default.
+const everyDay = "0|1|2|3|4|5|6"
 
 // StudentListItem is a student in the students list, with their group and buddy group.
 type StudentListItem struct {
@@ -100,7 +101,7 @@ type StudentSearchResult struct {
 
 func (s *Server) studentRoutes() {
 	s.adminRoute("GET /api/students", func(w http.ResponseWriter, r *http.Request) error {
-		students, err := s.listStudents()
+		students, err := s.getStudents()
 		if err != nil {
 			return err
 		}
@@ -159,7 +160,7 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/export", func(w http.ResponseWriter, r *http.Request) error {
-		students, err := s.listStudents()
+		students, err := s.getStudents()
 		if err != nil {
 			return err
 		}
@@ -269,11 +270,16 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/invitations", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok, err := s.requireStudent(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
@@ -293,11 +299,16 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/invitation-history", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok, err := s.requireStudent(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
@@ -435,11 +446,16 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/students/{id}", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok, err := s.requireStudent(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
@@ -478,11 +494,16 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/preferred-timeslots", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok, err := s.requireStudent(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
@@ -516,11 +537,16 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "timeslot_ids array is required")
 			return nil
 		}
-		id, ok, err := s.requireStudent(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
@@ -575,11 +601,16 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("GET /api/students/{id}/groups", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok, err := s.requireStudent(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
@@ -612,11 +643,16 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
-		id, ok, err := s.requireStudent(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
@@ -675,11 +711,16 @@ func (s *Server) studentRoutes() {
 	})
 
 	s.adminRoute("DELETE /api/students/{id}/cooldown", func(w http.ResponseWriter, r *http.Request) error {
-		id, ok, err := s.requireStudent(r)
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
@@ -697,17 +738,6 @@ func (s *Server) studentRoutes() {
 		httpx.OK(w, row)
 		return nil
 	})
-}
-
-// requireStudent returns the id in the {id} path value and whether it names a non-deleted
-// student.
-func (s *Server) requireStudent(r *http.Request) (int64, bool, error) {
-	id, ok := pathID(r, "id")
-	if !ok {
-		return id, false, nil
-	}
-	_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
-	return id, found, err
 }
 
 // importOptional holds an import row's optional columns; nil means the cell was blank.

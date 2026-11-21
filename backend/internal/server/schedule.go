@@ -27,7 +27,12 @@ type ScheduledInvitation struct {
 }
 
 func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) error {
-	session, found, err := s.loadSession(r)
+	sessionID, ok := pathID(r, "id")
+	if !ok {
+		httpx.Error(w, http.StatusNotFound, "Training session not found")
+		return nil
+	}
+	session, found, err := s.getSession(sessionID)
 	if err != nil {
 		return err
 	}
@@ -35,12 +40,11 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusNotFound, "Training session not found")
 		return nil
 	}
-	if st := session.Status; st != "draft" && st != "scheduled" {
+	if session.Status != "draft" && session.Status != "scheduled" {
 		httpx.Error(w, http.StatusBadRequest, "A schedule can only be generated before invitations are sent")
 		return nil
 	}
-	sessionID := session.ID
-	if session.TimetableID == nil || *session.TimetableID == 0 {
+	if session.TimetableID == nil {
 		httpx.Error(w, http.StatusBadRequest, "No timetable attached to this session")
 		return nil
 	}

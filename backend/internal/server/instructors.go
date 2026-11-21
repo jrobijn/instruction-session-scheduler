@@ -17,12 +17,25 @@ type Instructor struct {
 	Active    int64  `db:"active" json:"active"`
 }
 
+// getInstructor loads the (non-deleted) instructor with the given id, reporting whether there
+// is one.
+func (s *Server) getInstructor(id int64) (Instructor, bool, error) {
+	return db.One[Instructor](s.db, `
+		SELECT id, first_name, last_name, email, active FROM instructors
+		WHERE id = ? AND deleted_at IS NULL`, id)
+}
+
+// getInstructors lists all (non-deleted) instructors by name.
+func (s *Server) getInstructors() ([]Instructor, error) {
+	return db.Many[Instructor](s.db, `
+		SELECT id, first_name, last_name, email, active FROM instructors
+		WHERE deleted_at IS NULL
+		ORDER BY last_name ASC, first_name ASC`)
+}
+
 func (s *Server) instructorRoutes() {
 	s.adminRoute("GET /api/instructors", func(w http.ResponseWriter, r *http.Request) error {
-		instructors, err := db.Many[Instructor](s.db, `
-			SELECT id, first_name, last_name, email, active FROM instructors
-			WHERE deleted_at IS NULL
-			ORDER BY last_name ASC, first_name ASC`)
+		instructors, err := s.getInstructors()
 		if err != nil {
 			return err
 		}
@@ -31,10 +44,7 @@ func (s *Server) instructorRoutes() {
 	})
 
 	s.adminRoute("GET /api/instructors/export", func(w http.ResponseWriter, r *http.Request) error {
-		instructors, err := db.Many[Instructor](s.db, `
-			SELECT id, first_name, last_name, email, active FROM instructors
-			WHERE deleted_at IS NULL
-			ORDER BY last_name ASC, first_name ASC`)
+		instructors, err := s.getInstructors()
 		if err != nil {
 			return err
 		}
@@ -97,9 +107,7 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
-		row, found, err := db.One[Instructor](s.db, `
-			SELECT id, first_name, last_name, email, active FROM instructors
-			WHERE id = ? AND deleted_at IS NULL`, id)
+		row, found, err := s.getInstructor(id)
 		if err != nil {
 			return err
 		}

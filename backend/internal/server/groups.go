@@ -248,20 +248,19 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id); err != nil {
-			return err
-		} else if !found {
-			httpx.Error(w, http.StatusNotFound, "Group not found")
-			return nil
-		}
 		if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetable_groups WHERE group_id = ?", id); err != nil {
 			return err
 		} else if found {
 			httpx.Error(w, http.StatusBadRequest, "Cannot delete a group that is assigned to timetables")
 			return nil
 		}
-		if _, err := s.db.Exec("DELETE FROM groups WHERE id = ?", id); err != nil {
+		res, err := s.db.Exec("DELETE FROM groups WHERE id = ?", id)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			httpx.Error(w, http.StatusNotFound, "Group not found")
+			return nil
 		}
 		httpx.Success(w)
 		return nil
@@ -327,9 +326,11 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", groupID); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", groupID)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
@@ -440,9 +441,11 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
@@ -485,9 +488,11 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
@@ -519,9 +524,11 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
@@ -543,9 +550,11 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
@@ -578,9 +587,11 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
@@ -603,9 +614,11 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
@@ -620,7 +633,7 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		_, err := s.db.Exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", disciplineID, id)
+		_, err = s.db.Exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", disciplineID, id)
 		if isUniqueErr(err, "discipline_groups.discipline_id", "discipline_groups.group_id") {
 			httpx.Error(w, http.StatusConflict, "Already assigned")
 			return nil
@@ -638,9 +651,11 @@ func (s *Server) groupRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}

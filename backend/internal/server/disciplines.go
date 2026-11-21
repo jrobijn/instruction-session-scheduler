@@ -16,12 +16,14 @@ type Discipline struct {
 	Active       int64  `db:"active" json:"active"`
 }
 
-func (s *Server) listDisciplines() ([]Discipline, error) {
-	return db.Many[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines ORDER BY name ASC")
-}
-
+// getDiscipline loads the discipline with the given id, reporting whether there is one.
 func (s *Server) getDiscipline(id int64) (Discipline, bool, error) {
 	return db.One[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines WHERE id = ?", id)
+}
+
+// getDisciplines lists all disciplines by name.
+func (s *Server) getDisciplines() ([]Discipline, error) {
+	return db.Many[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines ORDER BY name ASC")
 }
 
 type DisciplineWithGroups struct {
@@ -37,7 +39,7 @@ type DisciplineOption struct {
 
 func (s *Server) disciplineRoutes() {
 	s.adminRoute("GET /api/disciplines", func(w http.ResponseWriter, r *http.Request) error {
-		disciplines, err := s.listDisciplines()
+		disciplines, err := s.getDisciplines()
 		if err != nil {
 			return err
 		}
@@ -70,7 +72,7 @@ func (s *Server) disciplineRoutes() {
 	})
 
 	s.adminRoute("GET /api/disciplines/export", func(w http.ResponseWriter, r *http.Request) error {
-		disciplines, err := s.listDisciplines()
+		disciplines, err := s.getDisciplines()
 		if err != nil {
 			return err
 		}
@@ -229,9 +231,11 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
@@ -259,9 +263,11 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
@@ -290,9 +296,11 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
@@ -320,9 +328,11 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
-		if _, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id); err != nil {
+		_, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id)
+		if err != nil {
 			return err
-		} else if !found {
+		}
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
