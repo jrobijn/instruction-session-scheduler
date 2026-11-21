@@ -70,11 +70,6 @@ func (i invitationDetails) vacated() vacatedSpot {
 	}
 }
 
-// broadcastInvitation pushes a status change to the student-facing per-token invitation channel.
-func (s *Server) broadcastInvitation(token, status string) {
-	s.hub.Broadcast(invitationChannel(token), "invitation_updated", map[string]any{"status": status})
-}
-
 // PublicInvitation is an invitation as shown to the invited student.
 type PublicInvitation struct {
 	StudentName    string  `json:"student_name"`
@@ -87,117 +82,6 @@ type PublicInvitation struct {
 	ClubName       string  `json:"club_name"`
 	Locale         string  `json:"locale"`
 	ExpiresAt      *string `json:"expires_at"`
-}
-
-// invitationExpired reports whether an invitation stored as 'invited' can no longer be
-// answered, and if so why. The expiry timer may not have updated the stored status yet.
-func (s *Server) invitationExpired(inv invitationDetails) (reason string, expired bool) {
-	switch effectiveStatus(inv.timing(), expiryMinutes(s.db), clubLocation(s.db), nowFunc()) {
-	case "invited":
-		return "", false
-	case "invalidated":
-		return "This time slot has already started", true
-	default:
-		return "This invitation has expired", true
-	}
-}
-
-// Invitation status changes live here, whichever route or timer triggers them. They take an
-// invitation id and load what they need themselves: each updates the invitation and queues
-// the changes to its expiry timer and the student's invitation page, and the emails and
-// notifications that go with it. Callers only decide which invitations to change.
-
-// sendInvitation marks the invitation invited, and once committed emails it to the student
-// and starts its expiry timer. Session-wide broadcasts are left to the caller, which may send
-// several.
-func (t *txn) sendInvitation(invitationID int64) error {
-	inv, found, err := invitationByID(t.q, invitationID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return fmt.Errorf("invitation %d not found", invitationID)
-	}
-	invitedAt := nowFunc().UTC().Format(time.DateTime) // the format of datetime('now')
-	if _, err := t.q.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = ? WHERE id = ?", invitedAt, invitationID); err != nil {
-		return err
-	}
-	params := email.InvitationParams{
-		To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate, Token: inv.Token,
-		ClubName: clubName(t.q), Locale: emailLocale(t.q),
-	}
-	deadline, hasDeadline := invitationDeadline(invitedAt, inv.SessionDate, inv.StartTime, expiryMinutes(t.q), clubLocation(t.q))
-	t.afterCommit(func(s *Server) {
-		s.mailer.SendInvitation(params)
-		if hasDeadline {
-			s.scheduleInvitationExpiry(invitationID, deadline)
-		}
-	})
-	return nil
-}
-
-// adminCancelInvitation cancels an invitation on the admin's behalf and, if the invitation
-// was emailed, tells the student. Session-wide broadcasts are left to the caller, which may
-// cancel several.
-func (t *txn) adminCancelInvitation(invitationID int64) error {
-	inv, found, err := invitationByID(t.q, invitationID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return fmt.Errorf("invitation %d not found", invitationID)
-	}
-	if _, err := t.q.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?", inv.ID); err != nil {
-		return err
-	}
-	params := email.SessionParams{
-		To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
-		StartTime: inv.StartTime, DisciplineName: inv.DisciplineName,
-		ClubName: clubName(t.q), Locale: emailLocale(t.q),
-	}
-	t.afterCommit(func(s *Server) {
-		s.cancelInvitationExpiry(inv.ID)
-		s.broadcastInvitation(inv.Token, "admin_cancelled")
-		if inv.EmailSent != 0 {
-			s.mailer.SendAdminCancellation(params)
-		}
-	})
-	return nil
-}
-
-// expireInvitation runs when an invitation's expiry timer fires. An invitation whose slot
-// has started is invalidated; otherwise it expires and a replacement is invited.
-func (t *txn) expireInvitation(invitationID int64) error {
-	inv, found, err := invitationByID(t.q, invitationID)
-	if err != nil || !found || inv.Status != "invited" {
-		return err // nil: already handled (confirmed, declined, ...)
-	}
-	if st := inv.SessionStatus; st == "completed" || st == "cancelled" {
-		return nil
-	}
-	sessionID := inv.SessionID
-	start, ok := slotStart(inv.SessionDate, inv.StartTime, clubLocation(t.q))
-	slotStarted := ok && !nowFunc().Before(start)
-	newStatus := "expired"
-	if slotStarted {
-		newStatus = "invalidated"
-	}
-	if _, err := t.q.Exec("UPDATE invitations SET status = ?, responded_at = datetime('now') WHERE id = ?", newStatus, invitationID); err != nil {
-		return err
-	}
-	t.afterCommit(func(s *Server) {
-		s.broadcastSessionInvitation(sessionID, invitationID, map[string]any{"status": newStatus})
-		s.broadcastInvitation(inv.Token, newStatus)
-		s.broadcastSessionCounts(sessionID)
-		s.notifyInvitation("invitation_expired", inv)
-	})
-
-	if !slotStarted {
-		// inv still carries status 'invited', which the decision log records as the reason.
-		_, err := t.findAndInviteReplacement(inv.vacated())
-		return err
-	}
-	return nil
 }
 
 func (s *Server) invitationRoutes() {
@@ -414,4 +298,120 @@ func (s *Server) invitationRoutes() {
 		httpx.OK(w, map[string]any{"success": true, "message": "Your participation has been cancelled."})
 		return nil
 	})
+}
+
+// broadcastInvitation pushes a status change to the student-facing per-token invitation channel.
+func (s *Server) broadcastInvitation(token, status string) {
+	s.hub.Broadcast(invitationChannel(token), "invitation_updated", map[string]any{"status": status})
+}
+
+// invitationExpired reports whether an invitation stored as 'invited' can no longer be
+// answered, and if so why. The expiry timer may not have updated the stored status yet.
+func (s *Server) invitationExpired(inv invitationDetails) (reason string, expired bool) {
+	switch effectiveStatus(inv.timing(), expiryMinutes(s.db), clubLocation(s.db), nowFunc()) {
+	case "invited":
+		return "", false
+	case "invalidated":
+		return "This time slot has already started", true
+	default:
+		return "This invitation has expired", true
+	}
+}
+
+// Invitation status changes live here, whichever route or timer triggers them. They take an
+// invitation id and load what they need themselves: each updates the invitation and queues
+// the changes to its expiry timer and the student's invitation page, and the emails and
+// notifications that go with it. Callers only decide which invitations to change.
+
+// sendInvitation marks the invitation invited, and once committed emails it to the student
+// and starts its expiry timer. Session-wide broadcasts are left to the caller, which may send
+// several.
+func (t *txn) sendInvitation(invitationID int64) error {
+	inv, found, err := invitationByID(t.q, invitationID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("invitation %d not found", invitationID)
+	}
+	invitedAt := nowFunc().UTC().Format(time.DateTime) // the format of datetime('now')
+	if _, err := t.q.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = ? WHERE id = ?", invitedAt, invitationID); err != nil {
+		return err
+	}
+	params := email.InvitationParams{
+		To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate, Token: inv.Token,
+		ClubName: clubName(t.q), Locale: emailLocale(t.q),
+	}
+	deadline, hasDeadline := invitationDeadline(invitedAt, inv.SessionDate, inv.StartTime, expiryMinutes(t.q), clubLocation(t.q))
+	t.afterCommit(func(s *Server) {
+		s.mailer.SendInvitation(params)
+		if hasDeadline {
+			s.scheduleInvitationExpiry(invitationID, deadline)
+		}
+	})
+	return nil
+}
+
+// adminCancelInvitation cancels an invitation on the admin's behalf and, if the invitation
+// was emailed, tells the student. Session-wide broadcasts are left to the caller, which may
+// cancel several.
+func (t *txn) adminCancelInvitation(invitationID int64) error {
+	inv, found, err := invitationByID(t.q, invitationID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("invitation %d not found", invitationID)
+	}
+	if _, err := t.q.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?", inv.ID); err != nil {
+		return err
+	}
+	params := email.SessionParams{
+		To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
+		StartTime: inv.StartTime, DisciplineName: inv.DisciplineName,
+		ClubName: clubName(t.q), Locale: emailLocale(t.q),
+	}
+	t.afterCommit(func(s *Server) {
+		s.cancelInvitationExpiry(inv.ID)
+		s.broadcastInvitation(inv.Token, "admin_cancelled")
+		if inv.EmailSent != 0 {
+			s.mailer.SendAdminCancellation(params)
+		}
+	})
+	return nil
+}
+
+// expireInvitation runs when an invitation's expiry timer fires. An invitation whose slot
+// has started is invalidated; otherwise it expires and a replacement is invited.
+func (t *txn) expireInvitation(invitationID int64) error {
+	inv, found, err := invitationByID(t.q, invitationID)
+	if err != nil || !found || inv.Status != "invited" {
+		return err // nil: already handled (confirmed, declined, ...)
+	}
+	if st := inv.SessionStatus; st == "completed" || st == "cancelled" {
+		return nil
+	}
+	sessionID := inv.SessionID
+	start, ok := slotStart(inv.SessionDate, inv.StartTime, clubLocation(t.q))
+	slotStarted := ok && !nowFunc().Before(start)
+	newStatus := "expired"
+	if slotStarted {
+		newStatus = "invalidated"
+	}
+	if _, err := t.q.Exec("UPDATE invitations SET status = ?, responded_at = datetime('now') WHERE id = ?", newStatus, invitationID); err != nil {
+		return err
+	}
+	t.afterCommit(func(s *Server) {
+		s.broadcastSessionInvitation(sessionID, invitationID, map[string]any{"status": newStatus})
+		s.broadcastInvitation(inv.Token, newStatus)
+		s.broadcastSessionCounts(sessionID)
+		s.notifyInvitation("invitation_expired", inv)
+	})
+
+	if !slotStarted {
+		// inv still carries status 'invited', which the decision log records as the reason.
+		_, err := t.findAndInviteReplacement(inv.vacated())
+		return err
+	}
+	return nil
 }
