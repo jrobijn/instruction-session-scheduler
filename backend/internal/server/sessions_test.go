@@ -222,9 +222,19 @@ func TestChangeSessionTimetable(t *testing.T) {
 
 func TestDeleteSession(t *testing.T) {
 	f, _ := invitedPair(t)
+	before := len(f.rows("SELECT 1 FROM invitations"))
+	for _, status := range []string{"scheduled", "invitations_sent", "completed", "cancelled"} {
+		f.exec("UPDATE training_sessions SET status = ?", status)
+		f.admin(http.MethodDelete, sessionPath(f.sessionID), nil).wantError(http.StatusBadRequest, "Only draft sessions can be deleted")
+	}
+	if n := len(f.rows("SELECT 1 FROM invitations")); n != before {
+		t.Fatalf("%d invitations after rejected deletes, want %d", n, before)
+	}
+
+	f.exec("UPDATE training_sessions SET status = 'draft'")
 	f.admin(http.MethodDelete, sessionPath(f.sessionID), nil).status(http.StatusOK)
-	if n := len(f.rows("SELECT 1 FROM invitations")); n != 0 {
-		t.Fatalf("%d invitations survive the session", n)
+	if n := len(f.rows("SELECT 1 FROM training_sessions")); n != 0 {
+		t.Fatalf("%d sessions after delete, want 0", n)
 	}
 	f.admin(http.MethodDelete, sessionPath(f.sessionID), nil).wantError(http.StatusNotFound, "Training session not found")
 }

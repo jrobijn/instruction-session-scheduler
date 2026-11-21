@@ -329,13 +329,22 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
 		}
-		res, err := s.db.Exec("DELETE FROM training_sessions WHERE id = ?", id)
+		session, found, err := getSession(s.db, id)
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
+		if !found {
 			httpx.Error(w, http.StatusNotFound, "Training session not found")
 			return nil
+		}
+		// Invitations cascade away with the session, without emails, timers or history, so
+		// only drafts (which have none) may be deleted; other sessions must be cancelled.
+		if session.Status != "draft" {
+			httpx.Error(w, http.StatusBadRequest, "Only draft sessions can be deleted")
+			return nil
+		}
+		if _, err := s.db.Exec("DELETE FROM training_sessions WHERE id = ?", id); err != nil {
+			return err
 		}
 		httpx.Success(w)
 		return nil
