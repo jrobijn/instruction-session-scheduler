@@ -43,7 +43,6 @@ interface Invitation {
   id: number;
   student_id: number;
   student_name: string;
-  student_email: string;
   student_membership_id: string;
   instructor_id: number;
   instructor_name: string;
@@ -56,7 +55,6 @@ interface Invitation {
   no_show: number;
   group_name: string | null;
   group_color: string | null;
-  invited_at: string | null;
   expires_at: string | null;
   buddy_group_id: number | null;
   buddy_group_name: string | null;

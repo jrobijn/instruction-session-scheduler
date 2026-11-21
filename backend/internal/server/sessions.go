@@ -30,7 +30,6 @@ type SessionInvitation struct {
 	ID                     int64   `db:"id" json:"id"`
 	StudentID              int64   `db:"student_id" json:"student_id"`
 	StudentName            string  `db:"student_name" json:"student_name"`
-	StudentEmail           string  `db:"student_email" json:"student_email"`
 	StudentMembershipID    string  `db:"student_membership_id" json:"student_membership_id"`
 	InstructorID           int64   `db:"instructor_id" json:"instructor_id"`
 	InstructorName         string  `db:"instructor_name" json:"instructor_name"`
@@ -43,7 +42,7 @@ type SessionInvitation struct {
 	NoShow                 int64   `db:"no_show" json:"no_show"`
 	GroupName              *string `db:"group_name" json:"group_name"`
 	GroupColor             *string `db:"group_color" json:"group_color"`
-	InvitedAt              string  `db:"invited_at" json:"invited_at"`
+	InvitedAt              string  `db:"invited_at" json:"-"`              // for the effective status and expiry
 	DecisionLog            *string `db:"decision_log" json:"decision_log"` // JSON, see batchLog and replacementLog
 	BuddyGroupID           *int64  `db:"buddy_group_id" json:"buddy_group_id"`
 	BuddyGroupName         *string `db:"buddy_group_name" json:"buddy_group_name"` // members' first names
@@ -131,7 +130,7 @@ func (s *Server) sessionRoutes() {
 
 		if detail.Invitations, err = db.Many[SessionInvitation](s.db, `
 			SELECT inv.id, inv.student_id,
-				s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.membership_id AS student_membership_id,
+				s.first_name || ' ' || s.last_name AS student_name, s.membership_id AS student_membership_id,
 				ss.instructor_id, i.first_name || ' ' || i.last_name AS instructor_name,
 				d.name AS discipline_name, d.abbreviation AS discipline_abbreviation,
 				inv.status, inv.token, inv.timeslot_id, ts.start_time AS timeslot_start_time, inv.no_show,
