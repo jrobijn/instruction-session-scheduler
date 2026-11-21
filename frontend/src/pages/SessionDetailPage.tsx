@@ -209,14 +209,6 @@ export default function SessionDetailPage() {
       });
     });
 
-    es.addEventListener('invitation_added', (e) => {
-      const data = JSON.parse(e.data);
-      setSession(prev => {
-        if (!prev) return prev;
-        return { ...prev, invitations: [...prev.invitations, data] };
-      });
-    });
-
     es.addEventListener('session_updated', (e) => {
       const data = JSON.parse(e.data);
       setSession(prev => prev ? { ...prev, ...data } : prev);

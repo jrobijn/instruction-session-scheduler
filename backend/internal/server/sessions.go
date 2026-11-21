@@ -4,7 +4,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -50,69 +49,8 @@ type SessionInvitation struct {
 	BuddyGroupName         *string `db:"buddy_group_name" json:"buddy_group_name"` // members' first names
 	SessionDate            string  `db:"session_date" json:"-"`                    // for the effective status and expiry
 
-	// Computed in applyTiming.
+	// Computed in GET /api/sessions/{id}.
 	ExpiresAt *string `db:"-" json:"expires_at"` // only while the invitation is open
-}
-
-// applyTiming replaces the stored status with the effective status and fills in the expiry
-// deadline. This stays in Go because it depends on the club's time zone and the current time.
-func (inv *SessionInvitation) applyTiming(minutes float64, loc *time.Location, now time.Time) {
-	timing := invitationTiming{Status: inv.Status, InvitedAt: inv.InvitedAt, SessionDate: inv.SessionDate, StartTime: inv.TimeslotStartTime}
-	inv.Status = effectiveStatus(timing, minutes, loc, now)
-	// Like GET /api/invitations/{token}: a deadline only while the invitation is still open.
-	if inv.Status == "invited" {
-		inv.ExpiresAt = expiresAtISO(timing, minutes, loc)
-	}
-}
-
-// selectSessionInvitations selects SessionInvitation rows; the queries below append a fixed
-// WHERE clause over inv (invitations), tsess (training_sessions), s (students), ts (timeslots),
-// ss (session_slots), i (instructors), d (disciplines), g (groups) and bgm (buddy_group_members).
-const selectSessionInvitations = `
-	SELECT inv.id, inv.student_id,
-		s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.membership_id AS student_membership_id,
-		ss.instructor_id, i.first_name || ' ' || i.last_name AS instructor_name,
-		d.name AS discipline_name, d.abbreviation AS discipline_abbreviation,
-		inv.status, inv.token, inv.timeslot_id, ts.start_time AS timeslot_start_time, inv.no_show,
-		g.name AS group_name, g.color AS group_color, inv.invited_at, inv.decision_log, bgm.buddy_group_id,
-		(SELECT NULLIF(group_concat(bs.first_name, ' & '), '')
-			FROM buddy_group_members bm JOIN students bs ON bs.id = bm.student_id
-			WHERE bm.buddy_group_id = bgm.buddy_group_id AND bs.deleted_at IS NULL) AS buddy_group_name,
-		tsess.date AS session_date
-	FROM invitations inv
-	JOIN training_sessions tsess ON tsess.id = inv.session_id
-	JOIN students s ON s.id = inv.student_id
-	JOIN timeslots ts ON ts.id = inv.timeslot_id
-	JOIN session_slots ss ON ss.id = inv.slot_id
-	JOIN instructors i ON i.id = ss.instructor_id
-	LEFT JOIN disciplines d ON d.id = inv.discipline_id
-	LEFT JOIN groups g ON g.id = inv.group_id
-	LEFT JOIN buddy_group_members bgm ON bgm.student_id = inv.student_id`
-
-// sessionInvitations lists all invitations of the session, ordered by timeslot and instructor.
-func (s *Server) sessionInvitations(sessionID int64) ([]SessionInvitation, error) {
-	invitations, err := db.Many[SessionInvitation](s.db, selectSessionInvitations+`
-		WHERE inv.session_id = ?
-		ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC, inv.id ASC`, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	minutes, loc, now := expiryMinutes(s.db), clubLocation(s.db), nowFunc()
-	for i := range invitations {
-		invitations[i].applyTiming(minutes, loc, now)
-	}
-	return invitations, nil
-}
-
-// sessionInvitationByID loads the invitation with the given id.
-func (s *Server) sessionInvitationByID(invitationID int64) (SessionInvitation, bool, error) {
-	inv, found, err := db.One[SessionInvitation](s.db, selectSessionInvitations+`
-		WHERE inv.id = ?`, invitationID)
-	if err != nil || !found {
-		return inv, found, err
-	}
-	inv.applyTiming(expiryMinutes(s.db), clubLocation(s.db), nowFunc())
-	return inv, true, nil
 }
 
 // Session routes (schedule generation lives in schedule.go).
@@ -191,10 +129,43 @@ func (s *Server) sessionRoutes() {
 			}
 		}
 
-		if detail.Invitations, err = s.sessionInvitations(id); err != nil {
+		if detail.Invitations, err = db.Many[SessionInvitation](s.db, `
+			SELECT inv.id, inv.student_id,
+				s.first_name || ' ' || s.last_name AS student_name, s.email AS student_email, s.membership_id AS student_membership_id,
+				ss.instructor_id, i.first_name || ' ' || i.last_name AS instructor_name,
+				d.name AS discipline_name, d.abbreviation AS discipline_abbreviation,
+				inv.status, inv.token, inv.timeslot_id, ts.start_time AS timeslot_start_time, inv.no_show,
+				g.name AS group_name, g.color AS group_color, inv.invited_at, inv.decision_log, bgm.buddy_group_id,
+				(SELECT NULLIF(group_concat(bs.first_name, ' & '), '')
+					FROM buddy_group_members bm JOIN students bs ON bs.id = bm.student_id
+					WHERE bm.buddy_group_id = bgm.buddy_group_id AND bs.deleted_at IS NULL) AS buddy_group_name,
+				tsess.date AS session_date
+			FROM invitations inv
+			JOIN training_sessions tsess ON tsess.id = inv.session_id
+			JOIN students s ON s.id = inv.student_id
+			JOIN timeslots ts ON ts.id = inv.timeslot_id
+			JOIN session_slots ss ON ss.id = inv.slot_id
+			JOIN instructors i ON i.id = ss.instructor_id
+			LEFT JOIN disciplines d ON d.id = inv.discipline_id
+			LEFT JOIN groups g ON g.id = inv.group_id
+			LEFT JOIN buddy_group_members bgm ON bgm.student_id = inv.student_id
+			WHERE inv.session_id = ?
+			ORDER BY ts.start_time ASC, i.last_name ASC, i.first_name ASC, inv.id ASC`, id); err != nil {
 			return err
 		}
-		detail.InvitationExpiryMinutes = expiryMinutes(s.db)
+		// The effective status and expiry deadline depend on the club's time zone and the
+		// current time, so they are computed here rather than in SQL.
+		minutes, loc, now := expiryMinutes(s.db), clubLocation(s.db), nowFunc()
+		for i := range detail.Invitations {
+			inv := &detail.Invitations[i]
+			timing := invitationTiming{Status: inv.Status, InvitedAt: inv.InvitedAt, SessionDate: inv.SessionDate, StartTime: inv.TimeslotStartTime}
+			inv.Status = effectiveStatus(timing, minutes, loc, now)
+			// Like GET /api/invitations/{token}: a deadline only while the invitation is still open.
+			if inv.Status == "invited" {
+				inv.ExpiresAt = expiresAtISO(timing, minutes, loc)
+			}
+		}
+		detail.InvitationExpiryMinutes = minutes
 		httpx.OK(w, detail)
 		return nil
 	})

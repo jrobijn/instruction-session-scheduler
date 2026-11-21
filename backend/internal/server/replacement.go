@@ -4,7 +4,6 @@ package server
 // to the next student in line.
 
 import (
-	"log"
 	mrand "math/rand/v2"
 
 	"github.com/google/uuid"
@@ -150,12 +149,7 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	}
 
 	t.afterCommit(func(s *Server) {
-		added, found, err := s.sessionInvitationByID(newID)
-		if err != nil {
-			log.Printf("broadcast replacement invitation %d: %v", newID, err)
-		} else if found {
-			s.hub.Broadcast(sessionChannel(sessionID), "invitation_added", added)
-		}
+		s.broadcastSessionReload(sessionID)
 		s.broadcastSessionCounts(sessionID)
 	})
 
