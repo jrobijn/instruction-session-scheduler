@@ -564,7 +564,11 @@ func (s *Server) groupRoutes() {
 			return nil
 		}
 		like := "%" + q + "%"
-		students, err := db.Many[StudentSearchResult](s.db, `
+		type searchResult struct {
+			StudentRef
+			CurrentGroupName *string `db:"current_group_name" json:"current_group_name"`
+		}
+		students, err := db.Many[searchResult](s.db, `
 			SELECT s.id, s.first_name, s.last_name, s.email,
 				(SELECT g.name FROM student_groups sg JOIN groups g ON g.id = sg.group_id WHERE sg.student_id = s.id) AS current_group_name
 			FROM students s

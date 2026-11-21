@@ -63,39 +63,12 @@ type StudentGroup struct {
 	Color string `db:"color" json:"color"`
 }
 
-// StudentInvitation is an upcoming invitation of a student.
-type StudentInvitation struct {
-	ID          int64  `db:"id" json:"id"`
-	Status      string `db:"status" json:"status"`
-	SessionDate string `db:"session_date" json:"session_date"`
-	StartTime   string `db:"start_time" json:"start_time"`
-}
-
-// InvitationHistoryEntry is any past or upcoming invitation of a student.
-type InvitationHistoryEntry struct {
-	ID             int64   `db:"id" json:"id"`
-	Status         string  `db:"status" json:"status"`
-	InvitedAt      string  `db:"invited_at" json:"invited_at"`
-	RespondedAt    *string `db:"responded_at" json:"responded_at"`
-	SessionDate    string  `db:"session_date" json:"session_date"`
-	StartTime      string  `db:"start_time" json:"start_time"`
-	DisciplineName *string `db:"discipline_name" json:"discipline_name"`
-	GroupName      *string `db:"group_name" json:"group_name"`
-	GroupColor     *string `db:"group_color" json:"group_color"`
-}
-
 // StudentRef identifies a student in search results.
 type StudentRef struct {
 	ID        int64  `db:"id" json:"id"`
 	FirstName string `db:"first_name" json:"first_name"`
 	LastName  string `db:"last_name" json:"last_name"`
 	Email     string `db:"email" json:"email"`
-}
-
-// StudentSearchResult is a student found when adding members to a group.
-type StudentSearchResult struct {
-	StudentRef
-	CurrentGroupName *string `db:"current_group_name" json:"current_group_name"`
 }
 
 func (s *Server) studentRoutes() {
@@ -124,7 +97,7 @@ func (s *Server) studentRoutes() {
 			StudentID    int64 `db:"student_id"`
 			BuddyGroupID int64 `db:"buddy_group_id"`
 		}
-		buddyMemberships, err := db.Many[buddyMembership](s.db, "SELECT student_id, buddy_group_id FROM buddy_group_members")
+		buddyMemberships, err := db.Many[buddyMembership](s.db, "SELECT student_id, buddy_group_id FROM buddy_group_members ORDER BY rowid")
 		if err != nil {
 			return err
 		}
@@ -201,7 +174,10 @@ func (s *Server) studentRoutes() {
 
 				// Optional columns stay nil when blank, which keeps the current value. A number
 				// column holding anything but a whole number makes the row an error.
-				var opt importOptional
+				var opt struct {
+					AttendedSessions, NoShowCount, Active *int
+					PreferredDays                         *string
+				}
 				invalid := ""
 				for _, f := range []struct {
 					col string
@@ -230,13 +206,49 @@ func (s *Server) studentRoutes() {
 					opt.PreferredDays = &d
 				}
 
-				err := importStudentRow(tx, first, last, email, membershipID, opt, defaultGroup)
-				if isUniqueErr(err, "students.email") { // the email belongs to a deleted student
-					result.skip(row, "A student with this email already exists")
-					continue
+				// Update the student with this email, or insert a new one. Blank optional columns
+				// keep the existing student's value, or the column default for a new student.
+				existing, found, err := db.One[int64](tx, "SELECT id FROM students WHERE email = ? AND deleted_at IS NULL", email)
+				if err != nil {
+					return err
+				}
+				studentID := existing
+				if found {
+					_, err = tx.Exec(`
+						UPDATE students SET first_name = ?, last_name = ?, membership_id = ?,
+							attended_sessions = COALESCE(?, attended_sessions),
+							no_show_count = COALESCE(?, no_show_count),
+							active = COALESCE(?, active),
+							preferred_days = COALESCE(?, preferred_days)
+						WHERE id = ?`,
+						first, last, membershipID, opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, existing)
+				} else {
+					// The fallbacks match the students column defaults.
+					studentID, err = db.Get[int64](tx, `
+						INSERT INTO students (first_name, last_name, email, membership_id,
+							attended_sessions, no_show_count, active, preferred_days)
+						VALUES (?, ?, ?, ?, COALESCE(?, 0), COALESCE(?, 0), COALESCE(?, 1), COALESCE(?, ?))
+						RETURNING id`,
+						first, last, email, membershipID,
+						opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, everyDay)
+					if isUniqueErr(err, "students.email") { // the email belongs to a deleted student
+						result.skip(row, "A student with this email already exists")
+						continue
+					}
 				}
 				if err != nil {
 					return err
+				}
+
+				// Put the student in the default group (if any) when they have no group yet.
+				if defaultGroup != 0 {
+					if _, err := tx.Exec(`
+						INSERT INTO student_groups (student_id, group_id, joined_at)
+						SELECT ?, ?, datetime('now')
+						WHERE NOT EXISTS (SELECT 1 FROM student_groups WHERE student_id = ?)`,
+						studentID, defaultGroup, studentID); err != nil {
+						return err
+					}
 				}
 				result.Imported++
 			}
@@ -281,7 +293,13 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
-		invitations, err := db.Many[StudentInvitation](s.db, `
+		type invitation struct {
+			ID          int64  `db:"id" json:"id"`
+			Status      string `db:"status" json:"status"`
+			SessionDate string `db:"session_date" json:"session_date"`
+			StartTime   string `db:"start_time" json:"start_time"`
+		}
+		invitations, err := db.Many[invitation](s.db, `
 			SELECT i.id, i.status, ts.date AS session_date, tsl.start_time
 			FROM invitations i
 			JOIN training_sessions ts ON ts.id = i.session_id
@@ -310,7 +328,18 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
-		invitations, err := db.Many[InvitationHistoryEntry](s.db, `
+		type historyEntry struct {
+			ID             int64   `db:"id" json:"id"`
+			Status         string  `db:"status" json:"status"`
+			InvitedAt      string  `db:"invited_at" json:"invited_at"`
+			RespondedAt    *string `db:"responded_at" json:"responded_at"`
+			SessionDate    string  `db:"session_date" json:"session_date"`
+			StartTime      string  `db:"start_time" json:"start_time"`
+			DisciplineName *string `db:"discipline_name" json:"discipline_name"`
+			GroupName      *string `db:"group_name" json:"group_name"`
+			GroupColor     *string `db:"group_color" json:"group_color"`
+		}
+		invitations, err := db.Many[historyEntry](s.db, `
 			SELECT i.id, i.status, i.invited_at, i.responded_at,
 				ts.date AS session_date, tsl.start_time,
 				d.name AS discipline_name,
@@ -564,15 +593,11 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
-		allIDs := make(map[int64]bool, len(all))
-		for _, id := range all {
-			allIDs[id] = true
-		}
 		// Keep only ids of this timetable's timeslots, once each, in the order sent.
 		var selected []int64
 		seen := map[int64]bool{}
 		for _, tsID := range in.TimeslotIDs {
-			if allIDs[tsID] && !seen[tsID] {
+			if slices.Contains(all, tsID) && !seen[tsID] {
 				seen[tsID] = true
 				selected = append(selected, tsID)
 			}
@@ -582,7 +607,7 @@ func (s *Server) studentRoutes() {
 				return err
 			}
 			// Selecting every timeslot is stored as no preference (= all).
-			if len(selected) >= len(allIDs) {
+			if len(selected) == len(all) {
 				return nil
 			}
 			for _, tsID := range selected {
@@ -715,7 +740,13 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
-		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
+		// End the cooldown now rather than erasing it, so its end still counts for the queue position.
+		row, found, err := db.One[Student](s.db, `
+			UPDATE students
+			SET cooldown_until = CASE WHEN cooldown_until > datetime('now') THEN datetime('now') ELSE cooldown_until END
+			WHERE id = ? AND deleted_at IS NULL
+			RETURNING id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
+				preferred_days, active, cooldown_until`, id)
 		if err != nil {
 			return err
 		}
@@ -723,70 +754,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
-		// End the cooldown now rather than erasing it, so its end still counts for the queue position.
-		if _, err := s.db.Exec("UPDATE students SET cooldown_until = datetime('now') WHERE id = ? AND cooldown_until > datetime('now')", id); err != nil {
-			return err
-		}
-		row, err := db.Get[Student](s.db, `
-			SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
-				preferred_days, active, cooldown_until
-			FROM students WHERE id = ?`, id)
-		if err != nil {
-			return err
-		}
 		httpx.OK(w, row)
 		return nil
 	})
-}
-
-// importOptional holds an import row's optional columns; nil means the cell was blank.
-type importOptional struct {
-	AttendedSessions *int
-	NoShowCount      *int
-	Active           *int
-	PreferredDays    *string
-}
-
-// importStudentRow updates the student with this email, or inserts a new one, and puts them
-// in the default group (if any) when they have no group yet. Blank optional columns keep the
-// existing student's value, or the column default for a new student.
-func importStudentRow(tx *sqlx.Tx, first, last, email, membershipID string, opt importOptional, defaultGroup int64) error {
-	existing, found, err := db.One[int64](tx, "SELECT id FROM students WHERE email = ? AND deleted_at IS NULL", email)
-	if err != nil {
-		return err
-	}
-	if !found {
-		// The fallbacks match the students column defaults.
-		studentID, err := db.Get[int64](tx, `
-			INSERT INTO students (first_name, last_name, email, membership_id,
-				attended_sessions, no_show_count, active, preferred_days)
-			VALUES (?, ?, ?, ?, COALESCE(?, 0), COALESCE(?, 0), COALESCE(?, 1), COALESCE(?, ?))
-			RETURNING id`,
-			first, last, email, membershipID,
-			opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, everyDay)
-		if err != nil || defaultGroup == 0 {
-			return err
-		}
-		_, err = tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", studentID, defaultGroup)
-		return err
-	}
-
-	if _, err := tx.Exec(`
-		UPDATE students SET first_name = ?, last_name = ?, membership_id = ?,
-			attended_sessions = COALESCE(?, attended_sessions),
-			no_show_count = COALESCE(?, no_show_count),
-			active = COALESCE(?, active),
-			preferred_days = COALESCE(?, preferred_days)
-		WHERE id = ?`,
-		first, last, membershipID, opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, existing); err != nil {
-		return err
-	}
-	if defaultGroup == 0 {
-		return nil
-	}
-	if _, hasGroup, err := db.One[int](tx, "SELECT 1 FROM student_groups WHERE student_id = ?", existing); err != nil || hasGroup {
-		return err
-	}
-	_, err = tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", existing, defaultGroup)
-	return err
 }
