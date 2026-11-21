@@ -33,8 +33,8 @@ func (s *Server) notificationRoutes() {
 		}
 		offset := (page - 1) * limit
 
-		var total int64
-		if err := s.db.QueryRow("SELECT COUNT(*) FROM notifications").Scan(&total); err != nil {
+		total, err := db.Get[int64](s.db, "SELECT COUNT(*) FROM notifications")
+		if err != nil {
 			return err
 		}
 		notifications, err := db.Many[Notification](s.db, `
@@ -92,9 +92,7 @@ func (s *Server) notificationRoutes() {
 }
 
 func (s *Server) unreadCount() (int64, error) {
-	var n int64
-	err := s.db.QueryRow("SELECT COUNT(*) FROM notifications WHERE read = 0").Scan(&n)
-	return n, err
+	return db.Get[int64](s.db, "SELECT COUNT(*) FROM notifications WHERE read = 0")
 }
 
 // notifyInvitation records a notification about a student's invitation, such as invitation_confirmed.

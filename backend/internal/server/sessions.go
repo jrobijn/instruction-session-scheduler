@@ -1115,13 +1115,15 @@ func (s *Server) removeSlot(sessionID int64, slotID int64) (int, error) {
 }
 
 func (s *Server) sessionCounts(sessionID int64) (map[string]any, error) {
-	var total, confirmed int64
-	err := s.db.QueryRow(`
+	counts, err := db.Get[struct {
+		Total     int64 `db:"total"`
+		Confirmed int64 `db:"confirmed"`
+	}](s.db, `
 		SELECT
-			(SELECT COUNT(*) FROM invitations WHERE session_id = ?),
-			(SELECT COUNT(*) FROM invitations WHERE session_id = ? AND status = 'confirmed')`,
-		sessionID, sessionID).Scan(&total, &confirmed)
-	return map[string]any{"session_id": sessionID, "invitation_count": total, "confirmed_count": confirmed}, err
+			(SELECT COUNT(*) FROM invitations WHERE session_id = ?) AS total,
+			(SELECT COUNT(*) FROM invitations WHERE session_id = ? AND status = 'confirmed') AS confirmed`,
+		sessionID, sessionID)
+	return map[string]any{"session_id": sessionID, "invitation_count": counts.Total, "confirmed_count": counts.Confirmed}, err
 }
 
 func (s *Server) broadcastSessionCounts(sessionID int64) {

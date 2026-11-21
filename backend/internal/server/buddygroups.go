@@ -40,7 +40,8 @@ func (s *Server) buddyGroupRoutes() {
 
 		var groupID int64
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
-			if err := tx.QueryRow("INSERT INTO buddy_groups DEFAULT VALUES RETURNING id").Scan(&groupID); err != nil {
+			var err error
+			if groupID, err = db.Get[int64](tx, "INSERT INTO buddy_groups DEFAULT VALUES RETURNING id"); err != nil {
 				return err
 			}
 			for _, sid := range ids {

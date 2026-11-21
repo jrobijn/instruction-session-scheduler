@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -267,16 +268,23 @@ func (s *Server) invitationRoutes() {
 				return nil
 			}
 		}
+		// Loaded before confirming, so a failed lookup changes nothing.
+		var discName, discAbbr *string
+		if in.DisciplineID != nil {
+			d, found, err := s.getDiscipline(*in.DisciplineID)
+			if err != nil {
+				return err
+			}
+			if found {
+				discName, discAbbr = &d.Name, &d.Abbreviation
+			}
+		}
 
 		if _, err := s.db.Exec("UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?", in.DisciplineID, invID); err != nil {
 			return err
 		}
 		s.cancelInvitationExpiry(invID)
 
-		var discName, discAbbr *string
-		if in.DisciplineID != nil {
-			s.db.QueryRow("SELECT name, abbreviation FROM disciplines WHERE id = ?", *in.DisciplineID).Scan(&discName, &discAbbr)
-		}
 		s.broadcastSessionInvitation(sessionID, invID, map[string]any{
 			"status": "confirmed", "discipline_name": discName, "discipline_abbreviation": discAbbr,
 		})
@@ -284,8 +292,9 @@ func (s *Server) invitationRoutes() {
 		s.broadcastSessionCounts(sessionID)
 
 		s.notifyInvitation("invitation_confirmed", inv)
+		// The confirmation is saved; a failed check only costs the "session full" notification.
 		if full, err := s.sessionFull(sessionID); err != nil {
-			return err
+			log.Printf("session full %d: %v", sessionID, err)
 		} else if full {
 			s.notifySession("session_full", sessionID, inv.SessionDate)
 		}

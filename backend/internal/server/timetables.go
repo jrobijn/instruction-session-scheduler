@@ -195,8 +195,8 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Timetable is already saved")
 			return nil
 		}
-		var timeslotCount int64
-		if err := s.db.QueryRow("SELECT COUNT(*) FROM timeslots WHERE timetable_id = ?", id).Scan(&timeslotCount); err != nil {
+		timeslotCount, err := db.Get[int64](s.db, "SELECT COUNT(*) FROM timeslots WHERE timetable_id = ?", id)
+		if err != nil {
 			return err
 		}
 		if timeslotCount == 0 {
@@ -308,10 +308,10 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
-		var blocking int64
-		if err := s.db.QueryRow(`
+		blocking, err := db.Get[int64](s.db, `
 			SELECT COUNT(*) FROM training_sessions
-			WHERE timetable_id = ? AND status IN ('invitations_sent', 'completed')`, id).Scan(&blocking); err != nil {
+			WHERE timetable_id = ? AND status IN ('invitations_sent', 'completed')`, id)
+		if err != nil {
 			return err
 		}
 		if blocking > 0 {

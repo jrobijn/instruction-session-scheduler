@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"fmt"
 	"math"
 	"net/http"
@@ -186,10 +185,9 @@ func (s *Server) studentRoutes() {
 
 		result := importResult{Errors: []string{}}
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
-			var defaultGroup int64
-			switch err := tx.QueryRow("SELECT id FROM groups WHERE is_default = 1").Scan(&defaultGroup); err {
-			case nil, sql.ErrNoRows:
-			default:
+			// 0 when there is no default group.
+			defaultGroup, _, err := db.One[int64](tx, "SELECT id FROM groups WHERE is_default = 1")
+			if err != nil {
 				return err
 			}
 
@@ -365,15 +363,12 @@ func (s *Server) studentRoutes() {
 			return err
 		}
 		// Auto-add to the default group.
-		var defaultGroup int64
-		switch err := s.db.QueryRow("SELECT id FROM groups WHERE is_default = 1").Scan(&defaultGroup); err {
-		case nil:
+		if defaultGroup, found, err := db.One[int64](s.db, "SELECT id FROM groups WHERE is_default = 1"); err != nil {
+			return err
+		} else if found {
 			if _, err := s.db.Exec("INSERT OR IGNORE INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", row.ID, defaultGroup); err != nil {
 				return err
 			}
-		case sql.ErrNoRows:
-		default:
-			return err
 		}
 		httpx.JSON(w, http.StatusCreated, row)
 		return nil
@@ -752,48 +747,42 @@ type importOptional struct {
 // in the default group (if any) when they have no group yet. Blank optional columns keep the
 // existing student's value, or the column default for a new student.
 func importStudentRow(tx *sqlx.Tx, first, last, email, membershipID string, opt importOptional, defaultGroup int64) error {
-	var existing int64
-	switch err := tx.QueryRow("SELECT id FROM students WHERE email = ? AND deleted_at IS NULL", email).Scan(&existing); err {
-	case nil:
-		if _, err := tx.Exec(`
-			UPDATE students SET first_name = ?, last_name = ?, membership_id = ?,
-				attended_sessions = COALESCE(?, attended_sessions),
-				no_show_count = COALESCE(?, no_show_count),
-				active = COALESCE(?, active),
-				preferred_days = COALESCE(?, preferred_days)
-			WHERE id = ?`,
-			first, last, membershipID, opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, existing); err != nil {
-			return err
-		}
-		if defaultGroup != 0 {
-			var one int
-			switch err := tx.QueryRow("SELECT 1 FROM student_groups WHERE student_id = ?", existing).Scan(&one); err {
-			case sql.ErrNoRows:
-				_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", existing, defaultGroup)
-				return err
-			default:
-				return err
-			}
-		}
-		return nil
-	case sql.ErrNoRows:
+	existing, found, err := db.One[int64](tx, "SELECT id FROM students WHERE email = ? AND deleted_at IS NULL", email)
+	if err != nil {
+		return err
+	}
+	if !found {
 		// The fallbacks match the students column defaults.
-		var studentID int64
-		if err := tx.QueryRow(`
+		studentID, err := db.Get[int64](tx, `
 			INSERT INTO students (first_name, last_name, email, membership_id,
 				attended_sessions, no_show_count, active, preferred_days)
 			VALUES (?, ?, ?, ?, COALESCE(?, 0), COALESCE(?, 0), COALESCE(?, 1), COALESCE(?, ?))
 			RETURNING id`,
 			first, last, email, membershipID,
-			opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, everyDay).Scan(&studentID); err != nil {
+			opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, everyDay)
+		if err != nil || defaultGroup == 0 {
 			return err
 		}
-		if defaultGroup != 0 {
-			_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", studentID, defaultGroup)
-			return err
-		}
-		return nil
-	default:
+		_, err = tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", studentID, defaultGroup)
 		return err
 	}
+
+	if _, err := tx.Exec(`
+		UPDATE students SET first_name = ?, last_name = ?, membership_id = ?,
+			attended_sessions = COALESCE(?, attended_sessions),
+			no_show_count = COALESCE(?, no_show_count),
+			active = COALESCE(?, active),
+			preferred_days = COALESCE(?, preferred_days)
+		WHERE id = ?`,
+		first, last, membershipID, opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, existing); err != nil {
+		return err
+	}
+	if defaultGroup == 0 {
+		return nil
+	}
+	if _, hasGroup, err := db.One[int](tx, "SELECT 1 FROM student_groups WHERE student_id = ?", existing); err != nil || hasGroup {
+		return err
+	}
+	_, err = tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", existing, defaultGroup)
+	return err
 }

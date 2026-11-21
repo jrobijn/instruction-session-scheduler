@@ -49,8 +49,8 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		return nil
 	}
 	timetableID := *session.TimetableID
-	var instructorCount int64
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM session_slots WHERE session_id = ? AND removed = 0", sessionID).Scan(&instructorCount); err != nil {
+	instructorCount, err := db.Get[int64](s.db, "SELECT COUNT(*) FROM session_slots WHERE session_id = ? AND removed = 0", sessionID)
+	if err != nil {
 		return err
 	}
 	if instructorCount == 0 {

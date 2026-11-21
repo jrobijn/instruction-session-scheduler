@@ -35,11 +35,11 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	sessionID, sessionDate := vacated.SessionID, vacated.SessionDate
 
 	// Without a timetable no group can be invited.
-	var timetableID int64
-	s.db.QueryRow("SELECT COALESCE(timetable_id, 0) FROM training_sessions WHERE id = ?", sessionID).Scan(&timetableID)
-	if timetableID == 0 {
-		return false, nil
+	session, found, err := s.getSession(sessionID)
+	if err != nil || !found || session.TimetableID == nil {
+		return false, err
 	}
+	timetableID := *session.TimetableID
 
 	timetableGroups, err := s.timetableGroups(timetableID)
 	if err != nil {
@@ -84,11 +84,24 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	}
 	replacement := pick.Member
 
-	var replacedName, groupName, groupColor, buddyName string
-	s.db.QueryRow("SELECT first_name || ' ' || last_name FROM students WHERE id = ?", vacated.StudentID).Scan(&replacedName)
-	s.db.QueryRow("SELECT name, color FROM groups WHERE id = ?", pick.GroupID).Scan(&groupName, &groupColor)
+	// Names for the decision log; a missing row (e.g. no vacated student) leaves them empty.
+	replacedName, _, err := db.One[string](s.db, "SELECT first_name || ' ' || last_name FROM students WHERE id = ?", vacated.StudentID)
+	if err != nil {
+		return false, err
+	}
+	type groupLabel struct {
+		Name  string `db:"name"`
+		Color string `db:"color"`
+	}
+	group, _, err := db.One[groupLabel](s.db, "SELECT name, color FROM groups WHERE id = ?", pick.GroupID)
+	if err != nil {
+		return false, err
+	}
+	var buddyName string
 	if pick.PulledUpBy != 0 {
-		s.db.QueryRow("SELECT first_name || ' ' || last_name FROM students WHERE id = ?", pick.PulledUpBy).Scan(&buddyName)
+		if buddyName, _, err = db.One[string](s.db, "SELECT first_name || ' ' || last_name FROM students WHERE id = ?", pick.PulledUpBy); err != nil {
+			return false, err
+		}
 	}
 
 	var preferredTimeslots []string
@@ -114,8 +127,8 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 			InviteNext:           replacement.InviteNextPendingSince != nil,
 			CandidateRank:        pick.Rank,
 			CandidatesConsidered: pick.Considered,
-			GroupName:            groupName,
-			GroupColor:           groupColor,
+			GroupName:            group.Name,
+			GroupColor:           group.Color,
 			PreferredTimeslots:   preferredTimeslots,
 			PreferredDays:        preferredDays(replacement.PreferredDays, s.clubDays()),
 			BuddyPlacedNear:      buddyName,
@@ -125,10 +138,9 @@ func (s *Server) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 		SameGroupMatch:    pick.SameGroup,
 	})
 
-	token := uuid.NewString()
-	var newID int64
-	if err := s.db.QueryRow("INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
-		sessionID, replacement.ID, vacated.TimeslotID, vacated.SlotID, pick.GroupID, token, decisionLog).Scan(&newID); err != nil {
+	newID, err := db.Get[int64](s.db, "INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, group_id, token, decision_log) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+		sessionID, replacement.ID, vacated.TimeslotID, vacated.SlotID, pick.GroupID, uuid.NewString(), decisionLog)
+	if err != nil {
 		return false, err
 	}
 
