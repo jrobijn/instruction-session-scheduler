@@ -99,19 +99,6 @@ func effectiveStatus(inv invitationTiming, minutes float64, loc *time.Location, 
 	return "invited"
 }
 
-// invitationExpiresAt returns the deadline of an open, sent invitation in UTC, or nil.
-func invitationExpiresAt(inv invitationTiming, minutes float64, loc *time.Location) *time.Time {
-	if inv.Status != "invited" || inv.InvitedAt == "" {
-		return nil
-	}
-	d, ok := invitationDeadline(inv.InvitedAt, inv.SessionDate, inv.StartTime, minutes, loc)
-	if !ok {
-		return nil
-	}
-	d = d.UTC()
-	return &d
-}
-
 // dayOfWeek mirrors new Date(date + 'T00:00:00').getDay().
 func dayOfWeek(date string) (int, bool) {
 	d, err := time.Parse(time.DateOnly, date)

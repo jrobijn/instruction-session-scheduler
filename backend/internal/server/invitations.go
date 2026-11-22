@@ -99,7 +99,10 @@ func (s *Server) invitationRoutes() {
 		status := effectiveStatus(timing, minutes, loc, s.now())
 		var expiresAt *time.Time
 		if status == "invited" {
-			expiresAt = invitationExpiresAt(timing, minutes, loc)
+			if d, ok := invitationDeadline(timing.InvitedAt, timing.SessionDate, timing.StartTime, minutes, loc); ok {
+				d = d.UTC()
+				expiresAt = &d
+			}
 		}
 		httpx.OK(w, PublicInvitation{
 			StudentName:    inv.StudentName,

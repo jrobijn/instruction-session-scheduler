@@ -162,7 +162,10 @@ func (s *Server) sessionRoutes() {
 			inv.Status = effectiveStatus(timing, minutes, loc, now)
 			// Like GET /api/invitations/{token}: a deadline only while the invitation is still open.
 			if inv.Status == "invited" {
-				inv.ExpiresAt = invitationExpiresAt(timing, minutes, loc)
+				if d, ok := invitationDeadline(inv.InvitedAt, inv.SessionDate, inv.TimeslotStartTime, minutes, loc); ok {
+					d = d.UTC()
+					inv.ExpiresAt = &d
+				}
 			}
 		}
 		detail.InvitationExpiryMinutes = minutes
