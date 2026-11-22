@@ -43,7 +43,6 @@ interface Invitation {
   id: number;
   student_id: number;
   student_name: string;
-  student_email: string;
   student_membership_id: string;
   instructor_id: number;
   instructor_name: string;
@@ -56,7 +55,6 @@ interface Invitation {
   no_show: number;
   group_name: string | null;
   group_color: string | null;
-  invited_at: string | null;
   expires_at: string | null;
   buddy_group_id: number | null;
   buddy_group_name: string | null;
@@ -194,7 +192,7 @@ export default function SessionDetailPage() {
   // SSE: real-time updates
   useEffect(() => {
     if (!id) return;
-    const es = new EventSource(`${API_BASE}/sessions/${id}/events`, { withCredentials: true });
+    const es = new EventSource(`${API_BASE}/sessions/${id}/events`);
 
     es.addEventListener('invitation_updated', (e) => {
       const data = JSON.parse(e.data);
@@ -206,14 +204,6 @@ export default function SessionDetailPage() {
             inv.id === data.id ? { ...inv, ...data } : inv
           ),
         };
-      });
-    });
-
-    es.addEventListener('invitation_added', (e) => {
-      const data = JSON.parse(e.data);
-      setSession(prev => {
-        if (!prev) return prev;
-        return { ...prev, invitations: [...prev.invitations, data] };
       });
     });
 
@@ -343,7 +333,7 @@ export default function SessionDetailPage() {
       if (!await confirm({ title: t.timetableSection, message: t.confirmTimetableChange })) return;
     }
     try {
-      await api.updateSession(String(id), { timetable_id: newTtId });
+      await api.setSessionTimetable(String(id), newTtId);
       load();
     } catch (err: any) {
       toast(err.message);
@@ -398,7 +388,7 @@ export default function SessionDetailPage() {
     if (!await confirm({ title: t.autoScheduleLabel, message: t.confirmAutoInvite, confirmLabel: t.autoScheduleLabel })) return;
     try {
       const result = await api.autoScheduleSlot(Number(id), timeslotId, instructorId);
-      if (!result.replacement) {
+      if (!result.replaced) {
         toast(t.noReplacementFound, 'info');
       }
       load();

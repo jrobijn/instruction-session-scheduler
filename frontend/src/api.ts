@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 export { API_BASE };
 
 let authErrorCallback: (() => void) | null = null;
@@ -9,8 +9,8 @@ export function onAuthError(cb: () => void) {
 
 async function request(path: string, options: RequestInit = {}): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as Record<string, string>) };
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' });
-  if (res.status === 401 || res.status === 403) {
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (res.status === 401) {
     authErrorCallback?.();
   }
   const data = await res.json();
@@ -19,8 +19,8 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
 }
 
 async function requestCsv(path: string): Promise<string> {
-  const res = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
-  if (res.status === 401 || res.status === 403) {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (res.status === 401) {
     authErrorCallback?.();
   }
   if (!res.ok) {
@@ -64,7 +64,8 @@ export const api = {
   getSessions: () => request('/sessions'),
   getSession: (id: string) => request(`/sessions/${id}`),
   createSession: (data: { date: string; notes?: string; timetable_id?: number }) => request('/sessions', { method: 'POST', body: JSON.stringify(data) }),
-  updateSession: (id: string, data: Record<string, unknown>) => request(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateSession: (id: string, data: { date?: string; notes?: string }) => request(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  setSessionTimetable: (id: string, timetableId: number | null) => request(`/sessions/${id}/timetable`, { method: 'PUT', body: JSON.stringify({ timetable_id: timetableId }) }),
   deleteSession: (id: number) => request(`/sessions/${id}`, { method: 'DELETE' }),
   assignInstructor: (sessionId: string, instructorId: string) => request(`/sessions/${sessionId}/instructors`, { method: 'POST', body: JSON.stringify({ instructor_id: instructorId }) }),
   removeInstructor: (sessionId: string, instructorId: number) => request(`/sessions/${sessionId}/instructors/${instructorId}`, { method: 'DELETE' }),
@@ -142,7 +143,7 @@ export const api = {
 
   // Public invitation
   getInvitation: (token: string) => request(`/invitations/${token}`),
-  confirmInvitation: (token: string, disciplineId: string | null) => request(`/invitations/${token}/confirm`, { method: 'POST', body: JSON.stringify({ discipline_id: disciplineId }) }),
+  confirmInvitation: (token: string, disciplineId: number | null) => request(`/invitations/${token}/confirm`, { method: 'POST', body: JSON.stringify({ discipline_id: disciplineId }) }),
   declineInvitation: (token: string) => request(`/invitations/${token}/decline`, { method: 'POST' }),
   cancelInvitation: (token: string) => request(`/invitations/${token}/cancel`, { method: 'POST' }),
 
