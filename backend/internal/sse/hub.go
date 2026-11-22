@@ -2,6 +2,7 @@
 package sse
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,13 +15,24 @@ type client chan []byte
 type Hub struct {
 	mu      sync.Mutex
 	clients map[string]map[client]struct{}
+	ctx     context.Context // cancelled by Close
+	cancel  context.CancelFunc
 }
 
 func NewHub() *Hub {
-	return &Hub{clients: make(map[string]map[client]struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Hub{clients: make(map[string]map[client]struct{}), ctx: ctx, cancel: cancel}
 }
 
-// Serve writes SSE headers and streams events for channel until the request is cancelled.
+// Close ends every stream, current and future. http.Server.Shutdown waits for handlers to
+// return but never cancels their requests, so without this it would wait on the streams
+// until its deadline.
+func (h *Hub) Close() {
+	h.cancel()
+}
+
+// Serve writes SSE headers and streams events for channel until the request is cancelled
+// or the hub is closed.
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, channel string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -41,6 +53,8 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, channel string) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-h.ctx.Done():
 			return
 		case msg := <-c:
 			if _, err := w.Write(msg); err != nil {

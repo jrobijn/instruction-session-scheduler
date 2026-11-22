@@ -3,8 +3,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -22,28 +22,37 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run holds the body of main so that its deferred cleanup still runs on failure, which
+// log.Fatal in main would skip.
+func run() error {
 	migrateOnly := flag.Bool("migrate", false, "apply pending database migrations, then exit (the server also applies them on startup)")
 	flag.Parse()
 	cfg := config.Load()
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("open database %s: %v", cfg.DBPath, err)
+		return fmt.Errorf("open database %s: %w", cfg.DBPath, err)
 	}
 	defer database.Close()
 	if err := database.Migrate(context.Background()); err != nil {
-		log.Fatalf("migrate database %s: %v", cfg.DBPath, err)
+		return fmt.Errorf("migrate database %s: %w", cfg.DBPath, err)
 	}
 	if *migrateOnly {
 		log.Printf("database %s is up to date", cfg.DBPath)
-		return
+		return nil
 	}
 
 	mailer := email.New(email.Config{
 		Host: cfg.SMTPHost, Port: cfg.SMTPPort, User: cfg.SMTPUser, Pass: cfg.SMTPPass, From: cfg.SMTPFrom,
 		Secure: cfg.SMTPSecure, FrontendURL: cfg.FrontendURL, PreviewDir: cfg.EmailPreviewDir,
 	})
-	app := server.New(cfg, database, sse.NewHub(), mailer)
+	hub := sse.NewHub()
+	app := server.New(cfg, database, hub, mailer)
 	app.Start()
 	defer app.Stop()
 
@@ -56,19 +65,30 @@ func main() {
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
+	srv.RegisterOnShutdown(hub.Close)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	listenErr := make(chan error, 1)
 	go func() {
 		log.Printf("Server running on http://localhost:%s", cfg.Port)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen: %v", err)
-		}
+		listenErr <- srv.ListenAndServe()
 	}()
 
-	<-ctx.Done()
+	select {
+	case err := <-listenErr:
+		return fmt.Errorf("listen: %w", err)
+	case <-ctx.Done():
+	}
+	// Restore default signal handling so a second Ctrl+C kills a hanging shutdown.
+	stop()
+	log.Printf("shutting down")
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
+	}
+	return nil
 }

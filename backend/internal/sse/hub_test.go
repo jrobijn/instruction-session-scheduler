@@ -120,3 +120,22 @@ func TestBroadcastUnmarshalableDataIsDropped(t *testing.T) {
 	default:
 	}
 }
+
+func TestCloseEndsStreams(t *testing.T) {
+	h := NewHub()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.Serve(w, r, r.URL.Query().Get("channel"))
+	}))
+	defer srv.Close()
+
+	sc, cancel := subscribe(t, srv, "a")
+	defer cancel()
+	waitFor(t, func() bool { return h.subscribers("a") == 1 })
+
+	h.Close()
+	h.Close() // idempotent
+	// Scan drains the initial newline and returns false once the stream ends.
+	for sc.Scan() {
+	}
+	waitFor(t, func() bool { return h.subscribers("a") == 0 })
+}
