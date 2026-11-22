@@ -9,9 +9,9 @@ import (
 )
 
 func (e *testEnv) timerCount() int {
-	e.srv.timers.mu.Lock()
-	defer e.srv.timers.mu.Unlock()
-	return len(e.srv.timers.timers)
+	e.srv.mu.Lock()
+	defer e.srv.mu.Unlock()
+	return len(e.srv.timers)
 }
 
 // expire runs the expiry callback the way a firing timer does.

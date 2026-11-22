@@ -2,60 +2,43 @@ package server
 
 import (
 	"log"
-	"sync"
 	"time"
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 )
 
-// expiryTimers holds one timer per invited invitation. Timer callbacks take the server lock, like handlers do.
-type expiryTimers struct {
-	mu     sync.Mutex
-	timers map[int64]*time.Timer
-}
+// The timer functions below require s.mu to be held; timer callbacks take it themselves.
 
 func (s *Server) scheduleInvitationExpiry(invitationID int64, at time.Time) {
 	s.cancelInvitationExpiry(invitationID)
-	t := s.timers
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	var timer *time.Timer
 	timer = time.AfterFunc(max(0, time.Until(at)), func() {
-		t.mu.Lock()
-		current := t.timers[invitationID] == timer
-		if current {
-			delete(t.timers, invitationID)
-		}
-		t.mu.Unlock()
-		if !current { // cancelled or rescheduled after firing
-			return
-		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		// Stop can't stop a callback that already fired, so skip if this timer was
+		// cancelled or rescheduled while waiting for the lock.
+		if s.timers[invitationID] != timer {
+			return
+		}
+		delete(s.timers, invitationID)
 		if err := s.inTx(func(t *txn) error { return t.expireInvitation(invitationID) }); err != nil {
 			log.Printf("Error processing expiry for invitation %d: %v", invitationID, err)
 		}
 	})
-	t.timers[invitationID] = timer
+	s.timers[invitationID] = timer
 }
 
 func (s *Server) cancelInvitationExpiry(invitationID int64) {
-	t := s.timers
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if timer, ok := t.timers[invitationID]; ok {
+	if timer, ok := s.timers[invitationID]; ok {
 		timer.Stop()
-		delete(t.timers, invitationID)
+		delete(s.timers, invitationID)
 	}
 }
 
 func (s *Server) clearAllTimers() {
-	t := s.timers
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for id, timer := range t.timers {
+	for id, timer := range s.timers {
 		timer.Stop()
-		delete(t.timers, id)
+		delete(s.timers, id)
 	}
 }
 

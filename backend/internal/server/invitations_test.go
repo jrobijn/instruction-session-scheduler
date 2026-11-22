@@ -58,9 +58,9 @@ func (e *testEnv) notificationTypes() []string {
 }
 
 func (e *testEnv) hasTimer(invitationID int64) bool {
-	e.srv.timers.mu.Lock()
-	defer e.srv.timers.mu.Unlock()
-	_, ok := e.srv.timers.timers[invitationID]
+	e.srv.mu.Lock()
+	defer e.srv.mu.Unlock()
+	_, ok := e.srv.timers[invitationID]
 	return ok
 }
 

@@ -24,13 +24,14 @@ type Server struct {
 	hub    *sse.Hub
 	mailer *email.Mailer
 	mux    *http.ServeMux
-	timers *expiryTimers
 
 	// mu serializes request handlers and timer callbacks. Handlers do multi-statement
 	// read-modify-write sequences (capacity checks, invitation state transitions) without
 	// transactions, and timers race with handlers on the same rows; holding mu for the whole
-	// handler makes each one atomic. SSE streams do not hold it.
+	// handler makes each one atomic. SSE streams do not hold it. It also guards timers.
 	mu sync.Mutex
+	// timers holds one expiry timer per invited invitation.
+	timers map[int64]*time.Timer
 
 	// onExpirySettingsChanged is called after invitation_expiry_minutes or timezone changes,
 	// so expiry timers can be rescheduled.
@@ -41,7 +42,7 @@ func New(cfg config.Config, database *db.DB, hub *sse.Hub, mailer *email.Mailer)
 	s := &Server{
 		cfg: cfg, db: database, hub: hub, mailer: mailer,
 		mux:    http.NewServeMux(),
-		timers: &expiryTimers{timers: map[int64]*time.Timer{}},
+		timers: map[int64]*time.Timer{},
 	}
 	s.onExpirySettingsChanged = s.rehydrateTimers
 	s.routes()
@@ -57,6 +58,8 @@ func (s *Server) Start() {
 
 // Stop cancels all expiry timers.
 func (s *Server) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.clearAllTimers()
 }
 
