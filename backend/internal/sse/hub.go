@@ -85,7 +85,7 @@ func (h *Hub) Broadcast(channel, event string, data any) {
 		log.Printf("sse: marshal %s/%s: %v", channel, event, err)
 		return
 	}
-	payload := []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event, body))
+	payload := fmt.Appendf(nil, "event: %s\ndata: %s\n\n", event, body)
 	for c := range set {
 		select {
 		case c <- payload:
