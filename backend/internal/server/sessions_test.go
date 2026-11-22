@@ -121,7 +121,7 @@ func TestGetSession(t *testing.T) {
 	f.buddies(f.studentID("A"), f.studentID("B"))
 	f.exec("UPDATE invitations SET invited_at = '2030-01-01 12:30:00' WHERE student_id = ?", f.studentID("A"))
 	f.exec("UPDATE invitations SET invited_at = '2030-01-01 10:00:00' WHERE student_id = ?", f.studentID("B"))
-	pinClock(t, utc("2030-01-01 13:00:00"))
+	f.pinClock(utc("2030-01-01 13:00:00"))
 
 	got := f.admin(http.MethodGet, sessionPath(f.sessionID), nil).status(http.StatusOK).object()
 	if n := len(got["instructors"].([]any)); n != 1 {
@@ -150,7 +150,7 @@ func TestGetSession(t *testing.T) {
 	if byName["B Test"]["status"] != "expired" || byName["B Test"]["expires_at"] != nil {
 		t.Errorf("B = status %v, expires_at %v; want effective status expired", byName["B Test"]["status"], byName["B Test"]["expires_at"])
 	}
-	if byName["A Test"]["status"] != "invited" || byName["A Test"]["expires_at"] != "2030-01-01T14:30:00.000Z" {
+	if byName["A Test"]["status"] != "invited" || byName["A Test"]["expires_at"] != "2030-01-01T14:30:00Z" {
 		t.Errorf("A = status %v, expires_at %v", byName["A Test"]["status"], byName["A Test"]["expires_at"])
 	}
 

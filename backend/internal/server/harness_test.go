@@ -102,13 +102,11 @@ func (e *testEnv) mailTo(addr string) []sentEmail {
 	return out
 }
 
-// pinClock makes nowFunc return t for the rest of the test. Tests that use it must not run
-// in parallel. Timers still run on the real clock.
-func pinClock(t *testing.T, now time.Time) {
-	t.Helper()
-	prev := nowFunc
-	nowFunc = func() time.Time { return now }
-	t.Cleanup(func() { nowFunc = prev })
+// pinClock makes the server's clock return now. Timers still run on the real clock.
+func (e *testEnv) pinClock(now time.Time) {
+	e.srv.mu.Lock() // timer callbacks read the clock under mu
+	defer e.srv.mu.Unlock()
+	e.srv.now = func() time.Time { return now }
 }
 
 // --- requests ---------------------------------------------------------------------------

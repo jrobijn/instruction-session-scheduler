@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -13,6 +15,7 @@ import (
 // db.Open). Side effects get the server once the transaction has committed.
 type txn struct {
 	q     *sqlx.Tx
+	now   time.Time // the server clock when the transaction began
 	after []func(s *Server)
 }
 
@@ -25,7 +28,7 @@ func (t *txn) afterCommit(f func(s *Server)) {
 
 // inTx runs fn in a transaction and, once that has committed, the side effects fn queued.
 func (s *Server) inTx(fn func(t *txn) error) error {
-	t := &txn{}
+	t := &txn{now: s.now()}
 	err := s.db.InTx(func(tx *sqlx.Tx) error {
 		t.q = tx
 		return fn(t)

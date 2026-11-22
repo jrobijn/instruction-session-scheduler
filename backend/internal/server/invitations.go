@@ -72,16 +72,16 @@ func (i invitationDetails) vacated() vacatedSpot {
 
 // PublicInvitation is an invitation as shown to the invited student.
 type PublicInvitation struct {
-	StudentName    string  `json:"student_name"`
-	Date           string  `json:"date"`
-	StartTime      string  `json:"start_time"`
-	Notes          *string `json:"notes"`
-	Status         string  `json:"status"` // effective status, see effectiveStatus
-	SessionStatus  string  `json:"session_status"`
-	DisciplineName string  `json:"discipline_name"`
-	ClubName       string  `json:"club_name"`
-	Locale         string  `json:"locale"`
-	ExpiresAt      *string `json:"expires_at"`
+	StudentName    string     `json:"student_name"`
+	Date           string     `json:"date"`
+	StartTime      string     `json:"start_time"`
+	Notes          *string    `json:"notes"`
+	Status         string     `json:"status"` // effective status, see effectiveStatus
+	SessionStatus  string     `json:"session_status"`
+	DisciplineName string     `json:"discipline_name"`
+	ClubName       string     `json:"club_name"`
+	Locale         string     `json:"locale"`
+	ExpiresAt      *time.Time `json:"expires_at"`
 }
 
 func (s *Server) invitationRoutes() {
@@ -96,10 +96,10 @@ func (s *Server) invitationRoutes() {
 		}
 		minutes, loc := expiryMinutes(s.db), clubLocation(s.db)
 		timing := inv.timing()
-		status := effectiveStatus(timing, minutes, loc, nowFunc())
-		var expiresAt *string
+		status := effectiveStatus(timing, minutes, loc, s.now())
+		var expiresAt *time.Time
 		if status == "invited" {
-			expiresAt = expiresAtISO(timing, minutes, loc)
+			expiresAt = invitationExpiresAt(timing, minutes, loc)
 		}
 		httpx.OK(w, PublicInvitation{
 			StudentName:    inv.StudentName,
@@ -308,7 +308,7 @@ func (s *Server) broadcastInvitation(token, status string) {
 // invitationExpired reports whether an invitation stored as 'invited' can no longer be
 // answered, and if so why. The expiry timer may not have updated the stored status yet.
 func (s *Server) invitationExpired(inv invitationDetails) (reason string, expired bool) {
-	switch effectiveStatus(inv.timing(), expiryMinutes(s.db), clubLocation(s.db), nowFunc()) {
+	switch effectiveStatus(inv.timing(), expiryMinutes(s.db), clubLocation(s.db), s.now()) {
 	case "invited":
 		return "", false
 	case "invalidated":
@@ -334,7 +334,7 @@ func (t *txn) sendInvitation(invitationID int64) error {
 	if !found {
 		return fmt.Errorf("invitation %d not found", invitationID)
 	}
-	invitedAt := nowFunc().UTC().Format(time.DateTime) // the format of datetime('now')
+	invitedAt := t.now.UTC().Format(time.DateTime) // the format of datetime('now')
 	if _, err := t.q.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = ? WHERE id = ?", invitedAt, invitationID); err != nil {
 		return err
 	}
@@ -393,7 +393,7 @@ func (t *txn) expireInvitation(invitationID int64) error {
 	}
 	sessionID := inv.SessionID
 	start, ok := slotStart(inv.SessionDate, inv.StartTime, clubLocation(t.q))
-	slotStarted := ok && !nowFunc().Before(start)
+	slotStarted := ok && !t.now.Before(start)
 	newStatus := "expired"
 	if slotStarted {
 		newStatus = "invalidated"

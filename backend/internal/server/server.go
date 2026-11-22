@@ -24,6 +24,8 @@ type Server struct {
 	hub    *sse.Hub
 	mailer *email.Mailer
 	mux    *http.ServeMux
+	// now is the clock for invitation timing and "today"; tests pin it with pinClock.
+	now func() time.Time
 
 	// mu serializes request handlers and timer callbacks. Handlers do multi-statement
 	// read-modify-write sequences (capacity checks, invitation state transitions) without
@@ -42,6 +44,7 @@ func New(cfg config.Config, database *db.DB, hub *sse.Hub, mailer *email.Mailer)
 	s := &Server{
 		cfg: cfg, db: database, hub: hub, mailer: mailer,
 		mux:    http.NewServeMux(),
+		now:    time.Now,
 		timers: map[int64]*time.Timer{},
 	}
 	s.onExpirySettingsChanged = s.rehydrateTimers

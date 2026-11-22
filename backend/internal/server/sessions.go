@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -49,7 +50,7 @@ type SessionInvitation struct {
 	SessionDate            string  `db:"session_date" json:"-"`                    // for the effective status and expiry
 
 	// Computed in GET /api/sessions/{id}.
-	ExpiresAt *string `db:"-" json:"expires_at"` // only while the invitation is open
+	ExpiresAt *time.Time `db:"-" json:"expires_at"` // only while the invitation is open
 }
 
 // Session routes (schedule generation lives in schedule.go).
@@ -154,14 +155,14 @@ func (s *Server) sessionRoutes() {
 		}
 		// The effective status and expiry deadline depend on the club's time zone and the
 		// current time, so they are computed here rather than in SQL.
-		minutes, loc, now := expiryMinutes(s.db), clubLocation(s.db), nowFunc()
+		minutes, loc, now := expiryMinutes(s.db), clubLocation(s.db), s.now()
 		for i := range detail.Invitations {
 			inv := &detail.Invitations[i]
 			timing := invitationTiming{Status: inv.Status, InvitedAt: inv.InvitedAt, SessionDate: inv.SessionDate, StartTime: inv.TimeslotStartTime}
 			inv.Status = effectiveStatus(timing, minutes, loc, now)
 			// Like GET /api/invitations/{token}: a deadline only while the invitation is still open.
 			if inv.Status == "invited" {
-				inv.ExpiresAt = expiresAtISO(timing, minutes, loc)
+				inv.ExpiresAt = invitationExpiresAt(timing, minutes, loc)
 			}
 		}
 		detail.InvitationExpiryMinutes = minutes

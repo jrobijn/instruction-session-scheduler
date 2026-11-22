@@ -110,7 +110,7 @@ func TestGetInvitationShowsEffectiveStatus(t *testing.T) {
 	f, _ := invitedPair(t)
 	f.exec("UPDATE invitations SET invited_at = '2030-01-01 10:00:00'")
 
-	pinClock(t, utc("2030-01-01 13:00:00")) // 3h after invited, default expiry is 2h
+	f.pinClock(utc("2030-01-01 13:00:00")) // 3h after invited, default expiry is 2h
 	got := f.public(http.MethodGet, "/api/invitations/"+f.tokenOf("A"), nil).status(http.StatusOK).object()
 	if got["status"] != "expired" || got["expires_at"] != nil {
 		t.Fatalf("status = %v, expires_at = %v; want expired without expires_at", got["status"], got["expires_at"])
@@ -207,10 +207,10 @@ func TestInvitationActionsRefusedWhenClosed(t *testing.T) {
 		{"unknown token", nil, "", "Invitation not found"},
 		{"expired", func(t *testing.T, f *scheduleFixture) {
 			f.exec("UPDATE invitations SET invited_at = '2030-01-01 10:00:00'")
-			pinClock(t, utc("2030-01-01 12:00:01"))
+			f.pinClock(utc("2030-01-01 12:00:01"))
 		}, "confirm", "This invitation has expired"},
 		{"slot started", func(t *testing.T, f *scheduleFixture) {
-			pinClock(t, utc(sessionDate+" 17:00:00")) // 18:00 Amsterdam
+			f.pinClock(utc(sessionDate + " 17:00:00")) // 18:00 Amsterdam
 		}, "decline", "This time slot has already started"},
 		{"session completed", func(t *testing.T, f *scheduleFixture) {
 			f.exec("UPDATE training_sessions SET status = 'completed'")

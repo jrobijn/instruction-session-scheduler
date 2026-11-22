@@ -118,20 +118,20 @@ func TestEffectiveStatus(t *testing.T) {
 	}
 }
 
-func TestExpiresAtISO(t *testing.T) {
+func TestInvitationExpiresAt(t *testing.T) {
 	loc := amsterdam(t)
 	inv := invitationTiming{Status: "invited", InvitedAt: "2030-01-07 10:00:00", SessionDate: "2030-01-07", StartTime: "18:00"}
-	if got := expiresAtISO(inv, 120, loc); got == nil || *got != "2030-01-07T12:00:00.000Z" {
+	if got := invitationExpiresAt(inv, 120, loc); got == nil || !got.Equal(utc("2030-01-07 12:00:00")) {
 		t.Fatalf("got %v", got)
 	}
 	confirmed := inv
 	confirmed.Status = "confirmed"
-	if got := expiresAtISO(confirmed, 120, loc); got != nil {
+	if got := invitationExpiresAt(confirmed, 120, loc); got != nil {
 		t.Fatalf("confirmed invitation has expires_at %v", got)
 	}
 	notSent := inv
 	notSent.InvitedAt = ""
-	if got := expiresAtISO(notSent, 120, loc); got != nil {
+	if got := invitationExpiresAt(notSent, 120, loc); got != nil {
 		t.Fatalf("invitation without invited_at has expires_at %v", got)
 	}
 }

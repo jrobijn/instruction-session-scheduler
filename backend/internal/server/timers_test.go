@@ -80,7 +80,7 @@ func TestExpiryRollsBackWhenReplacementFails(t *testing.T) {
 
 func TestExpiryAfterSlotStartInvalidatesWithoutReplacement(t *testing.T) {
 	f, _ := invitedPair(t)
-	pinClock(t, utc(sessionDate+" 17:00:00")) // 18:00 in Amsterdam
+	f.pinClock(utc(sessionDate + " 17:00:00")) // 18:00 in Amsterdam
 	f.expire(toInt64(f.invitationOf("A")["id"]))
 
 	if st := f.statusOf("A"); st != "invalidated" {

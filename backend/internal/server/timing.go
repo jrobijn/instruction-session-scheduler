@@ -32,16 +32,11 @@ func clubLocation(q db.Querier) *time.Location {
 	return loc
 }
 
-// sqliteTime parses a datetime('now') value ("YYYY-MM-DD HH:MM:SS", UTC).
-func sqliteTime(v string) (time.Time, bool) {
-	t, err := time.Parse(time.DateTime, v)
-	return t, err == nil
-}
-
-// computeExpiresAt adds whole minutes to invited_at (Date#setMinutes truncates).
+// computeExpiresAt adds whole minutes to invited_at, a datetime('now') value
+// ("YYYY-MM-DD HH:MM:SS", UTC). Date#setMinutes truncates, so the minutes do too.
 func computeExpiresAt(invitedAt string, minutes float64) (time.Time, bool) {
-	t, ok := sqliteTime(invitedAt)
-	if !ok {
+	t, err := time.Parse(time.DateTime, invitedAt)
+	if err != nil {
 		return time.Time{}, false
 	}
 	return t.Add(time.Duration(math.Trunc(minutes)) * time.Minute), true
@@ -104,8 +99,8 @@ func effectiveStatus(inv invitationTiming, minutes float64, loc *time.Location, 
 	return "invited"
 }
 
-// expiresAtISO returns the deadline as toISOString() would, or nil.
-func expiresAtISO(inv invitationTiming, minutes float64, loc *time.Location) *string {
+// invitationExpiresAt returns the deadline of an open, sent invitation in UTC, or nil.
+func invitationExpiresAt(inv invitationTiming, minutes float64, loc *time.Location) *time.Time {
 	if inv.Status != "invited" || inv.InvitedAt == "" {
 		return nil
 	}
@@ -113,8 +108,8 @@ func expiresAtISO(inv invitationTiming, minutes float64, loc *time.Location) *st
 	if !ok {
 		return nil
 	}
-	iso := d.UTC().Format("2006-01-02T15:04:05.000Z")
-	return &iso
+	d = d.UTC()
+	return &d
 }
 
 // dayOfWeek mirrors new Date(date + 'T00:00:00').getDay().
@@ -125,6 +120,3 @@ func dayOfWeek(date string) (int, bool) {
 	}
 	return int(d.Weekday()), true
 }
-
-// nowFunc is the clock used for effective statuses (a variable so tests can pin it).
-var nowFunc = time.Now
