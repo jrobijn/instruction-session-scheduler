@@ -26,13 +26,25 @@ func cleanEnv(t *testing.T) string {
 
 func TestLoadDefaults(t *testing.T) {
 	cleanEnv(t)
-	c := Load()
+	t.Setenv("ADMIN_PASSWORD", "pw")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := Config{
-		Port: "3001", FrontendURL: "http://localhost:5173", JWTSecret: "change-me",
+		Port: "3001", FrontendURL: "http://localhost:5173", AdminPassword: "pw", JWTSecret: "pw",
 		DBPath: "data.db", PublicDir: "public", SMTPPort: "587",
 	}
 	if c != want {
 		t.Fatalf("defaults = %+v\nwant %+v", c, want)
+	}
+}
+
+func TestLoadRequiresAdminPassword(t *testing.T) {
+	cleanEnv(t)
+	t.Setenv("JWT_SECRET", "jwt")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load succeeded without ADMIN_PASSWORD")
 	}
 }
 
@@ -41,14 +53,20 @@ func TestLoadFromEnvironment(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", "pw")
 	t.Setenv("SMTP_SECURE", "true")
 	t.Setenv("APP_ENV", "production")
-	c := Load()
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if c.AdminPassword != "pw" || c.JWTSecret != "pw" || !c.SMTPSecure || !c.Production {
 		t.Fatalf("config = %+v (JWT secret falls back to the admin password)", c)
 	}
 	t.Setenv("JWT_SECRET", "jwt")
 	t.Setenv("SMTP_SECURE", "1")
 	t.Setenv("APP_ENV", "staging")
-	c = Load()
+	c, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if c.JWTSecret != "jwt" || c.SMTPSecure || c.Production {
 		t.Fatalf("config = %+v", c)
 	}
@@ -69,7 +87,10 @@ EMPTY=
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := Load()
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, tc := range map[string]struct{ got, want string }{
 		"admin password": {c.AdminPassword, "secret"},
 		"double quotes":  {c.FrontendURL, "http://quoted.test"},

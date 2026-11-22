@@ -32,7 +32,10 @@ func main() {
 func run() error {
 	migrateOnly := flag.Bool("migrate", false, "apply pending database migrations, then exit (the server also applies them on startup)")
 	flag.Parse()
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {

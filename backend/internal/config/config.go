@@ -3,6 +3,7 @@ package config
 
 import (
 	"bufio"
+	"errors"
 	"os"
 	"strings"
 )
@@ -27,17 +28,20 @@ type Config struct {
 }
 
 // Load reads .env (if present) without overriding variables already set, then builds a Config.
-func Load() Config {
+// It fails if ADMIN_PASSWORD is unset, since nobody could log in.
+func Load() (Config, error) {
 	loadDotEnv(".env")
 
 	adminPassword := os.Getenv("ADMIN_PASSWORD")
-	jwtSecret := firstNonEmpty(os.Getenv("JWT_SECRET"), adminPassword, "change-me")
+	if adminPassword == "" {
+		return Config{}, errors.New("ADMIN_PASSWORD is not set")
+	}
 
 	return Config{
 		Port:          firstNonEmpty(os.Getenv("PORT"), "3001"),
 		FrontendURL:   firstNonEmpty(os.Getenv("FRONTEND_URL"), "http://localhost:5173"),
 		AdminPassword: adminPassword,
-		JWTSecret:     jwtSecret,
+		JWTSecret:     firstNonEmpty(os.Getenv("JWT_SECRET"), adminPassword),
 		DBPath:        firstNonEmpty(os.Getenv("DB_PATH"), "data.db"),
 		PublicDir:     firstNonEmpty(os.Getenv("PUBLIC_DIR"), "public"),
 		Production:    os.Getenv("APP_ENV") == "production",
@@ -50,7 +54,7 @@ func Load() Config {
 		SMTPFrom:   os.Getenv("SMTP_FROM"),
 
 		EmailPreviewDir: os.Getenv("EMAIL_PREVIEW_DIR"),
-	}
+	}, nil
 }
 
 func firstNonEmpty(values ...string) string {
