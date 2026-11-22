@@ -27,6 +27,7 @@ type fakeServer struct {
 	user string
 	pass string
 	data string
+
 	// active and maxActive count simultaneous connections; messages counts deliveries.
 	active, maxActive, messages int
 	dataDelay                   time.Duration
@@ -37,6 +38,7 @@ func newFakeServer(t *testing.T, cfg *tls.Config) *fakeServer {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s := &fakeServer{ln: ln, tls: cfg}
 	t.Cleanup(func() { ln.Close() })
 	go func() {
@@ -45,9 +47,11 @@ func newFakeServer(t *testing.T, cfg *tls.Config) *fakeServer {
 			if err != nil {
 				return
 			}
+
 			go s.serve(c)
 		}
 	}()
+
 	return s
 }
 
@@ -63,10 +67,12 @@ func (s *fakeServer) serve(conn net.Conn) {
 			s.active--
 			open = false
 		}
+
 		s.mu.Unlock()
 	}
 	defer closeConn()
 	defer conn.Close()
+
 	r, w := bufio.NewReader(conn), conn
 	say := func(line string) { w.Write([]byte(line + "\r\n")) }
 	say("220 fake.test ESMTP")
@@ -76,6 +82,7 @@ func (s *fakeServer) serve(conn net.Conn) {
 		if err != nil {
 			return
 		}
+
 		cmd := strings.TrimSpace(line)
 		upper := strings.ToUpper(cmd)
 		switch {
@@ -91,6 +98,7 @@ func (s *fakeServer) serve(conn net.Conn) {
 			if err := tc.Handshake(); err != nil {
 				return
 			}
+
 			conn, tlsOn = tc, true
 			r, w = bufio.NewReader(tc), tc
 		case strings.HasPrefix(upper, "AUTH PLAIN "):
@@ -101,6 +109,7 @@ func (s *fakeServer) serve(conn net.Conn) {
 				s.user, s.pass = parts[1], parts[2]
 				s.mu.Unlock()
 			}
+
 			say("235 ok")
 		case strings.HasPrefix(upper, "MAIL"), strings.HasPrefix(upper, "RCPT"):
 			say("250 ok")
@@ -112,8 +121,10 @@ func (s *fakeServer) serve(conn net.Conn) {
 				if err != nil || l == ".\r\n" {
 					break
 				}
+
 				b.WriteString(l)
 			}
+
 			time.Sleep(s.dataDelay)
 			s.mu.Lock()
 			s.data = b.String()
@@ -135,6 +146,7 @@ func testCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "127.0.0.1"},
 		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
@@ -144,6 +156,7 @@ func testCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	cert, _ := x509.ParseCertificate(der)
 	pool := x509.NewCertPool()
 	pool.AddCert(cert)
@@ -172,8 +185,10 @@ func TestSend(t *testing.T) {
 	if err := mailerFor(srv, roots).send("student@example.test", "Uitnodiging", "text", "<p>html</p>"); err != nil {
 		t.Fatalf("send: %v", err)
 	}
+
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
+
 	if srv.user != "club@example.test" || srv.pass != "s3cret" {
 		t.Errorf("AUTH PLAIN got %q / %q", srv.user, srv.pass)
 	}
@@ -190,6 +205,7 @@ func TestBuildMessageEncodesDisplayNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, want := range []string{
 		"From: =?utf-8?q?Schietcl=C3=BCb_Zuid?= <club@example.test>\r\n",
 		`To: "John Q. Doe" <student@example.test>` + "\r\n",
@@ -211,8 +227,10 @@ func TestSendRejectsHeaderInjection(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an invalid recipient error")
 	}
+
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
+
 	if srv.messages != 0 {
 		t.Errorf("message was delivered: %q", srv.data)
 	}
@@ -232,9 +250,11 @@ func TestSendOneAtATime(t *testing.T) {
 			}
 		})
 	}
+
 	wg.Wait()
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
+
 	if srv.messages != n {
 		t.Fatalf("%d of %d emails delivered", srv.messages, n)
 	}

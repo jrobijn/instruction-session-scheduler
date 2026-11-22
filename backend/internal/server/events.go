@@ -36,6 +36,7 @@ func (s *Server) eventRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Not found")
 			return
 		}
+
 		s.hub.Serve(w, r, sessionChannel(id))
 	}))
 
@@ -52,6 +53,7 @@ func (s *Server) eventRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Not found")
 			return
 		}
+
 		s.hub.Serve(w, r, invitationChannel(token))
 	})
 }

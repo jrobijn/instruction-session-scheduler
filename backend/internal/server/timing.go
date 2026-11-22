@@ -20,6 +20,7 @@ func expiryMinutes(q db.Querier) float64 {
 	if err != nil || math.IsNaN(v) {
 		return 0
 	}
+
 	return v
 }
 
@@ -28,6 +29,7 @@ func clubLocation(q db.Querier) *time.Location {
 	if loc, err := time.LoadLocation(tz); err == nil {
 		return loc
 	}
+
 	loc, _ := time.LoadLocation(defaultTimeZone)
 	return loc
 }
@@ -39,6 +41,7 @@ func computeExpiresAt(invitedAt string, minutes float64) (time.Time, bool) {
 	if err != nil {
 		return time.Time{}, false
 	}
+
 	return t.Add(time.Duration(math.Trunc(minutes)) * time.Minute), true
 }
 
@@ -48,15 +51,18 @@ func slotStart(sessionDate, startTime string, loc *time.Location) (time.Time, bo
 	if err != nil {
 		return time.Time{}, false
 	}
+
 	hh, mm, ok := strings.Cut(startTime, ":")
 	if !ok {
 		return time.Time{}, false
 	}
+
 	h, err1 := strconv.Atoi(hh)
 	m, err2 := strconv.Atoi(mm)
 	if err1 != nil || err2 != nil {
 		return time.Time{}, false
 	}
+
 	return time.Date(d.Year(), d.Month(), d.Day(), h, m, 0, 0, loc), true
 }
 
@@ -66,12 +72,15 @@ func invitationDeadline(invitedAt, sessionDate, startTime string, minutes float6
 	if !ok {
 		return time.Time{}, false
 	}
+
 	if minutes <= 0 {
 		return start, true
 	}
+
 	if byMinutes, ok := computeExpiresAt(invitedAt, minutes); ok && byMinutes.Before(start) {
 		return byMinutes, true
 	}
+
 	return start, true
 }
 
@@ -88,14 +97,17 @@ func effectiveStatus(inv invitationTiming, minutes float64, loc *time.Location, 
 	if inv.Status != "invited" {
 		return inv.Status
 	}
+
 	if start, ok := slotStart(inv.SessionDate, inv.StartTime, loc); ok && !now.Before(start) {
 		return "invalidated"
 	}
+
 	if minutes > 0 && inv.InvitedAt != "" {
 		if exp, ok := computeExpiresAt(inv.InvitedAt, minutes); ok && now.After(exp) {
 			return "expired"
 		}
 	}
+
 	return "invited"
 }
 
@@ -105,5 +117,6 @@ func dayOfWeek(date string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
+
 	return int(d.Weekday()), true
 }

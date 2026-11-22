@@ -32,6 +32,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusNotFound, "Training session not found")
 		return nil
 	}
+
 	session, found, err := getSession(s.db, sessionID)
 	if err != nil {
 		return err
@@ -40,31 +41,38 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusNotFound, "Training session not found")
 		return nil
 	}
+
 	if session.Status != "draft" && session.Status != "scheduled" {
 		httpx.Error(w, http.StatusBadRequest, "A schedule can only be generated before invitations are sent")
 		return nil
 	}
+
 	if session.TimetableID == nil {
 		httpx.Error(w, http.StatusBadRequest, "No timetable attached to this session")
 		return nil
 	}
+
 	timetableID := *session.TimetableID
 	instructorCount, err := db.Get[int64](s.db, "SELECT COUNT(*) FROM session_slots WHERE session_id = ? AND removed = 0", sessionID)
 	if err != nil {
 		return err
 	}
+
 	if instructorCount == 0 {
 		httpx.Error(w, http.StatusBadRequest, "No instructors assigned for this session")
 		return nil
 	}
+
 	timeslots, err := timetableTimeslots(s.db, timetableID)
 	if err != nil {
 		return err
 	}
+
 	if len(timeslots) == 0 {
 		httpx.Error(w, http.StatusBadRequest, "No timeslots defined in the attached timetable")
 		return nil
 	}
+
 	totalSlots := len(timeslots) * int(instructorCount)
 
 	// Manually-added invitations (group_id IS NULL) are kept; auto-generated ones are redone.
@@ -72,6 +80,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		TimeslotID int64 `db:"timeslot_id"`
 		SlotID     int64 `db:"slot_id"`
 	}
+
 	manual, err := db.Many[manualInvitation](s.db, "SELECT timeslot_id, slot_id FROM invitations WHERE session_id = ? AND group_id IS NULL", sessionID)
 	if err != nil {
 		return err
@@ -81,14 +90,17 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return err
 	}
+
 	if len(timetableGroups) == 0 {
 		httpx.Error(w, http.StatusBadRequest, "No groups assigned to this timetable")
 		return nil
 	}
+
 	groupName, groupColor := map[int64]string{}, map[int64]string{}
 	for _, tg := range timetableGroups {
 		groupName[tg.GroupID], groupColor[tg.GroupID] = tg.GroupName, tg.GroupColor
 	}
+
 	groups := scheduling.AllocateSlots(totalSlots-len(manual), schedulingGroups(timetableGroups))
 	quotaLabel := map[int64]string{}
 	for _, g := range groups {
@@ -99,6 +111,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		ID     int64 `db:"id"`
 		SlotID int64 `db:"slot_id"`
 	}
+
 	instructors, err := db.Many[assignedInstructor](s.db, `
 		SELECT i.id, ss.id AS slot_id FROM instructors i
 		JOIN session_slots ss ON ss.instructor_id = i.id
@@ -115,6 +128,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	for _, mi := range manual {
 		taken[spotKey{mi.TimeslotID, mi.SlotID}] = true
 	}
+
 	freeSlots := make([][]int64, len(timeslots))
 	timeslotCapacity := make([]scheduling.Timeslot, len(timeslots))
 	for ti, ts := range timeslots {
@@ -123,6 +137,7 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 				freeSlots[ti] = append(freeSlots[ti], in.SlotID)
 			}
 		}
+
 		timeslotCapacity[ti] = scheduling.Timeslot{ID: ts.ID, Capacity: len(freeSlots[ti])}
 	}
 
@@ -130,10 +145,12 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return err
 	}
+
 	buddies, err := loadBuddies(s.db)
 	if err != nil {
 		return err
 	}
+
 	clubDays := clubDays(s.db)
 	loc := clubLocation(s.db)
 
@@ -150,10 +167,12 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ? AND group_id IS NOT NULL", sessionID); err != nil {
 		return err
 	}
+
 	eligible, err := eligibleQueue(tx, loc, sessionID, session.Date, timetableID)
 	if err != nil {
 		return err
 	}
+
 	if len(eligible) == 0 && len(manual) == 0 {
 		httpx.Error(w, http.StatusBadRequest, "No eligible students found. Ensure students have group memberships with access to disciplines.")
 		return nil
@@ -181,9 +200,11 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 		if !p.Overflow {
 			quota = quotaLabel[p.GroupID]
 		}
+
 		if p.PulledUpBy != nil {
 			buddyOf = p.PulledUpBy.FirstName + " " + p.PulledUpBy.LastName
 		}
+
 		decisionLog := encodeJSON(batchLog{
 			candidateLog: candidateLog{
 				Trigger:              "batch_schedule",
@@ -214,9 +235,11 @@ func (s *Server) handleGenerateSchedule(w http.ResponseWriter, r *http.Request) 
 	if _, err := tx.Exec("UPDATE training_sessions SET status = 'scheduled' WHERE id = ?", sessionID); err != nil {
 		return err
 	}
+
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+
 	s.broadcastSessionReload(sessionID)
 	s.broadcastSessionCounts(sessionID)
 

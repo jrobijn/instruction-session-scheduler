@@ -25,11 +25,14 @@ type Config struct {
 type Mailer struct {
 	cfg     Config
 	enabled bool
+
 	// sending allows one SMTP connection at a time, so a batch of invitations does not open
 	// parallel logins on the club's mail server.
 	sending sync.Mutex
+
 	// capture, when set (tests), receives every email instead of it being sent or logged.
 	capture func(to, subject, text, html string)
+
 	// rootCAs, when set (tests), replaces the system roots for verifying the SMTP server.
 	rootCAs *x509.CertPool
 }
@@ -39,6 +42,7 @@ func New(cfg Config) *Mailer {
 	if !m.enabled {
 		log.Println("⚠ SMTP not configured — emails will be logged to console instead of sent.")
 	}
+
 	return m
 }
 
@@ -55,10 +59,12 @@ func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []stri
 		m.capture(to, subject, text, htmlBody)
 		return
 	}
+
 	if !m.enabled {
 		for _, l := range previewLines {
 			log.Println(l)
 		}
+
 		if m.cfg.PreviewDir != "" {
 			if err := os.MkdirAll(m.cfg.PreviewDir, 0o755); err == nil {
 				name := fmt.Sprintf("%d-%s.html", time.Now().UnixMilli(), strings.ToLower(nonAlnum.ReplaceAllString(subject, "-")))
@@ -68,13 +74,16 @@ func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []stri
 				}
 			}
 		}
+
 		return
 	}
+
 	go func() {
 		if err := m.send(to, subject, text, htmlBody); err != nil {
 			log.Printf("email to %s (%q) failed: %v", to, subject, err)
 			return
 		}
+
 		log.Printf("Message sent to %s: %s", to, subject)
 	}()
 }
@@ -174,6 +183,7 @@ func (m *Mailer) frontendURL() string {
 	if m.cfg.FrontendURL != "" {
 		return m.cfg.FrontendURL
 	}
+
 	return "http://localhost:5173"
 }
 
@@ -181,6 +191,7 @@ func orEN(locale string) string {
 	if locale == "" {
 		return "en"
 	}
+
 	return locale
 }
 
@@ -189,6 +200,7 @@ func sessionText(s Strings, date, startTime, discipline string) string {
 	if discipline != "" {
 		t += s.DisciplineLabel + " " + discipline + "\n"
 	}
+
 	return t
 }
 
@@ -199,9 +211,11 @@ func FormatDate(date, locale string) string {
 	if err != nil {
 		return date
 	}
+
 	if locale == "nl" {
 		return fmt.Sprintf("%s %d %s %d", nlWeekdays[d.Weekday()], d.Day(), nlMonths[d.Month()-1], d.Year())
 	}
+
 	return fmt.Sprintf("%s, %d %s %d", enWeekdays[d.Weekday()], d.Day(), enMonths[d.Month()-1], d.Year())
 }
 

@@ -24,6 +24,7 @@ func migrations() fs.FS {
 	if err != nil {
 		panic(err)
 	}
+
 	return sub
 }
 
@@ -44,6 +45,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 	if current > target {
 		return fmt.Errorf("database is at migration %d but this build only knows up to %d: it was migrated by a newer version of the server", current, target)
 	}
+
 	if current == target {
 		return nil
 	}
@@ -52,6 +54,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	if hasData {
 		if current == 0 {
 			// Created before goose: 00001_init must find the final TypeScript schema, which its
@@ -60,6 +63,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 				return err
 			}
 		}
+
 		if err := d.backup(current); err != nil {
 			return err
 		}
@@ -69,6 +73,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 	for _, r := range results {
 		log.Printf("migration %s", r)
 	}
+
 	return err
 }
 
@@ -84,13 +89,16 @@ func (d *DB) backup(version int64) error {
 	if d.path == "" || d.path == ":memory:" || strings.HasPrefix(d.path, "file::memory:") {
 		return nil
 	}
+
 	dest := fmt.Sprintf("%s.bak-v%d", d.path, version)
 	if _, err := os.Stat(dest); err == nil {
 		dest = fmt.Sprintf("%s.bak-v%d-%s", d.path, version, time.Now().Format("20060102-150405"))
 	}
+
 	if _, err := d.Exec("VACUUM INTO ?", dest); err != nil {
 		return fmt.Errorf("back up database before migrating: %w", err)
 	}
+
 	log.Printf("database backed up to %s", dest)
 	return nil
 }

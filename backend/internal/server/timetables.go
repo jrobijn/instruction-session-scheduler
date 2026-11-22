@@ -60,6 +60,7 @@ func schedulingGroups(tgs []TimetableGroup) []scheduling.Group {
 	for i, tg := range tgs {
 		out[i] = scheduling.Group{ID: tg.GroupID, Percentage: float64(tg.Percentage)}
 	}
+
 	return out
 }
 
@@ -69,6 +70,7 @@ func (s *Server) timetableRoutes() {
 			Timetable
 			TimeslotCount int64 `db:"timeslot_count" json:"timeslot_count"`
 		}
+
 		timetables, err := db.Many[timetableWithCount](s.db, `
 			SELECT t.id, t.name, t.status, t.is_default, t.active,
 				(SELECT COUNT(*) FROM timeslots WHERE timetable_id = t.id) AS timeslot_count
@@ -77,6 +79,7 @@ func (s *Server) timetableRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, timetables)
 		return nil
 	})
@@ -87,6 +90,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		t, found, err := s.getTimetable(id)
 		if err != nil {
 			return err
@@ -95,14 +99,17 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		timeslots, err := timetableTimeslots(s.db, id)
 		if err != nil {
 			return err
 		}
+
 		groups, err := timetableGroups(s.db, id)
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, struct {
 			Timetable
 			Timeslots []Timeslot       `json:"timeslots"`
@@ -115,19 +122,23 @@ func (s *Server) timetableRoutes() {
 		type request struct {
 			Name string `json:"name"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.Name == "" {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
+
 		row, err := db.Get[Timetable](s.db, "INSERT INTO timetables (name) VALUES (?) RETURNING id, name, status, is_default, active", in.Name)
 		if err != nil {
 			return err
 		}
+
 		// Auto-assign the default group at 100%.
 		defaultGroup, found, err := db.One[int64](s.db, "SELECT id FROM groups WHERE is_default = 1")
 		if err != nil {
@@ -138,6 +149,7 @@ func (s *Server) timetableRoutes() {
 				return err
 			}
 		}
+
 		httpx.JSON(w, http.StatusCreated, row)
 		return nil
 	})
@@ -148,6 +160,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		t, found, err := s.getTimetable(id)
 		if err != nil {
 			return err
@@ -156,23 +169,28 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		type request struct {
 			Name *string `json:"name"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.Name != nil {
 			if t.Status != "draft" {
 				httpx.Error(w, http.StatusBadRequest, "Cannot edit a saved timetable")
 				return nil
 			}
+
 			if t, err = db.Get[Timetable](s.db, "UPDATE timetables SET name = ? WHERE id = ? RETURNING id, name, status, is_default, active", *in.Name, id); err != nil {
 				return err
 			}
 		}
+
 		httpx.OK(w, t)
 		return nil
 	})
@@ -183,6 +201,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		t, found, err := s.getTimetable(id)
 		if err != nil {
 			return err
@@ -191,26 +210,32 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Timetable is already saved")
 			return nil
 		}
+
 		timeslotCount, err := db.Get[int64](s.db, "SELECT COUNT(*) FROM timeslots WHERE timetable_id = ?", id)
 		if err != nil {
 			return err
 		}
+
 		if timeslotCount == 0 {
 			httpx.Error(w, http.StatusBadRequest, "Cannot save a timetable with no timeslots")
 			return nil
 		}
+
 		percentages, err := db.Many[int64](s.db, "SELECT percentage FROM timetable_groups WHERE timetable_id = ?", id)
 		if err != nil {
 			return err
 		}
+
 		if len(percentages) == 0 {
 			httpx.Error(w, http.StatusBadRequest, "At least one group must be assigned")
 			return nil
 		}
+
 		var total int64
 		for _, p := range percentages {
 			total += p
@@ -219,10 +244,12 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, fmt.Sprintf("Group percentages must add up to 100%% (currently %d%%)", total))
 			return nil
 		}
+
 		row, err := db.Get[Timetable](s.db, "UPDATE timetables SET status = 'saved' WHERE id = ? RETURNING id, name, status, is_default, active", id)
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})
@@ -233,6 +260,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		t, found, err := s.getTimetable(id)
 		if err != nil {
 			return err
@@ -241,24 +269,29 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		if t.Active == 0 {
 			httpx.Error(w, http.StatusBadRequest, "Cannot set an inactive timetable as default")
 			return nil
 		}
+
 		if t.Status != "saved" {
 			httpx.Error(w, http.StatusBadRequest, "Only saved timetables can be set as default")
 			return nil
 		}
+
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("UPDATE timetables SET is_default = 0 WHERE is_default = 1"); err != nil {
 				return err
 			}
+
 			_, err := tx.Exec("UPDATE timetables SET is_default = 1 WHERE id = ?", id)
 			return err
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -269,6 +302,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		// Deactivating clears the default flag. The right-hand sides see the
 		// pre-update row, so `active = 1` in the CASE means "being deactivated".
 		newActive, found, err := db.One[int64](s.db, `
@@ -284,6 +318,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		httpx.OK(w, map[string]any{"success": true, "active": newActive})
 		return nil
 	})
@@ -294,6 +329,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -302,16 +338,19 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		blocking, err := db.Get[int64](s.db, `
 			SELECT COUNT(*) FROM training_sessions
 			WHERE timetable_id = ? AND status IN ('invitations_sent', 'completed')`, id)
 		if err != nil {
 			return err
 		}
+
 		if blocking > 0 {
 			httpx.Error(w, http.StatusBadRequest, "Cannot delete: timetable is attached to sessions with sent invitations or completed sessions")
 			return nil
 		}
+
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			// Reset scheduled sessions that use this timetable back to draft.
 			if _, err := tx.Exec(`
@@ -323,6 +362,7 @@ func (s *Server) timetableRoutes() {
 			if _, err := tx.Exec("UPDATE training_sessions SET status = 'draft' WHERE timetable_id = ? AND status = 'scheduled'", id); err != nil {
 				return err
 			}
+
 			// Deleting the timetable cascades to its timeslots and nulls
 			// training_sessions.timetable_id (ON DELETE SET NULL).
 			_, err = tx.Exec("DELETE FROM timetables WHERE id = ?", id)
@@ -331,6 +371,7 @@ func (s *Server) timetableRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -342,32 +383,39 @@ func (s *Server) timetableRoutes() {
 				Percentage int64 `json:"percentage"`
 			} `json:"groups"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.Groups == nil {
 			httpx.Error(w, http.StatusBadRequest, "groups array is required")
 			return nil
 		}
+
 		seen := map[int64]bool{}
 		for _, g := range in.Groups {
 			if g.Percentage < 0 || g.Percentage > 100 {
 				httpx.Error(w, http.StatusBadRequest, "Group percentages must be between 0 and 100")
 				return nil
 			}
+
 			if seen[g.GroupID] {
 				httpx.Error(w, http.StatusBadRequest, "Each group can only be assigned once")
 				return nil
 			}
+
 			seen[g.GroupID] = true
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		t, found, err := s.getTimetable(id)
 		if err != nil {
 			return err
@@ -376,10 +424,12 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify groups of a saved timetable")
 			return nil
 		}
+
 		for _, g := range in.Groups {
 			if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", g.GroupID); err != nil {
 				return err
@@ -388,21 +438,25 @@ func (s *Server) timetableRoutes() {
 				return nil
 			}
 		}
+
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM timetable_groups WHERE timetable_id = ?", id); err != nil {
 				return err
 			}
+
 			for i, g := range in.Groups {
 				if _, err := tx.Exec("INSERT INTO timetable_groups (timetable_id, group_id, percentage, position) VALUES (?, ?, ?, ?)",
 					id, g.GroupID, g.Percentage, i); err != nil {
 					return err
 				}
 			}
+
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -411,20 +465,24 @@ func (s *Server) timetableRoutes() {
 		type request struct {
 			GroupIDs []int64 `json:"group_ids"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.GroupIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "group_ids array is required")
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -433,17 +491,20 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			for i, gid := range in.GroupIDs {
 				if _, err := tx.Exec("UPDATE timetable_groups SET position = ? WHERE timetable_id = ? AND group_id = ?", i, id, gid); err != nil {
 					return err
 				}
 			}
+
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -452,20 +513,24 @@ func (s *Server) timetableRoutes() {
 		type request struct {
 			StartTime string `json:"start_time"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.StartTime == "" {
 			httpx.Error(w, http.StatusBadRequest, "start_time is required")
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		t, found, err := s.getTimetable(id)
 		if err != nil {
 			return err
@@ -474,10 +539,12 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify timeslots of a saved timetable")
 			return nil
 		}
+
 		row, err := db.Get[Timeslot](s.db, "INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id, timetable_id, start_time", id, in.StartTime)
 		if isUniqueErr(err, "timeslots.timetable_id", "timeslots.start_time") {
 			httpx.Error(w, http.StatusConflict, "A timeslot with this start time already exists in this timetable")
@@ -486,6 +553,7 @@ func (s *Server) timetableRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.JSON(w, http.StatusCreated, row)
 		return nil
 	})
@@ -496,6 +564,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		t, found, err := s.getTimetable(id)
 		if err != nil {
 			return err
@@ -504,15 +573,18 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify timeslots of a saved timetable")
 			return nil
 		}
+
 		timeslotID, ok := pathID(r, "timeslotId")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Timeslot not found")
 			return nil
 		}
+
 		res, err := s.db.Exec("DELETE FROM timeslots WHERE id = ? AND timetable_id = ?", timeslotID, id)
 		if err != nil {
 			return err
@@ -521,6 +593,7 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timeslot not found")
 			return nil
 		}
+
 		httpx.Success(w)
 		return nil
 	})

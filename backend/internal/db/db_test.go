@@ -15,6 +15,7 @@ func openWithTable(t *testing.T) *DB {
 	if _, err := d.Exec("CREATE TABLE things (id INTEGER PRIMARY KEY, name TEXT, score REAL, data BLOB, parent INTEGER REFERENCES things(id))"); err != nil {
 		t.Fatal(err)
 	}
+
 	return d
 }
 
@@ -27,22 +28,27 @@ type thing struct {
 func TestMany(t *testing.T) {
 	d := openWithTable(t)
 	d.Exec("INSERT INTO things (id, name) VALUES (1, 'a'), (2, NULL)")
+
 	// Columns are matched by name, in any order.
 	rows, err := Many[thing](d, "SELECT name, id FROM things ORDER BY id")
 	if err != nil || len(rows) != 2 || rows[0].ID != 1 || *rows[0].Name != "a" || rows[1].Name != nil {
 		t.Fatalf("Many = %+v, %v", rows, err)
 	}
+
 	empty, err := Many[thing](d, "SELECT id, name FROM things WHERE id = 99")
 	if err != nil || empty == nil || len(empty) != 0 {
 		t.Fatalf("empty result = %#v, %v; want a non-nil empty slice (JSON [])", empty, err)
 	}
+
 	ids, err := Many[int64](d, "SELECT id FROM things ORDER BY id")
 	if err != nil || len(ids) != 2 || ids[1] != 2 {
 		t.Fatalf("Many[int64] = %v, %v", ids, err)
 	}
+
 	if _, err := Many[thing](d, "SELECT * FROM missing"); err == nil {
 		t.Fatal("query error not returned")
 	}
+
 	if _, err := Many[thing](d, "SELECT id, name, score FROM things"); err == nil {
 		t.Fatal("column without a struct field not reported")
 	}
@@ -55,10 +61,12 @@ func TestOne(t *testing.T) {
 	if err != nil || !found || th.ID != 1 {
 		t.Fatalf("One = %+v, %v, %v", th, found, err)
 	}
+
 	_, found, err = One[thing](d, "SELECT id, name FROM things WHERE id = 3")
 	if err != nil || found {
 		t.Fatalf("One without rows: found %v, err %v", found, err)
 	}
+
 	if _, found, err := One[thing](d, "SELECT nope"); err == nil || found {
 		t.Fatalf("query error: found %v, err %v", found, err)
 	}
@@ -70,10 +78,12 @@ func TestGet(t *testing.T) {
 	if err != nil || th.ID != 1 || *th.Name != "a" {
 		t.Fatalf("Get = %+v, %v", th, err)
 	}
+
 	// Unlike One, a missing row is an error.
 	if _, err := Get[thing](d, "UPDATE things SET name = 'b' WHERE id = 2 RETURNING id, name"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("Get without rows: err %v, want sql.ErrNoRows", err)
 	}
+
 	if _, err := Get[thing](d, "SELECT nope"); err == nil || errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("query error: err %v", err)
 	}
@@ -84,6 +94,7 @@ func TestSettingFallsBack(t *testing.T) {
 	if got := Setting(d, "x", "def"); got != "def" { // no settings table at all
 		t.Fatalf("got %q", got)
 	}
+
 	d.Exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 	d.Exec("INSERT INTO settings VALUES ('set', 'v'), ('empty', '')")
 	for key, want := range map[string]string{"set": "v", "empty": "def", "missing": "def"} {
@@ -122,14 +133,17 @@ func TestInTx(t *testing.T) {
 				t.Fatal("panic not re-raised")
 			}
 		}()
+
 		d.InTx(func(tx *sqlx.Tx) error {
 			tx.Exec("INSERT INTO things (id) VALUES (3)")
 			panic("oops")
 		})
 	}()
+
 	if count() != 1 {
 		t.Fatalf("panic did not roll back: count %d", count())
 	}
+
 	// The single connection is usable again after each of these.
 	if _, err := d.Exec("INSERT INTO things (id) VALUES (4)"); err != nil {
 		t.Fatal(err)
@@ -141,6 +155,7 @@ func TestOpenEnforcesForeignKeys(t *testing.T) {
 	if _, err := d.Exec("INSERT INTO things (id, parent) VALUES (1, 42)"); err == nil {
 		t.Fatal("foreign keys are not enforced")
 	}
+
 	var mode string
 	d.QueryRow("PRAGMA journal_mode").Scan(&mode)
 	if mode != "wal" {

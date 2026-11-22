@@ -31,6 +31,7 @@ func (e *sessionEligibility) allows(m queue.Member) bool {
 		end, err := time.Parse(time.DateTime, *m.CooldownUntil)
 		cooldownOver = err == nil && end.In(e.loc).Format(time.DateOnly) <= e.date
 	}
+
 	return m.Active != 0 &&
 		e.groups[m.GroupID] &&
 		!e.invited[m.ID] &&
@@ -53,6 +54,7 @@ func loadEligibility(q db.Querier, loc *time.Location, sessionID int64, date str
 	if err != nil {
 		return nil, err
 	}
+
 	for _, id := range groupIDs {
 		e.groups[id] = true
 	}
@@ -64,9 +66,11 @@ func loadEligibility(q db.Querier, loc *time.Location, sessionID int64, date str
 	if err != nil {
 		return nil, err
 	}
+
 	for _, id := range studentIDs {
 		e.invited[id] = true
 	}
+
 	return e, nil
 }
 
@@ -78,10 +82,12 @@ func eligibleQueue(q db.Querier, loc *time.Location, sessionID int64, date strin
 	if err != nil {
 		return nil, err
 	}
+
 	members, err := queue.LoadMembers(q)
 	if err != nil {
 		return nil, err
 	}
+
 	eligible := slices.DeleteFunc(members, func(m queue.Member) bool { return !e.allows(m) })
 	queue.Sort(eligible, sessionID)
 	return eligible, nil
@@ -96,17 +102,21 @@ func loadTimeslotPrefs(q db.Querier, timetableID int64) (timeslotPrefs, error) {
 		StudentID  int64 `db:"student_id"`
 		TimeslotID int64 `db:"timeslot_id"`
 	}
+
 	preferences, err := db.Many[preference](q, "SELECT student_id, timeslot_id FROM student_preferred_timeslots WHERE timetable_id = ?", timetableID)
 	if err != nil {
 		return nil, err
 	}
+
 	out := timeslotPrefs{}
 	for _, p := range preferences {
 		if out[p.StudentID] == nil {
 			out[p.StudentID] = map[int64]bool{}
 		}
+
 		out[p.StudentID][p.TimeslotID] = true
 	}
+
 	return out, nil
 }
 
@@ -123,11 +133,13 @@ func (p timeslotPrefs) startTimes(studentID int64, timeslots []Timeslot) []strin
 	if len(prefs) == 0 {
 		return nil
 	}
+
 	list := []string{}
 	for _, t := range timeslots {
 		if prefs[t.ID] {
 			list = append(list, t.StartTime)
 		}
 	}
+
 	return list
 }

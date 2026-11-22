@@ -12,6 +12,7 @@ func timetablePath(id int64, rest ...string) string {
 	if len(rest) > 0 {
 		p += "/" + strings.Join(rest, "/")
 	}
+
 	return p
 }
 
@@ -75,6 +76,7 @@ func TestTimetableLifecycle(t *testing.T) {
 	if len(list) != 1 || list[0]["timeslot_count"] != 1.0 {
 		t.Fatalf("timetables = %v", list)
 	}
+
 	e.admin(http.MethodGet, timetablePath(999), nil).wantError(http.StatusNotFound, "Timetable not found")
 }
 
@@ -108,6 +110,7 @@ func TestTimetableDefaultAndActive(t *testing.T) {
 	if isDefault(b) {
 		t.Fatal("inactive timetable is still the default")
 	}
+
 	e.admin(http.MethodPost, timetablePath(b, "set-default"), nil).wantError(http.StatusBadRequest, "Cannot set an inactive timetable as default")
 	if got := e.admin(http.MethodPost, timetablePath(b, "toggle-active"), nil).status(http.StatusOK).object(); got["active"] != 1.0 {
 		t.Fatalf("toggle back = %v", got)
@@ -127,9 +130,11 @@ func TestDeleteTimetable(t *testing.T) {
 			t.Errorf("session %d after timetable delete = %v", id, s)
 		}
 	}
+
 	if n := len(f.rows("SELECT 1 FROM invitations")); n != 0 {
 		t.Fatalf("%d invitations left", n)
 	}
+
 	f.admin(http.MethodDelete, timetablePath(f.timetable), nil).wantError(http.StatusNotFound, "Timetable not found")
 }
 
@@ -167,6 +172,7 @@ func TestTimetableRoutesRejectBadInput(t *testing.T) {
 	badGroups := func(msg string, entries ...map[string]any) rejected {
 		return rejected{"PUT", p("/api/timetables/%d/groups", draft), map[string]any{"groups": entries}, http.StatusBadRequest, msg}
 	}
+
 	e.wantRejected(
 		badGroups("Group percentages must be between 0 and 100",
 			map[string]any{"group_id": g, "percentage": -50}, map[string]any{"group_id": e.group("Other"), "percentage": 150}),

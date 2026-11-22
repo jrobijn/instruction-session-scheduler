@@ -24,6 +24,7 @@ type Server struct {
 	hub    *sse.Hub
 	mailer *email.Mailer
 	mux    *http.ServeMux
+
 	// now is the clock for invitation timing and "today"; tests pin it with pinClock.
 	now func() time.Time
 
@@ -32,6 +33,7 @@ type Server struct {
 	// transactions, and timers race with handlers on the same rows; holding mu for the whole
 	// handler makes each one atomic. SSE streams do not hold it. It also guards timers.
 	mu sync.Mutex
+
 	// timers holds one expiry timer per invited invitation.
 	timers map[int64]*time.Timer
 
@@ -56,6 +58,7 @@ func New(cfg config.Config, database *db.DB, hub *sse.Hub, mailer *email.Mailer)
 func (s *Server) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.rehydrateTimers()
 }
 
@@ -63,6 +66,7 @@ func (s *Server) Start() {
 func (s *Server) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.clearAllTimers()
 }
 
@@ -96,17 +100,20 @@ func (s *Server) routes() {
 			http.NotFound(w, r)
 			return
 		}
+
 		clean := filepath.Clean("/" + r.URL.Path)
 		candidate := filepath.Join(s.cfg.PublicDir, filepath.FromSlash(clean))
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && !strings.Contains(clean, "/.") {
 			http.ServeFile(w, r, candidate)
 			return
 		}
+
 		index := filepath.Join(s.cfg.PublicDir, "index.html")
 		if _, err := os.Stat(index); err != nil {
 			http.NotFound(w, r)
 			return
 		}
+
 		http.ServeFile(w, r, index)
 	})
 }
@@ -119,10 +126,12 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 			httpx.Error(w, http.StatusUnauthorized, "Authentication required")
 			return
 		}
+
 		if _, err := auth.Verify(s.cfg.JWTSecret, c.Value); err != nil {
 			httpx.Error(w, http.StatusUnauthorized, "Invalid or expired token")
 			return
 		}
+
 		next(w, r)
 	}
 }
@@ -137,6 +146,7 @@ func (s *Server) wrap(fn handlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+
 		if err := fn(w, r); err != nil {
 			s.internalError(w, err)
 		}

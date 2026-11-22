@@ -15,6 +15,7 @@ func TestSelectWithBuddies(t *testing.T) {
 		for _, m := range ms {
 			out = append(out, m.ID)
 		}
+
 		return out
 	}
 

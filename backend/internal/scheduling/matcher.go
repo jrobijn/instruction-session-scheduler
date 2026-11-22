@@ -33,6 +33,7 @@ func (m *matcher) totalCapacity() int {
 	for _, ts := range m.timeslots {
 		total += ts.Capacity
 	}
+
 	return total
 }
 
@@ -41,12 +42,14 @@ func (m *matcher) allowedTimeslots(sid int64) []int {
 	if a, ok := m.allowed[sid]; ok {
 		return a
 	}
+
 	a := []int{}
 	for i, ts := range m.timeslots {
 		if m.allows(sid, ts.ID) {
 			a = append(a, i)
 		}
 	}
+
 	m.allowed[sid] = a
 	return a
 }
@@ -71,12 +74,15 @@ func (m *matcher) orderedTimeslots(sid int64, near int) []int {
 	if near < 0 {
 		return allowed
 	}
+
 	out := slices.Clone(allowed)
 	abs := func(x int) int { return max(x, -x) }
+
 	// allowed is ascending, so the stable sort keeps the earlier timeslot first on ties.
 	sort.SliceStable(out, func(i, j int) bool {
 		return abs(out[i]-near) < abs(out[j]-near)
 	})
+
 	return out
 }
 
@@ -90,10 +96,12 @@ func (m *matcher) tryPlace(sid int64, order []int, visited map[int]bool) bool {
 			return true
 		}
 	}
+
 	for _, ti := range order {
 		if visited[ti] {
 			continue
 		}
+
 		visited[ti] = true
 		for _, other := range m.movable(sid, ti) {
 			if other != sid && m.tryPlace(other, m.orderedTimeslots(other, ti), visited) {
@@ -102,6 +110,7 @@ func (m *matcher) tryPlace(sid int64, order []int, visited map[int]bool) bool {
 			}
 		}
 	}
+
 	return false
 }
 
@@ -119,6 +128,7 @@ func (m *matcher) put(sid int64, ti int) {
 	if prev, ok := m.placed[sid]; ok {
 		m.occupants[prev] = slices.DeleteFunc(m.occupants[prev], func(x int64) bool { return x == sid })
 	}
+
 	m.occupants[ti] = append(m.occupants[ti], sid)
 	m.placed[sid] = ti
 }

@@ -22,6 +22,7 @@ func TestInstructorCRUD(t *testing.T) {
 	if got["first_name"] != "Ada" || got["last_name"] != "Zed" {
 		t.Fatalf("updated = %v", got)
 	}
+
 	e.admin(http.MethodPut, fmt.Sprintf("/api/instructors/%d", id), map[string]any{"email": fmt.Sprintf("instructor%d@example.test", 1)}).
 		wantError(http.StatusConflict, "An instructor with this email already exists")
 
@@ -54,11 +55,13 @@ func TestDeleteInstructorRemovesThemFromSessions(t *testing.T) {
 	for _, n := range []string{"A", "B", "C", "D"} {
 		f.student(n, g)
 	}
+
 	f.sendInvitations() // each instructor has two invited students
 	gone, stays := f.instructorOfSlot(f.slots[0]), f.instructorOfSlot(f.slots[1])
 	onSlot := func(slot int64) []map[string]any {
 		return f.rows("SELECT inv.*, s.email FROM invitations inv JOIN students s ON s.id = inv.student_id WHERE inv.slot_id = ?", slot)
 	}
+
 	goneInvs := onSlot(f.slots[0])
 	f.invitationAction(f.row("SELECT first_name FROM students WHERE id = ?", goneInvs[0]["student_id"])["first_name"].(string), "confirm", map[string]any{}).
 		status(http.StatusOK)
@@ -79,10 +82,12 @@ func TestDeleteInstructorRemovesThemFromSessions(t *testing.T) {
 	removed := func(slot int64) bool {
 		return f.row("SELECT removed FROM session_slots WHERE id = ?", slot)["removed"] == int64(1)
 	}
+
 	if !removed(f.slots[0]) || !removed(draftSlot) || removed(f.slots[1]) || removed(pastSlot) {
 		t.Fatalf("removed: session %v, draft %v, other instructor %v, completed %v",
 			removed(f.slots[0]), removed(draftSlot), removed(f.slots[1]), removed(pastSlot))
 	}
+
 	// Their invited and confirmed students are admin-cancelled and emailed...
 	for _, inv := range onSlot(f.slots[0]) {
 		if inv["status"] != "admin_cancelled" || f.hasTimer(toInt64(inv["id"])) {
@@ -92,6 +97,7 @@ func TestDeleteInstructorRemovesThemFromSessions(t *testing.T) {
 	if n := len(f.sentMail()) - mailBefore; n != 2 {
 		t.Errorf("sent %d cancellation emails, want 2", n)
 	}
+
 	// ...the unsent one is deleted, the other instructor's are untouched, history is kept.
 	if n := len(onSlot(draftSlot)); n != 0 {
 		t.Errorf("%d invitations left on the draft session slot", n)
@@ -152,10 +158,12 @@ func TestInstructorImportExport(t *testing.T) {
 	if res["imported"] != 2.0 || res["skipped"] != 1.0 {
 		t.Fatalf("import = %v", res)
 	}
+
 	body := string(e.admin(http.MethodGet, "/api/instructors/export", nil).status(http.StatusOK).Body)
 	if want := "first_name,last_name,email,active\nNew,Name,old@example.test,1\nBo,Ng,bo@example.test,1\n"; body != want {
 		t.Fatalf("export = %q", body)
 	}
+
 	e.admin(http.MethodPost, "/api/instructors/import", map[string]any{"csv": "name\nx"}).
 		wantError(http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
 }

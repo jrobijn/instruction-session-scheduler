@@ -30,6 +30,7 @@ func newScheduleFixture(t *testing.T, startTimes []string, instructors int) *sch
 	for i := range instructors {
 		f.slots = append(f.slots, e.assign(f.sessionID, e.instructor(fmt.Sprintf("Instructor%c", 'A'+i))))
 	}
+
 	return f
 }
 
@@ -60,8 +61,10 @@ func (f *scheduleFixture) placements() map[string]placement {
 		if _, dup := out[name]; dup {
 			f.t.Fatalf("%s invited twice", name)
 		}
+
 		out[name] = placement{r["start_time"].(string), toInt64(r["slot_id"])}
 	}
+
 	return out
 }
 
@@ -83,9 +86,11 @@ func (f *scheduleFixture) decisionLog(firstName string) map[string]any {
 			if err := json.Unmarshal([]byte(r["decision_log"].(string)), &log); err != nil {
 				f.t.Fatalf("decision_log of %s: %v", firstName, err)
 			}
+
 			return log
 		}
 	}
+
 	f.t.Fatalf("%s not invited", firstName)
 	return nil
 }
@@ -117,34 +122,41 @@ func TestGenerateScheduleValidation(t *testing.T) {
 		f.public(http.MethodPost, fmt.Sprintf("/api/sessions/%d/generate-schedule", f.sessionID), nil).
 			wantError(http.StatusUnauthorized, "Authentication required")
 	})
+
 	t.Run("unknown session", func(t *testing.T) {
 		e := newTestEnv(t)
 		e.admin(http.MethodPost, "/api/sessions/999/generate-schedule", nil).
 			wantError(http.StatusNotFound, "Training session not found")
 	})
+
 	t.Run("no timetable", func(t *testing.T) {
 		e := newTestEnv(t)
 		id := e.session(sessionDate, 0)
 		e.admin(http.MethodPost, fmt.Sprintf("/api/sessions/%d/generate-schedule", id), nil).
 			wantError(http.StatusBadRequest, "No timetable attached to this session")
 	})
+
 	t.Run("no instructors", func(t *testing.T) {
 		f := newScheduleFixture(t, []string{"18:00"}, 0)
 		f.generate().wantError(http.StatusBadRequest, "No instructors assigned for this session")
 	})
+
 	t.Run("removed instructors do not count", func(t *testing.T) {
 		f := newScheduleFixture(t, []string{"18:00"}, 1)
 		f.exec("UPDATE session_slots SET removed = 1")
 		f.generate().wantError(http.StatusBadRequest, "No instructors assigned for this session")
 	})
+
 	t.Run("no timeslots", func(t *testing.T) {
 		f := newScheduleFixture(t, nil, 1)
 		f.generate().wantError(http.StatusBadRequest, "No timeslots defined in the attached timetable")
 	})
+
 	t.Run("no groups", func(t *testing.T) {
 		f := newScheduleFixture(t, []string{"18:00"}, 1)
 		f.generate().wantError(http.StatusBadRequest, "No groups assigned to this timetable")
 	})
+
 	t.Run("no eligible students", func(t *testing.T) {
 		f := newScheduleFixture(t, []string{"18:00"}, 1)
 		f.groupIn("Empty", 100)
@@ -172,6 +184,7 @@ func TestGenerateScheduleFillsGridInQueueOrder(t *testing.T) {
 
 	p := f.placements()
 	wantInvited(t, p, "S1", "S2", "S3", "S4")
+
 	// Without preferences, students fill the earliest timeslot first, in queue order.
 	wantStart(t, p, "S1", "18:00")
 	wantStart(t, p, "S2", "18:00")
@@ -183,8 +196,10 @@ func TestGenerateScheduleFillsGridInQueueOrder(t *testing.T) {
 		if spots[pl] {
 			t.Fatalf("spot %+v assigned twice", pl)
 		}
+
 		spots[pl] = true
 	}
+
 	for _, r := range f.invitationRows() {
 		if r["status"] != "scheduled" || toInt64(r["group_id"]) != g {
 			t.Fatalf("invitation %v: status %v group %v, want scheduled in group %d", r["first_name"], r["status"], r["group_id"], g)
@@ -301,6 +316,7 @@ func TestGenerateScheduleEligibility(t *testing.T) {
 	f.student("OtherGroup", f.group("Elsewhere"))
 
 	f.generate().status(http.StatusOK)
+
 	// DeclinedThisSession is listed for the kept declined invitation; placements fails on a second one.
 	wantInvited(t, f.placements(), "Eligible", "CooldownOver", "CooldownEndsThatDay", "DeclinedThisSession")
 }
@@ -315,6 +331,7 @@ func TestGenerateScheduleGroupQuotas(t *testing.T) {
 	for _, n := range []string{"A1", "A2", "A3"} {
 		f.student(n, a)
 	}
+
 	for _, n := range []string{"B1", "B2", "B3"} {
 		f.student(n, b)
 	}
@@ -486,6 +503,7 @@ func TestGenerateScheduleKeepsManualInvitations(t *testing.T) {
 		if res["students_invited"] != 2.0 {
 			t.Fatalf("run %d: students_invited = %v, want 2 (manual + A)", run, res["students_invited"])
 		}
+
 		p := f.placements()
 		wantInvited(t, p, "Manual", "A")
 		wantStart(t, p, "Manual", "18:00")
@@ -505,6 +523,7 @@ func TestGenerateScheduleIsDeterministic(t *testing.T) {
 		f.student(fmt.Sprintf("A%d", i), a)
 		f.student(fmt.Sprintf("B%d", i), b)
 	}
+
 	f.exec("UPDATE student_groups SET joined_at = NULL")
 
 	f.generate().status(http.StatusOK)
@@ -512,6 +531,7 @@ func TestGenerateScheduleIsDeterministic(t *testing.T) {
 	if len(first) != 6 {
 		t.Fatalf("invited %d, want 6", len(first))
 	}
+
 	f.generate().status(http.StatusOK)
 	if second := f.placements(); !maps.Equal(first, second) {
 		t.Fatalf("regenerating changed the schedule:\n first  %v\n second %v", first, second)

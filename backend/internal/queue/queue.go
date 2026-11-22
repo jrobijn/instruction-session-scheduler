@@ -56,6 +56,7 @@ func Sort(members []Member, seed int64) {
 	for _, m := range members {
 		hashes[m.ID] = tieHash(seed, m.ID)
 	}
+
 	slices.SortFunc(members, func(a, b Member) int {
 		return cmp.Or(
 			cmp.Compare(a.QueuePosition, b.QueuePosition),

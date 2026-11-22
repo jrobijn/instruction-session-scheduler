@@ -57,10 +57,12 @@ func TestEmailHTML(t *testing.T) {
 					t.Errorf("HTML contains unescaped %q", raw)
 				}
 			}
+
 			escaped := []string{"Club &#34;A&amp;B&#34; &lt;Club&gt;", "Jan &amp; &lt;Piet&gt;"}
 			if c.name != "invitation" {
 				escaped = append(escaped, "Pistool &amp; &lt;Geweer&gt;")
 			}
+
 			for _, want := range escaped {
 				if !strings.Contains(body, want) {
 					t.Errorf("HTML lacks escaped %q", want)
@@ -78,8 +80,10 @@ func TestEmailHTML(t *testing.T) {
 				if strings.Contains(body, "/invitation/") {
 					t.Error("HTML contains an invitation link")
 				}
+
 				return
 			}
+
 			// The button and the copy-link line both link to it; the latter also shows it.
 			if n := strings.Count(body, `href="`+c.url+`"`); n != 2 {
 				t.Errorf("HTML links to %s %d times, want 2", c.url, n)

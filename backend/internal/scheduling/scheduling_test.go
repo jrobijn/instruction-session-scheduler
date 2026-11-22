@@ -40,6 +40,7 @@ func TestAllocateSlots(t *testing.T) {
 		for i, p := range tc.pcts {
 			groups[i] = Group{ID: int64(i + 1), Percentage: p}
 		}
+
 		got := AllocateSlots(tc.available, groups)
 		slots := make([]int, len(got))
 		for i, g := range got {

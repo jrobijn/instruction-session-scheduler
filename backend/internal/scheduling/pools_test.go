@@ -50,16 +50,20 @@ func TestPools(t *testing.T) {
 		for _, m := range ms {
 			out = append(out, m.ID)
 		}
+
 		return out
 	}
+
 	p := newPools([]queue.Member{{ID: 1, GroupID: 20}, {ID: 2, GroupID: 10}, {ID: 3, GroupID: 20}})
 
 	if got := ids(p.group(20)); !slices.Equal(got, []int64{1, 3}) {
 		t.Errorf("Group(20) = %v, want queue order [1 3]", got)
 	}
+
 	if got := p.group(99); got != nil {
 		t.Errorf("group(99) = %v, want nil", got)
 	}
+
 	// Uniform pick (no weights) over the groups in order of first appearance: 20, then 10.
 	if got := p.pickWeighted(nil, scripted(0.5)); got != 10 {
 		t.Errorf("pickWeighted = %d, want 10 (second group by first appearance)", got)
@@ -71,6 +75,7 @@ func TestPools(t *testing.T) {
 	if m := p.pop(10); m.ID != 2 {
 		t.Errorf("pop(10) = %d, want 2", m.ID)
 	}
+
 	// Group 10 is empty now, so only group 20 can be picked.
 	if got := p.pickWeighted(map[int64]float64{10: 100}, scripted(0.9)); got != 20 {
 		t.Errorf("pickWeighted after emptying 10 = %d, want 20", got)

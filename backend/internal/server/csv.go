@@ -38,6 +38,7 @@ func (c csvImport) has(names ...string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -48,6 +49,7 @@ func (r csvRecord) get(col string) string {
 	if !ok || i >= len(r.fields) {
 		return ""
 	}
+
 	return strings.TrimSpace(r.fields[i])
 }
 
@@ -66,16 +68,20 @@ func parseCSVImport(data string) (csvImport, error) {
 		if err != nil {
 			return in, err
 		}
+
 		if first {
 			for i, c := range rec {
 				in.cols[strings.ToLower(strings.TrimSpace(c))] = i
 			}
+
 			first = false
 			continue
 		}
+
 		if strings.TrimSpace(strings.Join(rec, "")) == "" {
 			continue
 		}
+
 		line, _ := rd.FieldPos(0)
 		in.rows = append(in.rows, csvRecord{line: line, cols: in.cols, fields: rec})
 	}
@@ -99,19 +105,24 @@ func readCSVImport(r *http.Request) (csvImport, error) {
 	type request struct {
 		CSV string `json:"csv"`
 	}
+
 	body, err := decode[request](r)
 	if err != nil {
 		return csvImport{}, err
 	}
+
 	if body.CSV == "" {
 		return csvImport{}, errors.New("CSV data is required")
 	}
+
 	in, err := parseCSVImport(body.CSV)
 	if err != nil {
 		return csvImport{}, errors.New("Invalid CSV: " + err.Error())
 	}
+
 	if len(in.rows) == 0 {
 		return csvImport{}, errors.New("CSV must have a header row and at least one data row")
 	}
+
 	return in, nil
 }

@@ -15,16 +15,19 @@ func (s *Server) scheduleInvitationExpiry(invitationID int64, at time.Time) {
 	timer = time.AfterFunc(max(0, time.Until(at)), func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+
 		// Stop can't stop a callback that already fired, so skip if this timer was
 		// cancelled or rescheduled while waiting for the lock.
 		if s.timers[invitationID] != timer {
 			return
 		}
+
 		delete(s.timers, invitationID)
 		if err := s.inTx(func(t *txn) error { return t.expireInvitation(invitationID) }); err != nil {
 			log.Printf("Error processing expiry for invitation %d: %v", invitationID, err)
 		}
 	})
+
 	s.timers[invitationID] = timer
 }
 
@@ -50,6 +53,7 @@ func (s *Server) rehydrateTimers() {
 		ID int64 `db:"id"`
 		invitationTiming
 	}
+
 	pending, err := db.Many[pendingInvitation](s.db, `
 		SELECT inv.id, inv.status, inv.invited_at, ts.date AS session_date, tslot.start_time
 		FROM invitations inv
@@ -61,10 +65,12 @@ func (s *Server) rehydrateTimers() {
 		log.Printf("rehydrate timers: %v", err)
 		return
 	}
+
 	for _, p := range pending {
 		if deadline, ok := invitationDeadline(p.InvitedAt, p.SessionDate, p.StartTime, minutes, loc); ok {
 			s.scheduleInvitationExpiry(p.ID, deadline)
 		}
 	}
+
 	log.Printf("Rehydrated %d invitation expiry timer(s)", len(pending))
 }

@@ -42,9 +42,11 @@ func run() error {
 		return fmt.Errorf("open database %s: %w", cfg.DBPath, err)
 	}
 	defer database.Close()
+
 	if err := database.Migrate(context.Background()); err != nil {
 		return fmt.Errorf("migrate database %s: %w", cfg.DBPath, err)
 	}
+
 	if *migrateOnly {
 		log.Printf("database %s is up to date", cfg.DBPath)
 		return nil
@@ -84,14 +86,17 @@ func run() error {
 		return fmt.Errorf("listen: %w", err)
 	case <-ctx.Done():
 	}
+
 	// Restore default signal handling so a second Ctrl+C kills a hanging shutdown.
 	stop()
 	log.Printf("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
+
 	return nil
 }

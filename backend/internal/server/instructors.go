@@ -39,6 +39,7 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, instructors)
 		return nil
 	})
@@ -48,10 +49,12 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
+
 		rows := make([][]string, len(instructors))
 		for i, in := range instructors {
 			rows[i] = []string{in.FirstName, in.LastName, in.Email, strconv.FormatInt(in.Active, 10)}
 		}
+
 		return writeCSV(w, "instructors.csv", []string{"first_name", "last_name", "email", "active"}, rows)
 	})
 
@@ -61,6 +64,7 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if !in.has("first_name", "last_name", "email") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
 			return nil
@@ -74,6 +78,7 @@ func (s *Server) instructorRoutes() {
 					result.skip(row, "missing required fields")
 					continue
 				}
+
 				id, found, err := db.One[int64](tx, "SELECT id FROM instructors WHERE email = ? AND deleted_at IS NULL", email)
 				if err != nil {
 					return err
@@ -83,6 +88,7 @@ func (s *Server) instructorRoutes() {
 				} else {
 					_, err = tx.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)", first, last, email)
 				}
+
 				if isUniqueErr(err, "instructors.email") { // the email belongs to a deleted instructor
 					result.skip(row, "An instructor with this email already exists")
 					continue
@@ -90,13 +96,16 @@ func (s *Server) instructorRoutes() {
 				if err != nil {
 					return err
 				}
+
 				result.Imported++
 			}
+
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, result)
 		return nil
 	})
@@ -107,6 +116,7 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
+
 		row, found, err := s.getInstructor(id)
 		if err != nil {
 			return err
@@ -115,6 +125,7 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})
@@ -125,15 +136,18 @@ func (s *Server) instructorRoutes() {
 			LastName  string `json:"last_name"`
 			Email     string `json:"email"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.FirstName == "" || in.LastName == "" || in.Email == "" {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
 			return nil
 		}
+
 		row, err := db.Get[Instructor](s.db, "INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?) RETURNING id, first_name, last_name, email, active",
 			in.FirstName, in.LastName, in.Email)
 		if isUniqueErr(err, "instructors.email") {
@@ -143,6 +157,7 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.JSON(w, http.StatusCreated, row)
 		return nil
 	})
@@ -154,16 +169,19 @@ func (s *Server) instructorRoutes() {
 			Email     *string `json:"email"`
 			Active    *int64  `json:"active"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
+
 		row, found, err := db.One[Instructor](s.db, `
 			UPDATE instructors SET
 				first_name = COALESCE(?, first_name),
@@ -184,6 +202,7 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})
@@ -194,18 +213,21 @@ func (s *Server) instructorRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
+
 		if _, found, err := db.One[int](s.db, "SELECT 1 FROM instructors WHERE id = ? AND deleted_at IS NULL", id); err != nil {
 			return err
 		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Instructor not found")
 			return nil
 		}
+
 		// The instructor leaves every session that hasn't taken place, as if removed from each
 		// one; completed sessions are history and stay as they are.
 		type openSlot struct {
 			SessionID int64 `db:"session_id"`
 			SlotID    int64 `db:"slot_id"`
 		}
+
 		slots, err := db.Many[openSlot](s.db, `
 			SELECT ss.session_id, ss.id AS slot_id FROM session_slots ss
 			JOIN training_sessions ts ON ts.id = ss.session_id
@@ -213,12 +235,14 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
+
 		err = s.inTx(func(t *txn) error {
 			for _, slot := range slots {
 				if _, err := t.removeSlot(slot.SessionID, slot.SlotID); err != nil {
 					return err
 				}
 			}
+
 			// Soft-delete: mark as deleted and deactivate.
 			_, err := t.q.Exec("UPDATE instructors SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id)
 			return err
@@ -226,6 +250,7 @@ func (s *Server) instructorRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})

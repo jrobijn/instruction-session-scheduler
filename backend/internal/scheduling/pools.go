@@ -21,8 +21,10 @@ func newPools(members []queue.Member) *pools {
 		if _, seen := p.byGroup[m.GroupID]; !seen {
 			p.order = append(p.order, m.GroupID)
 		}
+
 		p.byGroup[m.GroupID] = append(p.byGroup[m.GroupID], m)
 	}
+
 	return p
 }
 
@@ -49,6 +51,7 @@ func (p *pools) pop(groupID int64) queue.Member {
 	} else {
 		p.byGroup[groupID] = q[1:]
 	}
+
 	return q[0]
 }
 
@@ -64,6 +67,7 @@ func weightedPickGroup(groupIDs []int64, weightByGroup map[int64]float64, random
 	if total <= 0 {
 		return groupIDs[int(math.Floor(random()*float64(len(groupIDs))))]
 	}
+
 	r := random() * total
 	for i, g := range groupIDs {
 		r -= weights[i]
@@ -71,5 +75,6 @@ func weightedPickGroup(groupIDs []int64, weightByGroup map[int64]float64, random
 			return g
 		}
 	}
+
 	return groupIDs[len(groupIDs)-1]
 }

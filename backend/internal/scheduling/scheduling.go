@@ -30,16 +30,21 @@ import (
 type Input struct {
 	// Queue is everyone who can be invited, in queue order.
 	Queue []queue.Member
+
 	// Groups are the timetable's groups in their configured order, with their quotas (see
 	// AllocateSlots).
 	Groups []Group
+
 	// Timeslots are the timetable's timeslots, earliest first, with the number of free spots
 	// in each.
 	Timeslots []Timeslot
+
 	// Allows reports whether a student may take a timeslot (by id).
 	Allows func(studentID, timeslotID int64) bool
+
 	// Buddies lists each student's buddies.
 	Buddies Buddies
+
 	// Seed makes the overflow picks reproducible: the same seed gives the same picks.
 	Seed int64
 }
@@ -67,11 +72,14 @@ type Placement struct {
 	Member   queue.Member
 	Timeslot int   // index into Input.Timeslots
 	GroupID  int64 // the group whose quota (or overflow pick) the student was placed in
+
 	// Rank is the student's position among the Considered candidates, 1 first: in their
 	// group's queue, or in overflow among all overflow candidates.
 	Rank, Considered int
+
 	// PulledUpBy is the buddy who pulled the student up within their group's quota, if any.
 	PulledUpBy *queue.Member
+
 	// Overflow is set when the student was placed beyond the group quotas.
 	Overflow bool
 }
@@ -85,10 +93,12 @@ func AllocateSlots(available int, groups []Group) []Group {
 		out[i].Slots = int(math.Floor(float64(available) * out[i].Percentage / 100))
 		allocated += out[i].Slots
 	}
+
 	for i := 0; i < len(out) && allocated < available; i++ {
 		out[i].Slots++
 		allocated++
 	}
+
 	return out
 }
 
@@ -96,6 +106,7 @@ func AllocateSlots(available int, groups []Group) []Group {
 // in the order they were made.
 func Generate(in Input) []Placement {
 	m := newMatcher(in.Timeslots, in.Allows, in.Buddies)
+
 	// A student goes in or near the timeslot of their first buddy who is placed already.
 	place := func(sid int64) bool {
 		for _, buddy := range in.Buddies[sid] {
@@ -103,6 +114,7 @@ func Generate(in Input) []Placement {
 				return m.place(sid, ti)
 			}
 		}
+
 		return m.place(sid, -1)
 	}
 
@@ -114,6 +126,7 @@ func Generate(in Input) []Placement {
 		rank := slices.IndexFunc(list, func(x queue.Member) bool { return x.ID == st.ID }) + 1
 		chosen[st.ID] = &Placement{Member: st, GroupID: groupID, Rank: rank, Considered: len(list), PulledUpBy: pulledUpBy}
 	}
+
 	var selected []queue.Member
 	remaining := map[int64][]queue.Member{} // per group, the students not selected, in queue order
 	for _, g := range in.Groups {
@@ -122,6 +135,7 @@ func Generate(in Input) []Placement {
 			selected = append(selected, s.member)
 			choose(s.member, g.ID, s.pulledUpBy)
 		}
+
 		remaining[g.ID] = rest
 	}
 
@@ -130,11 +144,13 @@ func Generate(in Input) []Placement {
 	for i, st := range in.Queue {
 		queueIndex[st.ID] = i
 	}
+
 	// Selection added students group by group, with pulled-up buddies right after the student
 	// who pulled them up; placement must go by queue position instead.
 	byQueue := func(list []queue.Member) {
 		slices.SortFunc(list, func(a, b queue.Member) int { return cmp.Compare(queueIndex[a.ID], queueIndex[b.ID]) })
 	}
+
 	var withPreference, withoutPreference []queue.Member
 	for _, st := range selected {
 		if m.restricted(st.ID) {
@@ -143,9 +159,12 @@ func Generate(in Input) []Placement {
 			withoutPreference = append(withoutPreference, st)
 		}
 	}
+
 	byQueue(withPreference)
 	byQueue(withoutPreference)
+
 	var placed []queue.Member
+
 	// Placing more students never frees room, so a student who failed once can't be placed later.
 	unplaceable := map[int64]bool{}
 
@@ -158,6 +177,7 @@ func Generate(in Input) []Placement {
 			placed = append(placed, st)
 			continue
 		}
+
 		unplaceable[st.ID] = true
 		gid := chosen[st.ID].GroupID
 		delete(chosen, st.ID)
@@ -165,9 +185,11 @@ func Generate(in Input) []Placement {
 		if len(rest) == 0 {
 			continue
 		}
+
 		repl := rest[0]
 		remaining[gid] = rest[1:]
 		choose(repl, gid, nil)
+
 		// Appended, not sorted in: a replacement goes after everyone selected before them.
 		if m.restricted(repl.ID) {
 			withPreference = append(withPreference, repl)
@@ -194,10 +216,12 @@ func Generate(in Input) []Placement {
 			overflowCandidates = append(overflowCandidates, st)
 		}
 	}
+
 	percentage := map[int64]float64{}
 	for _, g := range in.Groups {
 		percentage[g.ID] = g.Percentage
 	}
+
 	overflow := newPools(overflowCandidates)
 	random := mrand.New(mrand.NewPCG(uint64(in.Seed), 0)).Float64
 	overflowRank := 0
@@ -208,6 +232,7 @@ func Generate(in Input) []Placement {
 		if !place(st.ID) {
 			continue
 		}
+
 		placed = append(placed, st)
 		chosen[st.ID] = &Placement{Member: st, GroupID: picked, Rank: overflowRank, Considered: len(overflowCandidates), Overflow: true}
 	}
@@ -218,5 +243,6 @@ func Generate(in Input) []Placement {
 		out[i] = *chosen[st.ID]
 		out[i].Timeslot = m.placed[st.ID]
 	}
+
 	return out
 }

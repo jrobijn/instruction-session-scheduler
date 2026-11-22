@@ -29,10 +29,12 @@ func newQueueDB(t *testing.T) *queueDB {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { d.Close() })
 	if err := d.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
 	q := &queueDB{t: t, db: d, sessions: map[string]int64{}, slots: map[string]int64{}}
 	timetable := q.insert("INSERT INTO timetables (name) VALUES ('T') RETURNING id")
 	q.timeslot = q.insert("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, '18:00') RETURNING id", timetable)
@@ -41,6 +43,7 @@ func newQueueDB(t *testing.T) *queueDB {
 		q.sessions[date] = q.insert("INSERT INTO training_sessions (date, timetable_id) VALUES (?, ?) RETURNING id", date, timetable)
 		q.slots[date] = q.insert("INSERT INTO session_slots (session_id, instructor_id) VALUES (?, ?) RETURNING id", q.sessions[date], instructor)
 	}
+
 	return q
 }
 
@@ -58,6 +61,7 @@ func (q *queueDB) insert(query string, args ...any) int64 {
 	if err := q.db.QueryRow(query, args...).Scan(&id); err != nil {
 		q.t.Fatal(err)
 	}
+
 	return id
 }
 
@@ -127,6 +131,7 @@ func TestQueuePosition(t *testing.T) {
 	if len(members) != len(want) {
 		t.Fatalf("got %d members, want %d", len(members), len(want))
 	}
+
 	for _, m := range members {
 		w := want[m.FirstName]
 		reason := ""
@@ -149,6 +154,7 @@ func TestMemberMatchesQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rows.Close()
+
 	columns, err := rows.Columns()
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +164,7 @@ func TestMemberMatchesQuery(t *testing.T) {
 	for f := range reflect.TypeFor[Member]().Fields() {
 		fields = append(fields, f.Tag.Get("db"))
 	}
+
 	slices.Sort(columns)
 	slices.Sort(fields)
 	if !slices.Equal(columns, fields) {

@@ -55,6 +55,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { d.Close() })
 	if err := d.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
@@ -70,8 +71,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	mailer := email.NewCapturing(email.Config{FrontendURL: cfg.FrontendURL}, func(to, subject, text, html string) {
 		e.mailMu.Lock()
 		defer e.mailMu.Unlock()
+
 		e.mail = append(e.mail, sentEmail{to, subject, text, html})
 	})
+
 	e.srv = New(cfg, d, sse.NewHub(), mailer)
 	e.handler = e.srv.Handler()
 	t.Cleanup(e.srv.Stop)
@@ -80,6 +83,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	e.cookie = &http.Cookie{Name: authCookie, Value: token}
 	return e
 }
@@ -88,6 +92,7 @@ func newTestEnv(t *testing.T) *testEnv {
 func (e *testEnv) sentMail() []sentEmail {
 	e.mailMu.Lock()
 	defer e.mailMu.Unlock()
+
 	return append([]sentEmail(nil), e.mail...)
 }
 
@@ -99,6 +104,7 @@ func (e *testEnv) mailTo(addr string) []sentEmail {
 			out = append(out, m)
 		}
 	}
+
 	return out
 }
 
@@ -106,6 +112,7 @@ func (e *testEnv) mailTo(addr string) []sentEmail {
 func (e *testEnv) pinClock(now time.Time) {
 	e.srv.mu.Lock() // timer callbacks read the clock under mu
 	defer e.srv.mu.Unlock()
+
 	e.srv.now = func() time.Time { return now }
 }
 
@@ -131,15 +138,19 @@ func (e *testEnv) request(method, path string, body any, withAuth bool) *respons
 		if err != nil {
 			e.t.Fatal(err)
 		}
+
 		reader = bytes.NewReader(raw)
 	}
+
 	req := httptest.NewRequest(method, path, reader)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+
 	if withAuth {
 		req.AddCookie(e.cookie)
 	}
+
 	rec := httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, req)
 	return &response{t: e.t, Code: rec.Code, Body: rec.Body.Bytes(), rec: rec}
@@ -161,6 +172,7 @@ func (r *response) status(want int) *response {
 	if r.Code != want {
 		r.t.Fatalf("status = %d, want %d; body: %s", r.Code, want, r.Body)
 	}
+
 	return r
 }
 
@@ -170,6 +182,7 @@ func (r *response) object() map[string]any {
 	if err := json.Unmarshal(r.Body, &v); err != nil {
 		r.t.Fatalf("decode object: %v; body: %s", err, r.Body)
 	}
+
 	return v
 }
 
@@ -179,6 +192,7 @@ func (r *response) array() []map[string]any {
 	if err := json.Unmarshal(r.Body, &v); err != nil {
 		r.t.Fatalf("decode array: %v; body: %s", err, r.Body)
 	}
+
 	return v
 }
 
@@ -243,6 +257,7 @@ func (e *testEnv) insert(query string, args ...any) int64 {
 	if err := e.db.QueryRow(query, args...).Scan(&id); err != nil {
 		e.t.Fatalf("insert %q: %v", query, err)
 	}
+
 	return id
 }
 
@@ -255,10 +270,12 @@ func (e *testEnv) rows(query string, args ...any) []map[string]any {
 		e.t.Fatalf("query %q: %v", query, err)
 	}
 	defer rows.Close()
+
 	cols, err := rows.Columns()
 	if err != nil {
 		e.t.Fatalf("query %q: %v", query, err)
 	}
+
 	out := []map[string]any{}
 	for rows.Next() {
 		values := make([]any, len(cols))
@@ -269,6 +286,7 @@ func (e *testEnv) rows(query string, args ...any) []map[string]any {
 		if err := rows.Scan(ptrs...); err != nil {
 			e.t.Fatalf("query %q: %v", query, err)
 		}
+
 		row := make(map[string]any, len(cols))
 		for i, c := range cols {
 			if b, ok := values[i].([]byte); ok {
@@ -277,11 +295,14 @@ func (e *testEnv) rows(query string, args ...any) []map[string]any {
 				row[c] = values[i]
 			}
 		}
+
 		out = append(out, row)
 	}
+
 	if err := rows.Err(); err != nil {
 		e.t.Fatalf("query %q: %v", query, err)
 	}
+
 	return out
 }
 
@@ -291,6 +312,7 @@ func (e *testEnv) row(query string, args ...any) map[string]any {
 	if rows := e.rows(query, args...); len(rows) > 0 {
 		return rows[0]
 	}
+
 	return nil
 }
 
@@ -307,6 +329,7 @@ func toInt64(v any) int64 {
 		n, _ := strconv.ParseInt(x, 10, 64)
 		return n
 	}
+
 	return 0
 }
 
@@ -334,6 +357,7 @@ func (e *testEnv) discipline(name string, groupIDs ...int64) int64 {
 	for _, gid := range groupIDs {
 		e.exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", did, gid)
 	}
+
 	return did
 }
 
@@ -370,6 +394,7 @@ func (e *testEnv) timetable(startTimes ...string) (int64, []int64) {
 	for i, st := range startTimes {
 		ids[i] = e.insert("INSERT INTO timeslots (timetable_id, start_time) VALUES (?, ?) RETURNING id", tt, st)
 	}
+
 	return tt, ids
 }
 
@@ -388,10 +413,12 @@ func (e *testEnv) session(date string, timetableID int64) int64 {
 	if !ok {
 		e.t.Fatalf("bad date %q", date)
 	}
+
 	var tt any
 	if timetableID != 0 {
 		tt = timetableID
 	}
+
 	return e.insert("INSERT INTO training_sessions (date, day_of_week, timetable_id) VALUES (?, ?, ?) RETURNING id", date, dow, tt)
 }
 
@@ -408,6 +435,7 @@ func (e *testEnv) invitation(sessionID, studentID, timeslotID, slotID, groupID i
 	if groupID != 0 {
 		gid = groupID
 	}
+
 	return e.insert(`INSERT INTO invitations (session_id, student_id, timeslot_id, slot_id, token, group_id, status)
 		VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`, sessionID, studentID, timeslotID, slotID, uuid.NewString(), gid, status)
 }
@@ -425,5 +453,6 @@ func (e *testEnv) buddies(studentIDs ...int64) int64 {
 	for _, sid := range studentIDs {
 		e.exec("INSERT INTO buddy_group_members (buddy_group_id, student_id) VALUES (?, ?)", bg, sid)
 	}
+
 	return bg
 }

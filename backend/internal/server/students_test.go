@@ -13,6 +13,7 @@ func studentPath(id int64, rest ...string) string {
 	if len(rest) > 0 {
 		p += "/" + strings.Join(rest, "/")
 	}
+
 	return p
 }
 
@@ -26,6 +27,7 @@ func TestCreateStudent(t *testing.T) {
 	if got["membership_id"] != "" || got["active"] != 1.0 || got["preferred_days"] != "0|1|2|3|4|5|6" {
 		t.Fatalf("created = %v", got)
 	}
+
 	got = e.admin(http.MethodPost, "/api/students", map[string]any{"first_name": "Cy", "last_name": "Lee", "email": "cy@example.test", "preferred_days": "1|3"}).
 		status(http.StatusCreated).object()
 	if got["preferred_days"] != "1|3" {
@@ -46,6 +48,7 @@ func TestCreateStudent(t *testing.T) {
 	if got["membership_id"] != "M-1" {
 		t.Fatalf("membership_id = %v", got["membership_id"])
 	}
+
 	m := e.row("SELECT * FROM student_groups WHERE student_id = ?", toInt64(got["id"]))
 	if m == nil || toInt64(m["group_id"]) != g || m["joined_at"] == nil {
 		t.Fatalf("membership = %v", m)
@@ -84,6 +87,7 @@ func TestListAndGetStudents(t *testing.T) {
 	if got := e.admin(http.MethodGet, studentPath(loner), nil).status(http.StatusOK).object(); got["first_name"] != "Lo" {
 		t.Fatalf("get = %v", got)
 	}
+
 	e.admin(http.MethodGet, studentPath(gone), nil).wantError(http.StatusNotFound, "Student not found")
 }
 
@@ -97,6 +101,7 @@ func TestUpdateStudent(t *testing.T) {
 	if got["first_name"] != "Ann" || got["last_name"] != "Smith" || got["preferred_days"] != "1|3" {
 		t.Fatalf("updated = %v", got)
 	}
+
 	e.admin(http.MethodPut, studentPath(s), map[string]any{"email": e.studentEmail(other)}).
 		wantError(http.StatusConflict, "A student with this email already exists")
 	e.admin(http.MethodPut, studentPath(999), map[string]any{}).wantError(http.StatusNotFound, "Student not found")
@@ -106,6 +111,7 @@ func TestUpdateStudent(t *testing.T) {
 	if e.row("SELECT reactivated_at FROM student_groups WHERE student_id = ?", s)["reactivated_at"] != nil {
 		t.Fatal("deactivation set reactivated_at")
 	}
+
 	e.admin(http.MethodPut, studentPath(s), map[string]any{"active": 1}).status(http.StatusOK)
 	if e.row("SELECT reactivated_at FROM student_groups WHERE student_id = ?", s)["reactivated_at"] == nil {
 		t.Fatal("reactivation did not set reactivated_at")
@@ -133,10 +139,12 @@ func TestDeleteStudent(t *testing.T) {
 	if row["active"] != int64(0) || row["deleted_at"] == nil {
 		t.Fatalf("deleted student = %v", row)
 	}
+
 	statuses := map[int64]string{}
 	for _, r := range f.rows("SELECT session_id, status FROM invitations WHERE student_id = ?", a) {
 		statuses[toInt64(r["session_id"])] = r["status"].(string)
 	}
+
 	want := map[int64]string{f.sessionID: "admin_cancelled", later: "admin_cancelled", past: "confirmed"}
 	for sid, st := range want {
 		if statuses[sid] != st {
@@ -149,6 +157,7 @@ func TestDeleteStudent(t *testing.T) {
 	if f.hasTimer(aInv) {
 		t.Error("expiry timer of the cancelled invitation still set")
 	}
+
 	// Only the emailed invitation triggers a cancellation email; no replacement is invited.
 	if n := len(f.mailTo(aEmail)) - mailA; n != 1 {
 		t.Errorf("A got %d cancellation emails, want 1", n)
@@ -156,6 +165,7 @@ func TestDeleteStudent(t *testing.T) {
 	if n := len(f.rows("SELECT 1 FROM invitations WHERE session_id = ?", f.sessionID)); n != 2 {
 		t.Errorf("%d invitations in the session, want 2 (no replacement)", n)
 	}
+
 	f.admin(http.MethodDelete, studentPath(a), nil).wantError(http.StatusNotFound, "Student not found")
 
 	// A confirmed invitation is cancelled too, and the student is told.
@@ -198,10 +208,12 @@ func TestStudentInvitationLists(t *testing.T) {
 	if len(active) != 1 || active[0]["session_date"] != "2030-02-04" || active[0]["start_time"] != "19:00" {
 		t.Fatalf("active invitations = %v", active)
 	}
+
 	history := f.admin(http.MethodGet, studentPath(a, "invitation-history"), nil).status(http.StatusOK).array()
 	if len(history) != 3 {
 		t.Fatalf("history = %v", history)
 	}
+
 	f.admin(http.MethodGet, studentPath(999, "invitations"), nil).wantError(http.StatusNotFound, "Student not found")
 	f.admin(http.MethodGet, studentPath(999, "invitation-history"), nil).wantError(http.StatusNotFound, "Student not found")
 }
@@ -226,6 +238,7 @@ func TestStudentPreferredTimeslots(t *testing.T) {
 	if n := stored(tt); n != 1 {
 		t.Fatalf("stored %d preferences, want 1", n)
 	}
+
 	e.admin(http.MethodPut, path(other), map[string]any{"timeslot_ids": []any{otherSlots[1]}}).status(http.StatusOK)
 
 	got := e.admin(http.MethodGet, studentPath(s, "preferred-timeslots"), nil).status(http.StatusOK).object()
@@ -282,6 +295,7 @@ func TestStudentPreferredTimeslotsIgnoresInvalidIDsWhenCounting(t *testing.T) {
 	if got := strings.Join(stored(), ","); got != "18:00,20:00" {
 		t.Fatalf("stored %q", got)
 	}
+
 	// Every valid id (with noise) still means no preference.
 	e.admin(http.MethodPut, path, map[string]any{"timeslot_ids": []any{slots[2], slots[1], 9999, slots[0]}}).status(http.StatusOK)
 	if got := stored(); len(got) != 0 {
@@ -298,14 +312,17 @@ func TestStudentGroupMembership(t *testing.T) {
 	if toInt64(got["id"]) != a || got["name"] != "A" {
 		t.Fatalf("group = %v", got)
 	}
+
 	e.admin(http.MethodPut, studentPath(s, "groups"), map[string]any{"group_id": b}).status(http.StatusOK)
 	if m := e.rows("SELECT group_id FROM student_groups WHERE student_id = ?", s); len(m) != 1 || toInt64(m[0]["group_id"]) != b {
 		t.Fatalf("memberships = %v", m)
 	}
+
 	e.admin(http.MethodPut, studentPath(s, "groups"), map[string]any{"group_id": nil}).status(http.StatusOK)
 	if string(e.admin(http.MethodGet, studentPath(s, "groups"), nil).status(http.StatusOK).Body) != "null\n" {
 		t.Fatal("student without group should return null")
 	}
+
 	e.admin(http.MethodPut, studentPath(999, "groups"), map[string]any{}).wantError(http.StatusNotFound, "Student not found")
 }
 
@@ -317,6 +334,7 @@ func TestStudentCooldown(t *testing.T) {
 	for _, days := range []any{0, -1, nil} {
 		e.admin(http.MethodPut, path, map[string]any{"days": days}).wantError(http.StatusBadRequest, "A positive number of days is required")
 	}
+
 	e.admin(http.MethodPut, path, map[string]any{"days": "3"}).wantError(http.StatusBadRequest, "Invalid JSON body")
 	before := time.Now().UTC()
 	got := e.admin(http.MethodPut, path, map[string]any{"days": 2}).status(http.StatusOK).object()
@@ -334,11 +352,13 @@ func TestStudentCooldown(t *testing.T) {
 	if d := time.Since(ended); d < -2*time.Second || d > 2*time.Second {
 		t.Fatalf("ended cooldown_until = %v", got["cooldown_until"])
 	}
+
 	// A past cooldown is left alone.
 	e.exec("UPDATE students SET cooldown_until = '2020-01-01 00:00:00' WHERE id = ?", s)
 	if got := e.admin(http.MethodDelete, path, nil).status(http.StatusOK).object(); got["cooldown_until"] != "2020-01-01 00:00:00" {
 		t.Fatalf("past cooldown changed to %v", got["cooldown_until"])
 	}
+
 	e.admin(http.MethodDelete, studentPath(999, "cooldown"), nil).wantError(http.StatusNotFound, "Student not found")
 	e.admin(http.MethodPut, studentPath(999, "cooldown"), map[string]any{"days": 1}).wantError(http.StatusNotFound, "Student not found")
 	e.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", s)
@@ -374,6 +394,7 @@ func TestImportStudents(t *testing.T) {
 	if g := e.row("SELECT group_id FROM student_groups WHERE student_id = ?", ann["id"]); toInt64(g["group_id"]) != def {
 		t.Errorf("new student group = %v, want default", g)
 	}
+
 	// The existing student is updated by email; blank numbers are left as they are and their group kept.
 	old := e.row("SELECT * FROM students WHERE id = ?", existing)
 	if old["first_name"] != "New" || old["membership_id"] != "M-2" || old["attended_sessions"] != int64(0) || old["active"] != int64(0) {
@@ -382,6 +403,7 @@ func TestImportStudents(t *testing.T) {
 	if g := e.row("SELECT group_id FROM student_groups WHERE student_id = ?", existing); toInt64(g["group_id"]) != other {
 		t.Errorf("existing student moved to group %v", g)
 	}
+
 	// A new student's blank columns get the same values as the schema's column defaults.
 	e.exec("INSERT INTO students (first_name, last_name, email) VALUES ('Raw', 'Ng', 'raw@example.test')")
 	const optional = "SELECT membership_id, attended_sessions, no_show_count, active, preferred_days FROM students WHERE email = ?"

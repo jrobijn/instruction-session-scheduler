@@ -11,6 +11,7 @@ import (
 func (e *testEnv) timerCount() int {
 	e.srv.mu.Lock()
 	defer e.srv.mu.Unlock()
+
 	return len(e.srv.timers)
 }
 
@@ -33,10 +34,12 @@ func TestExpiredInvitationIsReplaced(t *testing.T) {
 	if st := f.statusOf("A"); st != "expired" {
 		t.Fatalf("A status = %s, want expired", st)
 	}
+
 	c := f.invitationOf("C")
 	if c["status"] != "invited" || c["slot_id"] != a["slot_id"] || c["timeslot_id"] != a["timeslot_id"] {
 		t.Fatalf("replacement = %v", c)
 	}
+
 	var log map[string]any
 	json.Unmarshal([]byte(c["decision_log"].(string)), &log)
 	if log["replacement_reason"] != "invited" {
@@ -124,6 +127,7 @@ func TestExpiryIgnoredWhenNoLongerPending(t *testing.T) {
 func TestExpiryTimerFires(t *testing.T) {
 	f, _ := invitedPair(t)
 	id := toInt64(f.invitationOf("A")["id"])
+
 	// Invited long ago: the deadline has passed, so the timer fires right away.
 	f.exec("UPDATE invitations SET invited_at = '2000-01-01 00:00:00' WHERE id = ?", id)
 	f.srv.mu.Lock()
@@ -135,8 +139,10 @@ func TestExpiryTimerFires(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("expiry timer did not fire")
 		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	if st := f.statusOf("A"); st != "expired" {
 		t.Fatalf("status = %s, want expired", st)
 	}
@@ -182,6 +188,7 @@ func TestStartRehydratesPendingTimers(t *testing.T) {
 	if n := f.timerCount(); n != 0 {
 		t.Fatalf("%d timers after Stop", n)
 	}
+
 	f.srv.Start()
 	if n := f.timerCount(); n != 2 {
 		t.Fatalf("%d timers after Start, want 2 (cancelled sessions are skipped)", n)
@@ -200,8 +207,10 @@ func TestExpirySettingChangeReschedulesTimers(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("timer was not rescheduled after the setting changed")
 		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
+
 	if st := f.statusOf("B"); st != "invited" {
 		t.Fatalf("B status = %s, want invited", st)
 	}
@@ -212,6 +221,7 @@ func TestSessionCancelClearsTimers(t *testing.T) {
 	if n := f.timerCount(); n != 2 {
 		t.Fatalf("%d timers, want 2", n)
 	}
+
 	f.admin(http.MethodPost, sessionPath(f.sessionID, "cancel"), nil).status(http.StatusOK)
 	if n := f.timerCount(); n != 0 {
 		t.Fatalf("%d timers after cancelling the session", n)

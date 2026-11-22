@@ -15,21 +15,25 @@ func (s *Server) authRoutes() {
 		type request struct {
 			Password *string `json:"password"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
+
 		// An unset ADMIN_PASSWORD never matches, not even an empty sent password.
 		if in.Password == nil || s.cfg.AdminPassword == "" || *in.Password != s.cfg.AdminPassword {
 			httpx.Error(w, http.StatusUnauthorized, "Invalid password")
 			return
 		}
+
 		token, err := auth.Sign(s.cfg.JWTSecret, "admin", 24*time.Hour)
 		if err != nil {
 			s.internalError(w, err)
 			return
 		}
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     authCookie,
 			Value:    token,

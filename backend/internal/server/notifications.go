@@ -27,16 +27,19 @@ func (s *Server) notificationRoutes() {
 		if n, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && n != 0 {
 			page = max(1, n)
 		}
+
 		limit := 20
 		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n != 0 {
 			limit = min(100, max(1, n))
 		}
+
 		offset := (page - 1) * limit
 
 		total, err := db.Get[int64](s.db, "SELECT COUNT(*) FROM notifications")
 		if err != nil {
 			return err
 		}
+
 		notifications, err := db.Many[Notification](s.db, `
 			SELECT id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at
 			FROM notifications
@@ -45,6 +48,7 @@ func (s *Server) notificationRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, map[string]any{"notifications": notifications, "total": total, "page": page, "limit": limit})
 		return nil
 	})
@@ -54,6 +58,7 @@ func (s *Server) notificationRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, map[string]int64{"count": count})
 		return nil
 	})
@@ -64,6 +69,7 @@ func (s *Server) notificationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Notification not found")
 			return nil
 		}
+
 		res, err := s.db.Exec("UPDATE notifications SET read = 1 WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -72,10 +78,12 @@ func (s *Server) notificationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Notification not found")
 			return nil
 		}
+
 		count, err := s.unreadCount()
 		if err != nil {
 			return err
 		}
+
 		s.hub.Broadcast(notificationsChannel, "unread_count_updated", map[string]int64{"unread_count": count})
 		httpx.Success(w)
 		return nil
@@ -85,6 +93,7 @@ func (s *Server) notificationRoutes() {
 		if _, err := s.db.Exec("UPDATE notifications SET read = 1 WHERE read = 0"); err != nil {
 			return err
 		}
+
 		s.hub.Broadcast(notificationsChannel, "unread_count_updated", map[string]int64{"unread_count": 0})
 		httpx.Success(w)
 		return nil
@@ -118,10 +127,12 @@ func (s *Server) createNotification(typ string, invitationID any, sessionID int6
 		log.Printf("create notification %s for session %d: %v", typ, sessionID, err)
 		return
 	}
+
 	count, err := s.unreadCount()
 	if err != nil {
 		log.Printf("count unread notifications: %v", err)
 		return
 	}
+
 	s.hub.Broadcast(notificationsChannel, "new_notification", map[string]any{"notification": notification, "unread_count": count})
 }

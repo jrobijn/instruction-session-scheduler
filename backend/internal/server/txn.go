@@ -36,8 +36,10 @@ func (s *Server) inTx(fn func(t *txn) error) error {
 	if err != nil {
 		return err
 	}
+
 	for _, f := range t.after {
 		f(s)
 	}
+
 	return nil
 }

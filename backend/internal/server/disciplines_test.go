@@ -22,6 +22,7 @@ func TestDisciplineCRUD(t *testing.T) {
 	if got["active"] != 0.0 || got["name"] != "Kayak" || got["abbreviation"] != "K" {
 		t.Fatalf("updated = %v", got)
 	}
+
 	e.admin(http.MethodPut, path, map[string]any{"name": "Canoe"}).wantError(http.StatusConflict, "A discipline with this name already exists")
 	e.admin(http.MethodPut, "/api/disciplines/999", map[string]any{}).wantError(http.StatusNotFound, "Discipline not found")
 
@@ -35,6 +36,7 @@ func TestDisciplineCRUD(t *testing.T) {
 	if got := e.admin(http.MethodGet, path+"/groups", nil).status(http.StatusOK).array(); len(got) != 1 || got[0]["name"] != "G" {
 		t.Fatalf("discipline groups = %v", got)
 	}
+
 	list := e.admin(http.MethodGet, "/api/disciplines", nil).status(http.StatusOK).array()
 	if len(list) != 2 || list[0]["name"] != "Canoe" || len(list[1]["groups"].([]any)) != 1 {
 		t.Fatalf("disciplines = %v", list)
@@ -53,10 +55,12 @@ func TestDisciplineImportExport(t *testing.T) {
 	e.discipline("Kayak")
 	csv := "name,abbreviation\nKayak,KY\nCanoe,C\n,X"
 	res := e.admin(http.MethodPost, "/api/disciplines/import", map[string]any{"csv": csv}).status(http.StatusOK).object()
+
 	// Updating an existing discipline counts as imported.
 	if res["imported"] != 2.0 || res["skipped"] != 1.0 {
 		t.Fatalf("import = %v", res)
 	}
+
 	body := string(e.admin(http.MethodGet, "/api/disciplines/export", nil).status(http.StatusOK).Body)
 	if want := "name,abbreviation,active\nCanoe,C,1\nKayak,KY,1\n"; body != want {
 		t.Fatalf("export = %q", body)
@@ -95,8 +99,10 @@ func TestPublicDisciplines(t *testing.T) {
 	manual := f.student("M", seniors)
 	f.sendInvitations()
 	f.invitation(f.sessionID, manual, f.timeslots[0], f.slots[0], 0, "invited")
+
 	// A moves to Seniors after being invited; the invitation keeps its scheduled group.
 	f.exec("UPDATE student_groups SET group_id = ? WHERE student_id = ?", seniors, a)
+
 	// A manual invitation for a student who has since left every group.
 	loner := f.student("L", seniors)
 	f.exec("DELETE FROM student_groups WHERE student_id = ?", loner)
@@ -107,8 +113,10 @@ func TestPublicDisciplines(t *testing.T) {
 		for _, d := range f.public(http.MethodGet, path, nil).status(http.StatusOK).array() {
 			out = append(out, d["name"].(string))
 		}
+
 		return strings.Join(out, ",")
 	}
+
 	if got := names("/api/public/disciplines"); got != "Juniors discipline,Seniors discipline" {
 		t.Errorf("all active = %s", got)
 	}
@@ -118,9 +126,11 @@ func TestPublicDisciplines(t *testing.T) {
 	if got := names("/api/public/disciplines/" + f.tokenOf("M")); got != "Seniors discipline" {
 		t.Errorf("for manual invitation = %s, want the student's group's", got)
 	}
+
 	// Exactly [] (not null): the invitation page maps over the result.
 	if got := strings.TrimSpace(string(f.public(http.MethodGet, "/api/public/disciplines/"+f.tokenOf("L"), nil).status(http.StatusOK).Body)); got != "[]" {
 		t.Errorf("for manual invitation of a student without a group = %s, want []", got)
 	}
+
 	f.public(http.MethodGet, "/api/public/disciplines/unknown", nil).wantError(http.StatusNotFound, "Invitation not found")
 }

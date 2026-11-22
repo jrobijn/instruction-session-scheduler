@@ -33,6 +33,7 @@ func Sign(secret, role string, ttl time.Duration) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	signingInput := b64.EncodeToString([]byte(header)) + "." + b64.EncodeToString(payload)
 	return signingInput + "." + b64.EncodeToString(mac(secret, signingInput)), nil
 }
@@ -50,6 +51,7 @@ func Verify(secret, token string) (*Claims, error) {
 	if err != nil || json.Unmarshal(rawHeader, &hdr) != nil {
 		return nil, ErrMalformed
 	}
+
 	if hdr.Alg != "HS256" {
 		return nil, ErrMalformed
 	}
@@ -58,6 +60,7 @@ func Verify(secret, token string) (*Claims, error) {
 	if err != nil {
 		return nil, ErrMalformed
 	}
+
 	if !hmac.Equal(sig, mac(secret, parts[0]+"."+parts[1])) {
 		return nil, ErrSignature
 	}
@@ -66,13 +69,16 @@ func Verify(secret, token string) (*Claims, error) {
 	if err != nil {
 		return nil, ErrMalformed
 	}
+
 	var claims Claims
 	if err := json.Unmarshal(rawPayload, &claims); err != nil {
 		return nil, ErrMalformed
 	}
+
 	if claims.Exp != 0 && time.Now().Unix() >= claims.Exp {
 		return nil, ErrExpired
 	}
+
 	return &claims, nil
 }
 

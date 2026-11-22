@@ -76,6 +76,7 @@ func For(locale string) Strings {
 	if s, ok := translations[locale]; ok {
 		return s
 	}
+
 	return translations["en"]
 }
 

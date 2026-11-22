@@ -13,6 +13,7 @@ func groupPath(id int64, rest ...string) string {
 	if len(rest) > 0 {
 		p += "/" + strings.Join(rest, "/")
 	}
+
 	return p
 }
 
@@ -24,6 +25,7 @@ func TestGroupCRUD(t *testing.T) {
 	if got["color"] != "#3b82f6" || got["new_member_priority"] != "back" || got["is_default"] != 0.0 {
 		t.Fatalf("created = %v", got)
 	}
+
 	e.admin(http.MethodPost, "/api/groups", map[string]any{"name": "Juniors"}).wantError(http.StatusConflict, "A group with this name already exists")
 	e.admin(http.MethodPost, "/api/groups", map[string]any{"name": "Seniors", "color": "#ff0000"}).status(http.StatusCreated)
 
@@ -31,6 +33,7 @@ func TestGroupCRUD(t *testing.T) {
 	if got["name"] != "Juniors" || got["color"] != "#000000" || got["cooldown_member_priority"] != "front" || got["new_member_priority"] != "back" {
 		t.Fatalf("updated = %v", got)
 	}
+
 	e.admin(http.MethodPut, groupPath(id), map[string]any{"new_member_priority": "middle"}).
 		wantError(http.StatusBadRequest, "new_member_priority must be 'front' or 'back'")
 	e.admin(http.MethodPut, groupPath(id), map[string]any{"name": "Seniors"}).wantError(http.StatusConflict, "A group with this name already exists")
@@ -51,6 +54,7 @@ func TestGroupCRUD(t *testing.T) {
 	if e.row("SELECT 1 FROM student_groups WHERE student_id = ?", s) != nil {
 		t.Fatal("membership survived the group")
 	}
+
 	e.admin(http.MethodDelete, groupPath(id), nil).wantError(http.StatusNotFound, "Group not found")
 }
 
@@ -66,15 +70,18 @@ func TestGroupDefault(t *testing.T) {
 	if isDefault(a) || !isDefault(b) {
 		t.Fatal("only one group can be the default")
 	}
+
 	e.admin(http.MethodPost, groupPath(b, "unset-default"), nil).status(http.StatusOK)
 	if isDefault(b) {
 		t.Fatal("unset-default left the flag")
 	}
+
 	e.admin(http.MethodPost, groupPath(a, "set-default"), nil).status(http.StatusOK)
 	e.admin(http.MethodPost, groupPath(999, "set-default"), nil).wantError(http.StatusNotFound, "Group not found")
 	if !isDefault(a) {
 		t.Fatal("setting a missing group as default cleared the existing default")
 	}
+
 	e.admin(http.MethodPost, groupPath(999, "unset-default"), nil).wantError(http.StatusNotFound, "Group not found")
 }
 
@@ -104,6 +111,7 @@ func TestGroupMembersEndpoints(t *testing.T) {
 	if e.row("SELECT invite_next_at FROM student_groups WHERE student_id = ?", s)["invite_next_at"] == nil {
 		t.Fatal("invite-next not set")
 	}
+
 	e.admin(http.MethodPut, path, map[string]any{"enabled": false}).status(http.StatusOK)
 	if e.row("SELECT invite_next_at FROM student_groups WHERE student_id = ?", s)["invite_next_at"] != nil {
 		t.Fatal("invite-next not cleared")
@@ -113,6 +121,7 @@ func TestGroupMembersEndpoints(t *testing.T) {
 	if e.row("SELECT 1 FROM student_groups WHERE student_id = ?", s) != nil {
 		t.Fatal("member not removed")
 	}
+
 	e.admin(http.MethodDelete, groupPath(999, "members", fmt.Sprint(s)), nil).wantError(http.StatusNotFound, "Group not found")
 }
 
@@ -136,16 +145,19 @@ func TestGroupMembersQueue(t *testing.T) {
 	if got := strings.Join(order, ","); got != "C:1,A:2,B:3,D:<nil>" {
 		t.Fatalf("queue = %s (invite-next first, inactive last without a position)", got)
 	}
+
 	byName := map[string]map[string]any{}
 	for _, m := range members {
 		byName[m["first_name"].(string)] = m
 	}
+
 	if byName["C"]["invite_next"] != true || byName["A"]["invite_next"] != false {
 		t.Error("invite_next flags")
 	}
 	if o, _ := byName["A"]["queue_override"].(map[string]any); o == nil || o["reason"] != "joined" {
 		t.Errorf("A queue_override = %v, want joined", byName["A"]["queue_override"])
 	}
+
 	bg, _ := byName["A"]["buddy_group"].(map[string]any)
 	if bg == nil || bg["name"] != "A & B" || len(bg["buddies"].([]any)) != 1 {
 		t.Errorf("A buddy_group = %v", byName["A"]["buddy_group"])
@@ -158,6 +170,7 @@ func TestGroupMembersQueue(t *testing.T) {
 			t.Errorf("internal column %s leaked", k)
 		}
 	}
+
 	f.admin(http.MethodGet, groupPath(999, "members"), nil).wantError(http.StatusNotFound, "Group not found")
 }
 
@@ -168,16 +181,19 @@ func TestGroupMembersBreakTiesLikeNextSession(t *testing.T) {
 	for _, name := range []string{"A", "B", "C", "D", "E", "F"} {
 		f.student(name, g)
 	}
+
 	f.exec("UPDATE student_groups SET joined_at = '2029-01-01 00:00:00'") // all tied
 
 	var overview []string
 	for _, m := range f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array() {
 		overview = append(overview, m["first_name"].(string))
 	}
+
 	eligible, err := eligibleQueue(f.db, clubLocation(f.srv.db), f.sessionID, sessionDate, f.timetable)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var scheduler []string
 	for _, c := range eligible {
 		scheduler = append(scheduler, c.FirstName)
@@ -211,10 +227,12 @@ func TestGroupNonMembers(t *testing.T) {
 	if got := e.admin(http.MethodGet, groupPath(a, "non-members")+"?q=", nil).status(http.StatusOK).array(); len(got) != 0 {
 		t.Fatalf("empty query = %v", got)
 	}
+
 	got := e.admin(http.MethodGet, groupPath(a, "non-members")+"?q=Test", nil).status(http.StatusOK).array()
 	if len(got) != 2 || got[0]["first_name"] != "Bob" || got[0]["current_group_name"] != "B" || got[1]["current_group_name"] != nil {
 		t.Fatalf("non-members = %v", got)
 	}
+
 	e.admin(http.MethodGet, groupPath(999, "non-members")+"?q=x", nil).wantError(http.StatusNotFound, "Group not found")
 }
 
@@ -231,10 +249,12 @@ func TestGroupDisciplines(t *testing.T) {
 	if got := e.admin(http.MethodGet, groupPath(g, "disciplines"), nil).status(http.StatusOK).array(); len(got) != 1 || got[0]["name"] != "Kayak" {
 		t.Fatalf("disciplines = %v", got)
 	}
+
 	e.admin(http.MethodDelete, path, nil).status(http.StatusOK)
 	if got := e.admin(http.MethodGet, groupPath(g, "disciplines"), nil).status(http.StatusOK).array(); len(got) != 0 {
 		t.Fatalf("disciplines after removal = %v", got)
 	}
+
 	e.admin(http.MethodGet, groupPath(999, "disciplines"), nil).wantError(http.StatusNotFound, "Group not found")
 	e.admin(http.MethodDelete, groupPath(999, "disciplines", "1"), nil).wantError(http.StatusNotFound, "Group not found")
 }
@@ -247,6 +267,7 @@ func TestGroupImportExport(t *testing.T) {
 	if res["imported"] != 2.0 || res["skipped"] != 2.0 || fmt.Sprint(res["errors"]) != "[Row 4: missing name]" {
 		t.Fatalf("import = %v", res)
 	}
+
 	e.admin(http.MethodPost, "/api/groups/import", map[string]any{"csv": "title\nx"}).wantError(http.StatusBadRequest, "CSV must contain a name column")
 
 	body := string(e.admin(http.MethodGet, "/api/groups/export", nil).status(http.StatusOK).Body)

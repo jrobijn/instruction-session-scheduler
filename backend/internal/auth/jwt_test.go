@@ -11,6 +11,7 @@ func TestSignVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	claims, err := Verify("secret", tok)
 	if err != nil {
 		t.Fatalf("verify: %v", err)

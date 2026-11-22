@@ -23,14 +23,17 @@ func (m *Mailer) send(toRaw, subject, text, htmlBody string) error {
 	if fromRaw == "" {
 		fromRaw = m.cfg.User
 	}
+
 	from, err := mail.ParseAddress(fromRaw)
 	if err != nil {
 		return fmt.Errorf("invalid sender address %q: %w", fromRaw, err)
 	}
+
 	to, err := mail.ParseAddress(toRaw)
 	if err != nil {
 		return fmt.Errorf("invalid recipient address %q: %w", toRaw, err)
 	}
+
 	msg, err := buildMessage(from, to, subject, text, htmlBody)
 	if err != nil {
 		return err
@@ -38,30 +41,38 @@ func (m *Mailer) send(toRaw, subject, text, htmlBody string) error {
 
 	m.sending.Lock()
 	defer m.sending.Unlock()
+
 	c, err := m.connect()
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+
 	if err := m.authenticate(c); err != nil {
 		return err
 	}
+
 	if err := c.Mail(from.Address); err != nil {
 		return err
 	}
+
 	if err := c.Rcpt(to.Address); err != nil {
 		return err
 	}
+
 	wc, err := c.Data()
 	if err != nil {
 		return err
 	}
+
 	if _, err := wc.Write(msg); err != nil {
 		return err
 	}
+
 	if err := wc.Close(); err != nil {
 		return err
 	}
+
 	return c.Quit()
 }
 
@@ -77,6 +88,7 @@ func buildMessage(from, to *mail.Address, subject, text, htmlBody string) ([]byt
 	if at := strings.LastIndex(from.Address, "@"); at >= 0 {
 		domain = from.Address[at+1:]
 	}
+
 	headers := []string{
 		"From: " + from.String(),
 		"To: " + to.String(),
@@ -95,13 +107,16 @@ func buildMessage(from, to *mail.Address, subject, text, htmlBody string) ([]byt
 		if err != nil {
 			return nil, err
 		}
+
 		qp := quotedprintable.NewWriter(w)
 		qp.Write([]byte(part.body))
 		qp.Close()
 	}
+
 	if err := mw.Close(); err != nil {
 		return nil, err
 	}
+
 	return []byte(b.String()), nil
 }
 
@@ -128,12 +143,14 @@ func (m *Mailer) connect() (*smtp.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	conn.SetDeadline(time.Now().Add(2 * time.Minute))
 	c, err := smtp.NewClient(conn, m.cfg.Host)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
+
 	if !m.cfg.Secure {
 		if ok, _ := c.Extension("STARTTLS"); ok {
 			if err := c.StartTLS(tlsConfig); err != nil {
@@ -142,6 +159,7 @@ func (m *Mailer) connect() (*smtp.Client, error) {
 			}
 		}
 	}
+
 	return c, nil
 }
 
@@ -151,5 +169,6 @@ func (m *Mailer) authenticate(c *smtp.Client) error {
 	if ok, _ := c.Extension("AUTH"); !ok || m.cfg.User == "" {
 		return nil
 	}
+
 	return c.Auth(smtp.PlainAuth("", m.cfg.User, m.cfg.Pass, m.cfg.Host))
 }

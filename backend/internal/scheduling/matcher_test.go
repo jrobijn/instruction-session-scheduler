@@ -13,6 +13,7 @@ func TestMatcher(t *testing.T) {
 	if !m.place(2, -1) || m.placed[2] != 0 || m.placed[1] != 1 {
 		t.Fatalf("after placing picky student: 1 in %d, 2 in %d; want 1, 0", m.placed[1], m.placed[2])
 	}
+
 	// Nobody in timeslot 10 can move, so a second student needing it doesn't fit.
 	if m.place(3, -1) {
 		t.Errorf("second picky student placed, want no room")
@@ -32,6 +33,7 @@ func TestMatcher(t *testing.T) {
 
 func TestMatcherMovesBuddyLast(t *testing.T) {
 	timeslots := []Timeslot{{ID: 10, Capacity: 2}, {ID: 20, Capacity: 1}}
+
 	// 3 can only take timeslot 10, which 1 (3's buddy) and 2 fill. Either could move to 20;
 	// moving 2 keeps the buddies together, though 1 came in first.
 	m := newMatcher(timeslots, onlyIn(map[int64][]int64{1: {10, 20}, 2: {10, 20}, 3: {10}}), Buddies{1: {3}, 3: {1}})

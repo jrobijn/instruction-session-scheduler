@@ -22,14 +22,17 @@ func TestParseCSVImport(t *testing.T) {
 	if !in.has("first_name", "email") || in.has("last_name") {
 		t.Errorf("cols = %v", in.cols)
 	}
+
 	type row struct {
 		line         int
 		first, email string
 	}
+
 	var got []row
 	for _, r := range in.rows {
 		got = append(got, row{r.line, r.get("first_name"), r.get("email")})
 	}
+
 	want := []row{{2, "Ann", "a@x.nl"}, {5, `Smith, "Jr."`, "multi\nline"}, {7, "short", ""}}
 	if !slices.Equal(got, want) {
 		t.Errorf("rows = %+v, want %+v", got, want)
@@ -42,6 +45,7 @@ func TestCSVExportRoundTrip(t *testing.T) {
 	if err := writeCSV(rec, "x.csv", []string{"a", "b", "c", "d", "e"}, [][]string{values}); err != nil {
 		t.Fatal(err)
 	}
+
 	in, err := parseCSVImport(rec.Body.String())
 	if err != nil || len(in.rows) != 1 {
 		t.Fatalf("parse: %v, %d rows", err, len(in.rows))

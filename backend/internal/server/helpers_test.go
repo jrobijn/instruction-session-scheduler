@@ -18,6 +18,7 @@ func TestIsUniqueErr(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
+
 	conn.SetMaxOpenConns(1) // every connection to :memory: is its own database
 	if _, err := conn.Exec(`
 		CREATE TABLE t (a TEXT UNIQUE, ab TEXT UNIQUE, b INT, c INT, UNIQUE(b, c));
@@ -91,11 +92,13 @@ func TestDecode(t *testing.T) {
 	type body struct {
 		A int `json:"a"`
 	}
+
 	post := func(s string) *http.Request { return httptest.NewRequest(http.MethodPost, "/", strings.NewReader(s)) }
 
 	if v, err := decode[body](post(`{"a":1}`)); err != nil || v.A != 1 {
 		t.Fatalf("decode = %v, %v", v, err)
 	}
+
 	for name, tc := range map[string]struct{ body, want string }{
 		"empty":      {"", "Invalid JSON body"},
 		"malformed":  {"{", "Invalid JSON body"},

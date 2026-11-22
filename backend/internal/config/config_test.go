@@ -19,6 +19,7 @@ func cleanEnv(t *testing.T) string {
 		t.Setenv(k, "") // registers restoration
 		os.Unsetenv(k)
 	}
+
 	dir := t.TempDir()
 	t.Chdir(dir)
 	return dir
@@ -31,6 +32,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	want := Config{
 		Port: "3001", FrontendURL: "http://localhost:5173", AdminPassword: "pw", JWTSecret: "pw",
 		DBPath: "data.db", PublicDir: "public", SMTPPort: "587",
@@ -60,6 +62,7 @@ func TestLoadFromEnvironment(t *testing.T) {
 	if c.AdminPassword != "pw" || c.JWTSecret != "pw" || !c.SMTPSecure || !c.Production {
 		t.Fatalf("config = %+v (JWT secret falls back to the admin password)", c)
 	}
+
 	t.Setenv("JWT_SECRET", "jwt")
 	t.Setenv("SMTP_SECURE", "1")
 	t.Setenv("APP_ENV", "staging")
@@ -87,10 +90,12 @@ EMPTY=
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for name, tc := range map[string]struct{ got, want string }{
 		"admin password": {c.AdminPassword, "secret"},
 		"double quotes":  {c.FrontendURL, "http://quoted.test"},
@@ -105,5 +110,6 @@ EMPTY=
 	if v, ok := os.LookupEnv("EMPTY"); !ok || v != "" {
 		t.Errorf("EMPTY = %q, %v", v, ok)
 	}
+
 	os.Unsetenv("EMPTY")
 }

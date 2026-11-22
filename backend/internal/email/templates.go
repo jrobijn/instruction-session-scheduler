@@ -71,18 +71,21 @@ func renderDetails(rows []detailRow, tone string) string {
 	if tone == "danger" {
 		toneColor = theme.danger
 	}
+
 	var rowsHTML strings.Builder
 	for _, r := range rows {
 		font, size := theme.fontBody, "15px"
 		if r.mono {
 			font, size = theme.fontMono, "14px"
 		}
+
 		rowsHTML.WriteString(`
       <tr>
         <td style="padding: 4px 16px 4px 0; white-space: nowrap; vertical-align: baseline; font-family: ` + theme.fontDisplay + `; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: ` + theme.muted + `;">` + html.EscapeString(strings.TrimSuffix(r.label, ":")) + `</td>
         <td style="padding: 4px 0; vertical-align: baseline; font-family: ` + font + `; font-size: ` + size + `; color: ` + theme.text + `;">` + html.EscapeString(r.value) + `</td>
       </tr>`)
 	}
+
 	return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 20px; background: ` + theme.sunken + `; border: 1px solid ` + theme.border + `; border-left: 3px solid ` + toneColor + `; border-radius: 2px;">
       <tr>
@@ -99,6 +102,7 @@ func renderButton(url, label, variant string) string {
 	if variant == "primary" {
 		background, border, color = theme.accent, theme.accentText, theme.accentContrast
 	}
+
 	return `
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0;">
       <tr>
@@ -125,5 +129,6 @@ func sessionRows(s Strings, formattedDate, startTime, discipline string) []detai
 	if discipline != "" {
 		rows = append(rows, detailRow{label: s.DisciplineLabel, value: discipline})
 	}
+
 	return rows
 }

@@ -25,6 +25,7 @@ func (f *scheduleFixture) invitationOf(firstName string) map[string]any {
 	if row == nil {
 		f.t.Fatalf("no invitation for %s", firstName)
 	}
+
 	return row
 }
 
@@ -54,12 +55,14 @@ func (e *testEnv) notificationTypes() []string {
 	for _, r := range e.rows("SELECT type FROM notifications ORDER BY id") {
 		out = append(out, r["type"].(string))
 	}
+
 	return out
 }
 
 func (e *testEnv) hasTimer(invitationID int64) bool {
 	e.srv.mu.Lock()
 	defer e.srv.mu.Unlock()
+
 	_, ok := e.srv.timers[invitationID]
 	return ok
 }
@@ -78,6 +81,7 @@ func invitedPair(t *testing.T) (*scheduleFixture, int64) {
 	for _, n := range []string{"A", "B", "C", "D"} {
 		f.student(n, g)
 	}
+
 	f.sendInvitations()
 	return f, g
 }
@@ -115,6 +119,7 @@ func TestGetInvitationShowsEffectiveStatus(t *testing.T) {
 	if got["status"] != "expired" || got["expires_at"] != nil {
 		t.Fatalf("status = %v, expires_at = %v; want expired without expires_at", got["status"], got["expires_at"])
 	}
+
 	// The stored status is untouched; the expiry timer does that.
 	if st := f.statusOf("A"); st != "invited" {
 		t.Fatalf("stored status = %s", st)
@@ -132,6 +137,7 @@ func TestConfirmInvitation(t *testing.T) {
 	if res["success"] != true {
 		t.Fatalf("confirm = %v", res)
 	}
+
 	inv := f.invitationOf("A")
 	if inv["status"] != "confirmed" || toInt64(inv["discipline_id"]) != discipline || inv["responded_at"] == nil {
 		t.Fatalf("invitation after confirm: %v", inv)
@@ -225,10 +231,12 @@ func TestInvitationActionsRefusedWhenClosed(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(t, f)
 			}
+
 			if tc.action == "" {
 				f.public(http.MethodPost, "/api/invitations/unknown/confirm", map[string]any{}).wantError(http.StatusNotFound, tc.msg)
 				return
 			}
+
 			before := f.statusOf("A")
 			f.invitationAction("A", tc.action, map[string]any{}).wantError(http.StatusBadRequest, tc.msg)
 			if after := f.statusOf("A"); after != before {
@@ -265,6 +273,7 @@ func TestDeclineInvitesReplacement(t *testing.T) {
 	if len(f.mailTo(f.row("SELECT email FROM students WHERE first_name = 'C'")["email"].(string))) != 1 {
 		t.Fatal("replacement was not emailed")
 	}
+
 	var log map[string]any
 	json.Unmarshal([]byte(c["decision_log"].(string)), &log)
 	for k, want := range map[string]any{
@@ -284,6 +293,7 @@ func TestDeclineInvitesReplacement(t *testing.T) {
 	if st := f.statusOf("D"); st != "invited" {
 		t.Fatalf("D status = %s, want invited", st)
 	}
+
 	before := f.invitationCount()
 	f.invitationAction("D", "decline", nil).status(http.StatusOK)
 	if f.invitationCount() != before {
@@ -309,11 +319,13 @@ func TestCancelConfirmedInvitation(t *testing.T) {
 	if n := len(f.mailTo(aEmail)); n != 3 {
 		t.Fatalf("A got %d emails, want invitation, confirmation and cancellation", n)
 	}
+
 	got := strings.Join(f.notificationTypes(), ",")
 	want := "invitation_confirmed,invitation_confirmed,session_full,invitation_cancelled,session_no_longer_full"
 	if got != want {
 		t.Fatalf("notifications = %s, want %s", got, want)
 	}
+
 	var log map[string]any
 	json.Unmarshal([]byte(f.invitationOf("C")["decision_log"].(string)), &log)
 	if log["replacement_reason"] != "confirmed" {

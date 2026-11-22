@@ -20,6 +20,7 @@ func TestReplacementPullsUpBuddyOfInvitedStudent(t *testing.T) {
 	if st := f.statusOf("D"); st != "invited" {
 		t.Fatalf("D status = %s, want invited (pulled up by buddy B)", st)
 	}
+
 	var log map[string]any
 	json.Unmarshal([]byte(f.invitationOf("D")["decision_log"].(string)), &log)
 	if log["buddy_placed_near"] != "B Test" || log["candidate_rank"] != float64(2) || log["candidates_considered"] != float64(2) {
@@ -75,6 +76,7 @@ func TestReplacementFallsBackToOtherGroup(t *testing.T) {
 	if st := f.statusOf("B1"); st != "invited" {
 		t.Fatalf("B1 status = %s, want invited", st)
 	}
+
 	var log map[string]any
 	json.Unmarshal([]byte(f.invitationOf("B1")["decision_log"].(string)), &log)
 	if log["same_group_match"] != false || log["group_name"] != "B" {

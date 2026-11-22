@@ -39,37 +39,45 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	if err != nil || !found || session.TimetableID == nil {
 		return false, err
 	}
+
 	timetableID := *session.TimetableID
 
 	timetableGroups, err := timetableGroups(t.q, timetableID)
 	if err != nil {
 		return false, err
 	}
+
 	eligible, err := eligibleQueue(t.q, clubLocation(t.q), sessionID, sessionDate, timetableID)
 	if err != nil {
 		return false, err
 	}
+
 	prefs, err := loadTimeslotPrefs(t.q, timetableID)
 	if err != nil {
 		return false, err
 	}
+
 	buddies, err := loadBuddies(t.q)
 	if err != nil {
 		return false, err
 	}
+
 	// The vacated invitation already has its final status, so it doesn't count here.
 	invitedIDs, err := db.Many[int64](t.q, "SELECT student_id FROM invitations WHERE session_id = ? AND status IN ('scheduled', 'invited', 'confirmed')", sessionID)
 	if err != nil {
 		return false, err
 	}
+
 	invited := map[int64]bool{}
 	for _, id := range invitedIDs {
 		invited[id] = true
 	}
+
 	var vacancyGroup int64
 	if vacated.GroupID != nil {
 		vacancyGroup = *vacated.GroupID
 	}
+
 	pick, found := scheduling.PickReplacement(scheduling.ReplacementInput{
 		Queue:   eligible,
 		Groups:  schedulingGroups(timetableGroups),
@@ -82,6 +90,7 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	if !found {
 		return false, nil
 	}
+
 	replacement := pick.Member
 
 	// Names for the decision log; a missing row (e.g. no vacated student) leaves them empty.
@@ -89,14 +98,17 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+
 	type groupLabel struct {
 		Name  string `db:"name"`
 		Color string `db:"color"`
 	}
+
 	group, _, err := db.One[groupLabel](t.q, "SELECT name, color FROM groups WHERE id = ?", pick.GroupID)
 	if err != nil {
 		return false, err
 	}
+
 	var buddyName string
 	if pick.PulledUpBy != 0 {
 		if buddyName, _, err = db.One[string](t.q, "SELECT first_name || ' ' || last_name FROM students WHERE id = ?", pick.PulledUpBy); err != nil {
@@ -110,6 +122,7 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+
 		preferredTimeslots = prefs.startTimes(replacement.ID, slots)
 	}
 
@@ -117,6 +130,7 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	if vacated.Status != "" {
 		reason = vacated.Status
 	}
+
 	// candidate_rank and candidates_considered count within the queue the replacement was
 	// picked from (as in a generated schedule, where both are counted within the student's
 	// group). The rank is 1 unless a buddy pulled them up.

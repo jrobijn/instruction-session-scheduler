@@ -22,28 +22,34 @@ func selectWithBuddies(list []queue.Member, slots int, buddies Buddies) (selecte
 		taken[st.ID] = true
 		selected = append(selected, selection{member: st, pulledUpBy: pulledUpBy})
 	}
+
 	for i, st := range list {
 		if len(taken) >= slots {
 			break
 		}
+
 		if taken[st.ID] {
 			continue
 		}
+
 		take(st, nil)
 		for _, buddy := range list {
 			if len(taken) >= slots {
 				break
 			}
+
 			if !taken[buddy.ID] && slices.Contains(buddies[st.ID], buddy.ID) {
 				take(buddy, &list[i])
 			}
 		}
 	}
+
 	rest = []queue.Member{}
 	for _, st := range list {
 		if !taken[st.ID] {
 			rest = append(rest, st)
 		}
 	}
+
 	return selected, rest
 }

@@ -20,6 +20,7 @@ type candidateLog struct {
 	GroupColor           string   `json:"group_color"`
 	PreferredTimeslots   []string `json:"preferred_timeslots"`
 	PreferredDays        []int    `json:"preferred_days"`
+
 	// BuddyPlacedNear is the name of the buddy who pulled the student up, if any.
 	BuddyPlacedNear string `json:"buddy_placed_near"`
 }
@@ -46,12 +47,14 @@ func preferredDays(studentDays, clubDays string) []int {
 	if studentDays == "" {
 		return nil
 	}
+
 	club := map[int]bool{}
 	for _, d := range strings.Split(clubDays, "|") {
 		if n, err := strconv.Atoi(strings.TrimSpace(d)); err == nil {
 			club[n] = true
 		}
 	}
+
 	out := []int{}
 	for _, d := range strings.Split(studentDays, "|") {
 		if n, err := strconv.Atoi(strings.TrimSpace(d)); err == nil && club[n] {
@@ -61,5 +64,6 @@ func preferredDays(studentDays, clubDays string) []int {
 	if len(out) >= len(club) {
 		return nil
 	}
+
 	return out
 }

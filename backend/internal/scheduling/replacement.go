@@ -6,17 +6,23 @@ import "github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
 type ReplacementInput struct {
 	// Queue is everyone who can be invited, in queue order.
 	Queue []queue.Member
+
 	// Groups are the timetable's groups; only their percentages are used.
 	Groups []Group
+
 	// Allows reports whether a student may take a timeslot (by id).
 	Allows func(studentID, timeslotID int64) bool
+
 	// Vacancy is the spot to fill.
 	Vacancy Vacancy
+
 	// Buddies lists each student's buddies.
 	Buddies Buddies
+
 	// Invited holds the students with an active (scheduled, invited or confirmed) invitation
 	// to the session: their buddies are pulled up.
 	Invited map[int64]bool
+
 	// Random is the random source for picking another group (see PickReplacement).
 	Random func() float64
 }
@@ -24,6 +30,7 @@ type ReplacementInput struct {
 // Vacancy is a spot that was given up and needs a new student.
 type Vacancy struct {
 	TimeslotID int64
+
 	// GroupID is the group of the invitation that held the spot; 0 if it had none (it was
 	// added manually).
 	GroupID int64
@@ -32,14 +39,18 @@ type Vacancy struct {
 // ReplacementPick is the student chosen for a vacancy.
 type ReplacementPick struct {
 	Member queue.Member
+
 	// GroupID is the group the new invitation counts for.
 	GroupID int64
+
 	// Rank is the student's position in the queue they were picked from, 1 first, out of
 	// Considered students. It is 1 unless they were pulled up.
 	Rank, Considered int
+
 	// SameGroup is set when the student comes from the vacancy's group (or, for a vacancy
 	// without a group, from the whole queue).
 	SameGroup bool
+
 	// PulledUpBy is the invited buddy who pulled the student up; 0 if none.
 	PulledUpBy int64
 }
@@ -67,6 +78,7 @@ func PickReplacement(in ReplacementInput) (ReplacementPick, bool) {
 		if len(candidates) == 0 {
 			return ReplacementPick{}, false
 		}
+
 		return in.pickWithBuddies(candidates), true
 	}
 
@@ -74,13 +86,16 @@ func PickReplacement(in ReplacementInput) (ReplacementPick, bool) {
 	if q := byGroup.group(in.Vacancy.GroupID); len(q) > 0 {
 		return in.pickWithBuddies(q), true
 	}
+
 	if byGroup.empty() {
 		return ReplacementPick{}, false
 	}
+
 	percentage := map[int64]float64{}
 	for _, g := range in.Groups {
 		percentage[g.ID] = g.Percentage
 	}
+
 	picked := byGroup.pickWeighted(percentage, in.Random)
 	q := byGroup.group(picked)
 	return ReplacementPick{Member: q[0], GroupID: picked, Rank: 1, Considered: len(q)}, true
@@ -92,6 +107,7 @@ func (in ReplacementInput) pickWithBuddies(q []queue.Member) ReplacementPick {
 		m := q[i]
 		return ReplacementPick{Member: m, GroupID: m.GroupID, Rank: i + 1, Considered: len(q), SameGroup: true, PulledUpBy: pulledUpBy}
 	}
+
 	for i, m := range q {
 		for _, buddy := range in.Buddies[m.ID] {
 			if in.Invited[buddy] {
@@ -99,5 +115,6 @@ func (in ReplacementInput) pickWithBuddies(q []queue.Member) ReplacementPick {
 			}
 		}
 	}
+
 	return pick(0, 0)
 }

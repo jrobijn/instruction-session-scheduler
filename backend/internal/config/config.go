@@ -23,6 +23,7 @@ type Config struct {
 	SMTPUser   string
 	SMTPPass   string
 	SMTPFrom   string
+
 	// EmailPreviewDir: when SMTP is not configured, unsent emails are saved here as HTML.
 	EmailPreviewDir string
 }
@@ -63,6 +64,7 @@ func firstNonEmpty(values ...string) string {
 			return v
 		}
 	}
+
 	return ""
 }
 
@@ -81,11 +83,13 @@ func loadDotEnv(path string) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+
 		line = strings.TrimPrefix(line, "export ")
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
 		}
+
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
 		if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
@@ -93,6 +97,7 @@ func loadDotEnv(path string) {
 		} else if i := strings.Index(value, " #"); i >= 0 {
 			value = strings.TrimSpace(value[:i])
 		}
+
 		if _, exists := os.LookupEnv(key); !exists {
 			os.Setenv(key, value)
 		}

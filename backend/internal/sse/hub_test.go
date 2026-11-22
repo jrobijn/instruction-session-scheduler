@@ -13,6 +13,7 @@ import (
 func (h *Hub) subscribers(channel string) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	return len(h.clients[channel])
 }
 
@@ -23,6 +24,7 @@ func waitFor(t *testing.T, cond func() bool) {
 		if time.Now().After(deadline) {
 			t.Fatal("condition not met in time")
 		}
+
 		time.Sleep(5 * time.Millisecond)
 	}
 }
@@ -36,10 +38,12 @@ func subscribe(t *testing.T, srv *httptest.Server, channel string) (*bufio.Scann
 		cancel()
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { resp.Body.Close() })
 	if resp.Header.Get("Content-Type") != "text/event-stream" || resp.Header.Get("Cache-Control") != "no-cache" {
 		t.Fatalf("headers = %v", resp.Header)
 	}
+
 	return bufio.NewScanner(resp.Body), cancel
 }
 
@@ -52,8 +56,10 @@ func TestHubDeliversToChannelSubscribers(t *testing.T) {
 
 	a, cancelA := subscribe(t, srv, "a")
 	defer cancelA()
+
 	b, cancelB := subscribe(t, srv, "b")
 	defer cancelB()
+
 	waitFor(t, func() bool { return h.subscribers("a") == 1 && h.subscribers("b") == 1 })
 
 	h.Broadcast("a", "hello", map[string]int{"n": 1})
@@ -70,8 +76,10 @@ func TestHubDeliversToChannelSubscribers(t *testing.T) {
 				}
 			}
 		}
+
 		return lines
 	}
+
 	if got := strings.Join(read(a), "|"); got != `event: hello|data: {"n":1}` {
 		t.Errorf("a got %q", got)
 	}
@@ -96,13 +104,16 @@ func TestBroadcastWithoutSubscribersOrToSlowClient(t *testing.T) {
 			h.Broadcast("nobody", "x", 1)
 			h.Broadcast("slow", "x", 1)
 		}
+
 		close(done)
 	}()
+
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("broadcast blocked on a slow client")
 	}
+
 	h.unsubscribe("slow", c)
 	if h.subscribers("slow") != 0 {
 		t.Fatal("unsubscribe left the client registered")
@@ -130,12 +141,15 @@ func TestCloseEndsStreams(t *testing.T) {
 
 	sc, cancel := subscribe(t, srv, "a")
 	defer cancel()
+
 	waitFor(t, func() bool { return h.subscribers("a") == 1 })
 
 	h.Close()
 	h.Close() // idempotent
+
 	// Scan drains the initial newline and returns false once the stream ends.
 	for sc.Scan() {
 	}
+
 	waitFor(t, func() bool { return h.subscribers("a") == 0 })
 }

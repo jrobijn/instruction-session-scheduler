@@ -43,10 +43,12 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
+
 		type link struct {
 			DisciplineID int64 `db:"discipline_id"`
 			GroupRef
 		}
+
 		links, err := db.Many[link](s.db, `
 			SELECT dg.discipline_id, g.id, g.name
 			FROM discipline_groups dg
@@ -55,18 +57,22 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
+
 		byDiscipline := map[int64][]GroupRef{}
 		for _, l := range links {
 			byDiscipline[l.DisciplineID] = append(byDiscipline[l.DisciplineID], l.GroupRef)
 		}
+
 		out := make([]DisciplineWithGroups, len(disciplines))
 		for i, d := range disciplines {
 			groups := byDiscipline[d.ID]
 			if groups == nil {
 				groups = []GroupRef{}
 			}
+
 			out[i] = DisciplineWithGroups{Discipline: d, Groups: groups}
 		}
+
 		httpx.OK(w, out)
 		return nil
 	})
@@ -76,10 +82,12 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
+
 		rows := make([][]string, len(disciplines))
 		for i, d := range disciplines {
 			rows[i] = []string{d.Name, d.Abbreviation, strconv.FormatInt(d.Active, 10)}
 		}
+
 		return writeCSV(w, "disciplines.csv", []string{"name", "abbreviation", "active"}, rows)
 	})
 
@@ -89,6 +97,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if !in.has("name") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain a name column")
 			return nil
@@ -102,6 +111,7 @@ func (s *Server) disciplineRoutes() {
 					result.skip(row, "missing name")
 					continue
 				}
+
 				id, found, err := db.One[int64](tx, "SELECT id FROM disciplines WHERE name = ?", name)
 				if err != nil {
 					return err
@@ -111,6 +121,7 @@ func (s *Server) disciplineRoutes() {
 				} else {
 					_, err = tx.Exec("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)", name, abbr)
 				}
+
 				switch {
 				case isUniqueErr(err, "disciplines.name"):
 					result.skip(row, "A discipline with this name already exists")
@@ -120,11 +131,13 @@ func (s *Server) disciplineRoutes() {
 					result.Imported++
 				}
 			}
+
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, result)
 		return nil
 	})
@@ -135,6 +148,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		row, found, err := s.getDiscipline(id)
 		if err != nil {
 			return err
@@ -143,6 +157,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})
@@ -152,15 +167,18 @@ func (s *Server) disciplineRoutes() {
 			Name         string `json:"name"`
 			Abbreviation string `json:"abbreviation"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.Name == "" {
 			httpx.Error(w, http.StatusBadRequest, "Name is required")
 			return nil
 		}
+
 		row, err := db.Get[Discipline](s.db, "INSERT INTO disciplines (name, abbreviation) VALUES (?, ?) RETURNING id, name, abbreviation, active",
 			in.Name, in.Abbreviation)
 		if isUniqueErr(err, "disciplines.name") {
@@ -170,6 +188,7 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.JSON(w, http.StatusCreated, row)
 		return nil
 	})
@@ -180,16 +199,19 @@ func (s *Server) disciplineRoutes() {
 			Abbreviation *string `json:"abbreviation"`
 			Active       *int64  `json:"active"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		row, found, err := db.One[Discipline](s.db, `
 			UPDATE disciplines SET
 				name = COALESCE(?, name),
@@ -209,6 +231,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})
@@ -217,20 +240,24 @@ func (s *Server) disciplineRoutes() {
 		type request struct {
 			GroupIDs []int64 `json:"group_ids"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.GroupIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "group_ids array is required")
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -239,20 +266,24 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM discipline_groups WHERE discipline_id = ?", id); err != nil {
 				return err
 			}
+
 			for _, gid := range in.GroupIDs {
 				if _, err := tx.Exec("INSERT INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", id, gid); err != nil {
 					return err
 				}
 			}
+
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -263,6 +294,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -271,12 +303,14 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		type groupSummary struct {
 			ID        int64  `db:"id" json:"id"`
 			Name      string `db:"name" json:"name"`
 			IsDefault int64  `db:"is_default" json:"is_default"`
 			Active    int64  `db:"active" json:"active"`
 		}
+
 		groups, err := db.Many[groupSummary](s.db, `
 			SELECT g.id, g.name, g.is_default, g.active
 			FROM groups g
@@ -286,6 +320,7 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, groups)
 		return nil
 	})
@@ -296,6 +331,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -304,20 +340,24 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		groupID, ok := pathID(r, "groupId")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
+
 		if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", groupID); err != nil {
 			return err
 		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
+
 		if _, err := s.db.Exec("INSERT OR IGNORE INTO discipline_groups (discipline_id, group_id) VALUES (?, ?)", id, groupID); err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -328,6 +368,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM disciplines WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -336,14 +377,17 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		groupID, ok := pathID(r, "groupId")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Group not found")
 			return nil
 		}
+
 		if _, err := s.db.Exec("DELETE FROM discipline_groups WHERE discipline_id = ? AND group_id = ?", id, groupID); err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -354,6 +398,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		res, err := s.db.Exec("DELETE FROM disciplines WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -362,6 +407,7 @@ func (s *Server) disciplineRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Discipline not found")
 			return nil
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -371,6 +417,7 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, disciplines)
 		return nil
 	})
@@ -381,6 +428,7 @@ func (s *Server) disciplineRoutes() {
 			StudentID int64  `db:"student_id"`
 			GroupID   *int64 `db:"group_id"`
 		}
+
 		inv, found, err := db.One[tokenInvitation](s.db, "SELECT student_id, group_id FROM invitations WHERE token = ?", r.PathValue("token"))
 		if err != nil {
 			return err
@@ -401,6 +449,7 @@ func (s *Server) disciplineRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, disciplines)
 		return nil
 	})

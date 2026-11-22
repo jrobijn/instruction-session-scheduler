@@ -16,6 +16,7 @@ func openTemp(t *testing.T) (*DB, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { d.Close() })
 	return d, path
 }
@@ -26,6 +27,7 @@ func latestVersion(t *testing.T) int64 {
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no migrations embedded: %v", err)
 	}
+
 	return int64(len(files))
 }
 
@@ -35,6 +37,7 @@ func dbVersion(t *testing.T, d *DB) int64 {
 	if err := d.QueryRow("SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1").Scan(&v); err != nil {
 		t.Fatal(err)
 	}
+
 	return v
 }
 
@@ -45,6 +48,7 @@ func legacySchema(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return string(b)
 }
 
@@ -63,6 +67,7 @@ func TestMigrateFreshDatabase(t *testing.T) {
 	if backups, _ := filepath.Glob(path + ".bak-*"); len(backups) != 0 {
 		t.Fatalf("empty database should not be backed up, got %v", backups)
 	}
+
 	// A second run has nothing to do.
 	if err := d.Migrate(ctx); err != nil {
 		t.Fatal(err)
@@ -87,6 +92,7 @@ func TestMigratePreGooseDatabase(t *testing.T) {
 	if got, want := dbVersion(t, d), latestVersion(t); got != want {
 		t.Fatalf("version = %d, want %d", got, want)
 	}
+
 	var n int
 	if err := d.QueryRow("SELECT COUNT(*) FROM students").Scan(&n); err != nil || n != 1 {
 		t.Fatalf("students = %d (%v), want 1", n, err)
@@ -104,6 +110,7 @@ func TestMigrateRefusesOutdatedDatabase(t *testing.T) {
 	if _, err := d.Exec("CREATE TABLE students (id INTEGER PRIMARY KEY, first_name TEXT)"); err != nil {
 		t.Fatal(err)
 	}
+
 	err := d.Migrate(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "outdated") {
 		t.Fatalf("err = %v, want schema outdated error", err)
@@ -119,6 +126,7 @@ func TestMigrateRefusesNewerDatabase(t *testing.T) {
 	if _, err := d.Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)", latestVersion(t)+1); err != nil {
 		t.Fatal(err)
 	}
+
 	err := d.Migrate(ctx)
 	if err == nil || !strings.Contains(err.Error(), "newer version") {
 		t.Fatalf("err = %v, want newer-version error", err)

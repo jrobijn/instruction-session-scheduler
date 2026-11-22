@@ -24,6 +24,7 @@ func TestLoadBuddies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	want := scheduling.Buddies{
 		a: {c, b},
 		b: {c, a},
@@ -53,10 +54,12 @@ func TestBuddyGroups(t *testing.T) {
 	if e.row("SELECT 1 FROM buddy_groups WHERE id = ?", id) == nil {
 		t.Fatal("group with a member left was deleted")
 	}
+
 	e.admin(http.MethodDelete, fmt.Sprintf("/api/buddy-groups/%d/members/%d", id, b), nil).status(http.StatusOK)
 	if e.row("SELECT 1 FROM buddy_groups WHERE id = ?", id) != nil {
 		t.Fatal("empty buddy group not deleted")
 	}
+
 	e.admin(http.MethodDelete, fmt.Sprintf("/api/buddy-groups/%d/members/%d", id, b), nil).wantError(http.StatusNotFound, "Buddy group not found")
 
 	id = toInt64(e.admin(http.MethodPost, "/api/buddy-groups/quick-create", map[string]any{"student_ids": []any{a, c}}).
@@ -65,6 +68,7 @@ func TestBuddyGroups(t *testing.T) {
 	if n := len(e.rows("SELECT 1 FROM buddy_group_members")); n != 0 {
 		t.Fatalf("%d members left", n)
 	}
+
 	e.admin(http.MethodDelete, fmt.Sprintf("/api/buddy-groups/%d", id), nil).wantError(http.StatusNotFound, "Buddy group not found")
 }
 

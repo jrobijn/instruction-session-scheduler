@@ -25,6 +25,7 @@ func decode[T any](r *http.Request) (T, error) {
 	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(&v); err != nil {
 		return v, errors.New("Invalid JSON body")
 	}
+
 	return v, nil
 }
 
@@ -37,14 +38,17 @@ func isUniqueErr(err error, columns ...string) bool {
 	if !errors.As(err, &se) {
 		return false
 	}
+
 	if code := se.Code(); code != sqlite3.SQLITE_CONSTRAINT_UNIQUE && code != sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY {
 		return false
 	}
+
 	// The message reads "... UNIQUE constraint failed: t.a, t.b (2067)".
 	_, failed, ok := strings.Cut(se.Error(), "UNIQUE constraint failed: ")
 	if !ok {
 		return false
 	}
+
 	failed = strings.TrimSuffix(failed, fmt.Sprintf(" (%d)", se.Code()))
 	return failed == strings.Join(columns, ", ")
 }

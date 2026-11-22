@@ -23,6 +23,7 @@ func TestAuthChecks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e.cookie = &http.Cookie{Name: authCookie, Value: token}
 			e.admin(http.MethodGet, "/api/students", nil).wantError(http.StatusUnauthorized, "Invalid or expired token")
+
 			// SSE streams are admin-only too.
 			e.admin(http.MethodGet, "/api/sessions/events", nil).wantError(http.StatusUnauthorized, "Invalid or expired token")
 			e.admin(http.MethodGet, "/api/notifications/events", nil).wantError(http.StatusUnauthorized, "Invalid or expired token")

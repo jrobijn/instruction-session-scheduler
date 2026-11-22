@@ -77,10 +77,12 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		type membership struct {
 			StudentID int64 `db:"student_id"`
 			StudentGroup
 		}
+
 		memberships, err := db.Many[membership](s.db, `
 			SELECT sg.student_id, g.id, g.name, g.color
 			FROM student_groups sg
@@ -88,6 +90,7 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		groupByStudent := map[int64]StudentGroup{}
 		for _, m := range memberships {
 			groupByStudent[m.StudentID] = m.StudentGroup
@@ -97,14 +100,17 @@ func (s *Server) studentRoutes() {
 			StudentID    int64 `db:"student_id"`
 			BuddyGroupID int64 `db:"buddy_group_id"`
 		}
+
 		buddyMemberships, err := db.Many[buddyMembership](s.db, "SELECT student_id, buddy_group_id FROM buddy_group_members ORDER BY rowid")
 		if err != nil {
 			return err
 		}
+
 		firstNameByID := make(map[int64]string, len(students))
 		for _, st := range students {
 			firstNameByID[st.ID] = st.FirstName
 		}
+
 		// Buddy group names are the listed (non-deleted) members' first names.
 		namesByBuddyGroup := map[int64][]string{}
 		for _, m := range buddyMemberships {
@@ -112,6 +118,7 @@ func (s *Server) studentRoutes() {
 				namesByBuddyGroup[m.BuddyGroupID] = append(namesByBuddyGroup[m.BuddyGroupID], name)
 			}
 		}
+
 		buddyByStudent := map[int64]GroupRef{}
 		for _, m := range buddyMemberships {
 			buddyByStudent[m.StudentID] = GroupRef{ID: m.BuddyGroupID, Name: strings.Join(namesByBuddyGroup[m.BuddyGroupID], " & ")}
@@ -123,10 +130,12 @@ func (s *Server) studentRoutes() {
 			if g, ok := groupByStudent[st.ID]; ok {
 				out[i].Group = &g
 			}
+
 			if bg, ok := buddyByStudent[st.ID]; ok {
 				out[i].BuddyGroup = &bg
 			}
 		}
+
 		httpx.OK(w, out)
 		return nil
 	})
@@ -136,11 +145,13 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		rows := make([][]string, len(students))
 		for i, st := range students {
 			rows[i] = []string{st.FirstName, st.LastName, st.Email, st.MembershipID,
 				strconv.FormatInt(st.AttendedSessions, 10), strconv.FormatInt(st.NoShowCount, 10), st.PreferredDays, strconv.FormatInt(st.Active, 10)}
 		}
+
 		header := []string{"first_name", "last_name", "email", "membership_id", "attended_sessions", "no_show_count", "preferred_days", "active"}
 		return writeCSV(w, "students.csv", header, rows)
 	})
@@ -151,6 +162,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if !in.has("first_name", "last_name", "email") {
 			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
 			return nil
@@ -170,6 +182,7 @@ func (s *Server) studentRoutes() {
 					result.skip(row, "missing required fields")
 					continue
 				}
+
 				membershipID := row.get("membership_id")
 
 				// Optional columns stay nil when blank, which keeps the current value. A number
@@ -191,17 +204,20 @@ func (s *Server) studentRoutes() {
 					if v == "" {
 						continue
 					}
+
 					n, err := strconv.Atoi(v)
 					if err != nil {
 						invalid = fmt.Sprintf("%s must be a whole number, got %q", f.col, v)
 						break
 					}
+
 					*f.dst = &n
 				}
 				if invalid != "" {
 					result.skip(row, "%s", invalid)
 					continue
 				}
+
 				if d := row.get("preferred_days"); d != "" {
 					opt.PreferredDays = &d
 				}
@@ -212,6 +228,7 @@ func (s *Server) studentRoutes() {
 				if err != nil {
 					return err
 				}
+
 				studentID := existing
 				if found {
 					_, err = tx.Exec(`
@@ -250,13 +267,16 @@ func (s *Server) studentRoutes() {
 						return err
 					}
 				}
+
 				result.Imported++
 			}
+
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, result)
 		return nil
 	})
@@ -267,6 +287,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		row, found, err := s.getStudent(id)
 		if err != nil {
 			return err
@@ -275,6 +296,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})
@@ -285,6 +307,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
@@ -293,12 +316,14 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		type invitation struct {
 			ID          int64  `db:"id" json:"id"`
 			Status      string `db:"status" json:"status"`
 			SessionDate string `db:"session_date" json:"session_date"`
 			StartTime   string `db:"start_time" json:"start_time"`
 		}
+
 		invitations, err := db.Many[invitation](s.db, `
 			SELECT i.id, i.status, ts.date AS session_date, tsl.start_time
 			FROM invitations i
@@ -310,6 +335,7 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, invitations)
 		return nil
 	})
@@ -320,6 +346,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
@@ -328,6 +355,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		type historyEntry struct {
 			ID             int64   `db:"id" json:"id"`
 			Status         string  `db:"status" json:"status"`
@@ -339,6 +367,7 @@ func (s *Server) studentRoutes() {
 			GroupName      *string `db:"group_name" json:"group_name"`
 			GroupColor     *string `db:"group_color" json:"group_color"`
 		}
+
 		invitations, err := db.Many[historyEntry](s.db, `
 			SELECT i.id, i.status, i.invited_at, i.responded_at,
 				ts.date AS session_date, tsl.start_time,
@@ -354,6 +383,7 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, invitations)
 		return nil
 	})
@@ -366,18 +396,22 @@ func (s *Server) studentRoutes() {
 			MembershipID  string `json:"membership_id"`
 			PreferredDays string `json:"preferred_days"` // "" for the column default (every day)
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.FirstName == "" || in.LastName == "" || in.Email == "" {
 			httpx.Error(w, http.StatusBadRequest, "First name, last name and email are required")
 			return nil
 		}
+
 		if in.PreferredDays == "" {
 			in.PreferredDays = everyDay
 		}
+
 		row, err := db.Get[Student](s.db, `
 			INSERT INTO students (first_name, last_name, email, membership_id, preferred_days)
 			VALUES (?, ?, ?, ?, ?)
@@ -391,6 +425,7 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		// Auto-add to the default group.
 		if defaultGroup, found, err := db.One[int64](s.db, "SELECT id FROM groups WHERE is_default = 1"); err != nil {
 			return err
@@ -399,6 +434,7 @@ func (s *Server) studentRoutes() {
 				return err
 			}
 		}
+
 		httpx.JSON(w, http.StatusCreated, row)
 		return nil
 	})
@@ -413,16 +449,19 @@ func (s *Server) studentRoutes() {
 			Active           *int64  `json:"active"`
 			PreferredDays    *string `json:"preferred_days"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		student, found, err := s.getStudent(id)
 		if err != nil {
 			return err
@@ -431,6 +470,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		var row Student
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			var err error
@@ -450,12 +490,14 @@ func (s *Server) studentRoutes() {
 				in.AttendedSessions, in.Active, in.PreferredDays, id); err != nil {
 				return err
 			}
+
 			// Reactivation (active: 1 over a stored 0) moves the queue position.
 			if in.Active != nil && *in.Active == 1 && student.Active == 0 {
 				if _, err := tx.Exec("UPDATE student_groups SET reactivated_at = datetime('now') WHERE student_id = ?", id); err != nil {
 					return err
 				}
 			}
+
 			return nil
 		})
 		if isUniqueErr(err, "students.email") {
@@ -465,6 +507,7 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})
@@ -475,6 +518,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
@@ -483,6 +527,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		// Open invitations for sessions that haven't taken place are admin-cancelled, as if
 		// the admin cancelled each one; completed sessions are history and stay as they are.
 		open, err := db.Many[struct {
@@ -496,16 +541,19 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		var sessions []int64
 		err = s.inTx(func(t *txn) error {
 			for _, inv := range open {
 				if err := t.adminCancelInvitation(inv.ID); err != nil {
 					return err
 				}
+
 				if sid := inv.SessionID; !slices.Contains(sessions, sid) {
 					sessions = append(sessions, sid)
 				}
 			}
+
 			// Soft-delete: mark as deleted and deactivate.
 			_, err := t.q.Exec("UPDATE students SET deleted_at = datetime('now'), active = 0 WHERE id = ?", id)
 			return err
@@ -513,10 +561,12 @@ func (s *Server) studentRoutes() {
 		if err != nil {
 			return err
 		}
+
 		for _, sid := range sessions {
 			s.broadcastSessionReload(sid)
 			s.broadcastSessionCounts(sid)
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -527,6 +577,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
@@ -535,19 +586,23 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		type preference struct {
 			TimetableID int64 `db:"timetable_id"`
 			TimeslotID  int64 `db:"timeslot_id"`
 		}
+
 		preferences, err := db.Many[preference](s.db, "SELECT timetable_id, timeslot_id FROM student_preferred_timeslots WHERE student_id = ?", id)
 		if err != nil {
 			return err
 		}
+
 		// Timeslot ids by timetable id; timetables without preferences are absent (= all timeslots).
 		byTimetable := map[int64][]int64{}
 		for _, p := range preferences {
 			byTimetable[p.TimetableID] = append(byTimetable[p.TimetableID], p.TimeslotID)
 		}
+
 		httpx.OK(w, byTimetable)
 		return nil
 	})
@@ -556,20 +611,24 @@ func (s *Server) studentRoutes() {
 		type request struct {
 			TimeslotIDs []int64 `json:"timeslot_ids"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		if in.TimeslotIDs == nil {
 			httpx.Error(w, http.StatusBadRequest, "timeslot_ids array is required")
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
@@ -578,21 +637,25 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		timetableID, ok := pathID(r, "timetableId")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ?", timetableID); err != nil {
 			return err
 		} else if !found {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
+
 		all, err := db.Many[int64](s.db, "SELECT id FROM timeslots WHERE timetable_id = ?", timetableID)
 		if err != nil {
 			return err
 		}
+
 		// Keep only ids of this timetable's timeslots, once each, in the order sent.
 		var selected []int64
 		seen := map[int64]bool{}
@@ -602,24 +665,29 @@ func (s *Server) studentRoutes() {
 				selected = append(selected, tsID)
 			}
 		}
+
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM student_preferred_timeslots WHERE student_id = ? AND timetable_id = ?", id, timetableID); err != nil {
 				return err
 			}
+
 			// Selecting every timeslot is stored as no preference (= all).
 			if len(selected) == len(all) {
 				return nil
 			}
+
 			for _, tsID := range selected {
 				if _, err := tx.Exec("INSERT INTO student_preferred_timeslots (student_id, timeslot_id, timetable_id) VALUES (?, ?, ?)", id, tsID, timetableID); err != nil {
 					return err
 				}
 			}
+
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -630,6 +698,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
@@ -638,11 +707,13 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		type studentGroup struct {
 			ID        int64  `db:"id" json:"id"`
 			Name      string `db:"name" json:"name"`
 			IsDefault int64  `db:"is_default" json:"is_default"`
 		}
+
 		g, found, err := db.One[studentGroup](s.db, `
 			SELECT g.id, g.name, g.is_default FROM groups g
 			JOIN student_groups sg ON sg.group_id = g.id
@@ -654,6 +725,7 @@ func (s *Server) studentRoutes() {
 			httpx.OK(w, nil) // null when the student has no group
 			return nil
 		}
+
 		httpx.OK(w, g)
 		return nil
 	})
@@ -662,16 +734,19 @@ func (s *Server) studentRoutes() {
 		type request struct {
 			GroupID int64 `json:"group_id"` // 0 or null: no group
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		_, found, err := db.One[int](s.db, "SELECT 1 FROM students WHERE id = ? AND deleted_at IS NULL", id)
 		if err != nil {
 			return err
@@ -680,19 +755,23 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM student_groups WHERE student_id = ?", id); err != nil {
 				return err
 			}
+
 			if in.GroupID != 0 {
 				_, err := tx.Exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, datetime('now'))", id, in.GroupID)
 				return err
 			}
+
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.Success(w)
 		return nil
 	})
@@ -701,21 +780,25 @@ func (s *Server) studentRoutes() {
 		type request struct {
 			Days float64 `json:"days"`
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		days := in.Days
 		if days <= 0 {
 			httpx.Error(w, http.StatusBadRequest, "A positive number of days is required")
 			return nil
 		}
+
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		// new Date(Date.now() + days * 864e5).toISOString() truncated to whole seconds, UTC.
 		ms := math.Trunc(float64(time.Now().UnixMilli()) + days*24*60*60*1000)
 		cooldownUntil := time.UnixMilli(int64(ms)).UTC().Format(time.DateTime)
@@ -730,6 +813,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})
@@ -740,6 +824,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		// End the cooldown now rather than erasing it, so its end still counts for the queue position.
 		row, found, err := db.One[Student](s.db, `
 			UPDATE students
@@ -754,6 +839,7 @@ func (s *Server) studentRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Student not found")
 			return nil
 		}
+
 		httpx.OK(w, row)
 		return nil
 	})

@@ -24,17 +24,21 @@ func (e *testEnv) openStream(path string, cookie *http.Cookie) *bufio.Scanner {
 	if cookie != nil {
 		req.AddCookie(cookie)
 	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		e.t.Fatal(err)
 	}
+
 	e.t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusOK {
 		e.t.Fatalf("GET %s = %d", path, resp.StatusCode)
 	}
+
 	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
 		e.t.Fatalf("Content-Type = %q", ct)
 	}
+
 	sc := bufio.NewScanner(resp.Body)
 	sc.Scan() // the initial blank line confirms the subscription is in place
 	return sc
@@ -49,6 +53,7 @@ func readEvent(t *testing.T, sc *bufio.Scanner) (string, string) {
 			return ev, strings.TrimPrefix(sc.Text(), "data: ")
 		}
 	}
+
 	t.Fatalf("stream ended: %v", sc.Err())
 	return "", ""
 }

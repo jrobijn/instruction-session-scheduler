@@ -11,6 +11,7 @@ func amsterdam(t *testing.T) *time.Location {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return loc
 }
 
@@ -19,6 +20,7 @@ func utc(s string) time.Time {
 	if err != nil {
 		panic(err)
 	}
+
 	return t
 }
 
@@ -41,8 +43,10 @@ func TestSlotStart(t *testing.T) {
 			if ok {
 				t.Errorf("slotStart(%q, %q) = %v, want invalid", tc.date, tc.start, got)
 			}
+
 			continue
 		}
+
 		if !ok || !got.Equal(utc(tc.want)) {
 			t.Errorf("slotStart(%q, %q) = %v, %v; want %s UTC", tc.date, tc.start, got.UTC(), ok, tc.want)
 		}
@@ -54,6 +58,7 @@ func TestComputeExpiresAtTruncatesMinutes(t *testing.T) {
 	if !ok || !got.Equal(utc("2030-01-07 11:30:00")) {
 		t.Fatalf("got %v, %v", got, ok)
 	}
+
 	if _, ok := computeExpiresAt("not a time", 10); ok {
 		t.Fatal("invalid invited_at should not parse")
 	}
@@ -61,6 +66,7 @@ func TestComputeExpiresAtTruncatesMinutes(t *testing.T) {
 
 func TestInvitationDeadline(t *testing.T) {
 	loc := amsterdam(t)
+
 	// Slot starts 2030-01-07 17:00 UTC.
 	for _, tc := range []struct {
 		name      string
@@ -111,6 +117,7 @@ func TestEffectiveStatus(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&i)
 			}
+
 			if got := effectiveStatus(i, tc.minutes, loc, utc(tc.now)); got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
@@ -124,6 +131,7 @@ func TestDayOfWeek(t *testing.T) {
 			t.Errorf("dayOfWeek(%s) = %d, %v; want %d", date, got, ok, want)
 		}
 	}
+
 	if _, ok := dayOfWeek("2030-13-01"); ok {
 		t.Error("invalid date accepted")
 	}
@@ -137,6 +145,7 @@ func TestExpiryMinutesSetting(t *testing.T) {
 			t.Errorf("expiryMinutes with %q = %v, want %v", value, got, want)
 		}
 	}
+
 	e.exec("DELETE FROM settings WHERE key = 'invitation_expiry_minutes'")
 	if got := expiryMinutes(e.srv.db); got != 120 {
 		t.Errorf("default expiryMinutes = %v, want 120", got)

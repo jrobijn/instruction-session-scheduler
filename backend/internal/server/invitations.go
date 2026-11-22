@@ -94,6 +94,7 @@ func (s *Server) invitationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
+
 		minutes, loc := expiryMinutes(s.db), clubLocation(s.db)
 		timing := inv.timing()
 		status := effectiveStatus(timing, minutes, loc, s.now())
@@ -104,6 +105,7 @@ func (s *Server) invitationRoutes() {
 				expiresAt = &d
 			}
 		}
+
 		httpx.OK(w, PublicInvitation{
 			StudentName:    inv.StudentName,
 			Date:           inv.SessionDate,
@@ -123,11 +125,13 @@ func (s *Server) invitationRoutes() {
 		type request struct {
 			DisciplineID *int64 `json:"discipline_id"` // null or missing: none chosen
 		}
+
 		in, err := decode[request](r)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return nil
 		}
+
 		inv, found, err := invitationByToken(s.db, r.PathValue("token"))
 		if err != nil {
 			return err
@@ -136,18 +140,22 @@ func (s *Server) invitationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
+
 		if inv.SessionStatus == "completed" {
 			httpx.Error(w, http.StatusBadRequest, "This session has already passed")
 			return nil
 		}
+
 		if inv.Status != "invited" {
 			httpx.Error(w, http.StatusBadRequest, fmt.Sprintf("Invitation already %s", inv.Status))
 			return nil
 		}
+
 		if reason, expired := s.invitationExpired(inv); expired {
 			httpx.Error(w, http.StatusBadRequest, reason)
 			return nil
 		}
+
 		invID, sessionID := inv.ID, inv.SessionID
 
 		// The discipline must belong to the invitation's group, or for manual invitations
@@ -164,6 +172,7 @@ func (s *Server) invitationRoutes() {
 				return nil
 			}
 		}
+
 		// Loaded before confirming, so a failed lookup changes nothing.
 		var discName, discAbbr *string
 		if in.DisciplineID != nil {
@@ -179,6 +188,7 @@ func (s *Server) invitationRoutes() {
 		if _, err := s.db.Exec("UPDATE invitations SET status = 'confirmed', discipline_id = ?, responded_at = datetime('now') WHERE id = ?", in.DisciplineID, invID); err != nil {
 			return err
 		}
+
 		s.cancelInvitationExpiry(invID)
 
 		s.broadcastSessionInvitation(sessionID, invID, map[string]any{
@@ -188,6 +198,7 @@ func (s *Server) invitationRoutes() {
 		s.broadcastSessionCounts(sessionID)
 
 		s.notifyInvitation("invitation_confirmed", inv)
+
 		// The confirmation is saved; a failed check only costs the "session full" notification.
 		if full, err := s.sessionFull(sessionID); err != nil {
 			log.Printf("session full %d: %v", sessionID, err)
@@ -199,6 +210,7 @@ func (s *Server) invitationRoutes() {
 		if discName != nil {
 			disciplineName = *discName
 		}
+
 		s.mailer.SendConfirmation(email.SessionParams{
 			To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
 			StartTime: inv.StartTime, DisciplineName: disciplineName, ClubName: clubName(s.db), Locale: emailLocale(s.db),
@@ -217,23 +229,28 @@ func (s *Server) invitationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
+
 		if inv.SessionStatus == "completed" {
 			httpx.Error(w, http.StatusBadRequest, "This session has already passed")
 			return nil
 		}
+
 		if inv.Status != "invited" {
 			httpx.Error(w, http.StatusBadRequest, fmt.Sprintf("Invitation already %s", inv.Status))
 			return nil
 		}
+
 		if reason, expired := s.invitationExpired(inv); expired {
 			httpx.Error(w, http.StatusBadRequest, reason)
 			return nil
 		}
+
 		invID, sessionID := inv.ID, inv.SessionID
 		err = s.inTx(func(t *txn) error {
 			if _, err := t.q.Exec("UPDATE invitations SET status = 'declined', responded_at = datetime('now') WHERE id = ?", invID); err != nil {
 				return err
 			}
+
 			t.afterCommit(func(s *Server) {
 				s.cancelInvitationExpiry(invID)
 				s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "declined"})
@@ -241,12 +258,14 @@ func (s *Server) invitationRoutes() {
 				s.broadcastSessionCounts(sessionID)
 				s.notifyInvitation("invitation_declined", inv)
 			})
+
 			_, err := t.findAndInviteReplacement(inv.vacated())
 			return err
 		})
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, map[string]any{"success": true, "message": "Your decline has been recorded."})
 		return nil
 	})
@@ -260,19 +279,23 @@ func (s *Server) invitationRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Invitation not found")
 			return nil
 		}
+
 		if inv.SessionStatus == "completed" {
 			httpx.Error(w, http.StatusBadRequest, "This session has already passed")
 			return nil
 		}
+
 		if inv.Status != "confirmed" {
 			httpx.Error(w, http.StatusBadRequest, fmt.Sprintf("Cannot cancel — invitation is %s", inv.Status))
 			return nil
 		}
+
 		invID, sessionID := inv.ID, inv.SessionID
 		wasFull, err := s.sessionFull(sessionID)
 		if err != nil {
 			return err
 		}
+
 		params := email.SessionParams{
 			To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
 			StartTime: inv.StartTime, DisciplineName: inv.DisciplineName, ClubName: clubName(s.db), Locale: emailLocale(s.db),
@@ -281,6 +304,7 @@ func (s *Server) invitationRoutes() {
 			if _, err := t.q.Exec("UPDATE invitations SET status = 'cancelled', responded_at = datetime('now') WHERE id = ?", invID); err != nil {
 				return err
 			}
+
 			t.afterCommit(func(s *Server) {
 				s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "cancelled"})
 				s.broadcastInvitation(inv.Token, "cancelled")
@@ -289,8 +313,10 @@ func (s *Server) invitationRoutes() {
 				if wasFull {
 					s.notifySession("session_no_longer_full", sessionID, inv.SessionDate)
 				}
+
 				s.mailer.SendCancellation(params)
 			})
+
 			// The decision log records the status the invitation had when it was loaded.
 			_, err := t.findAndInviteReplacement(inv.vacated())
 			return err
@@ -298,6 +324,7 @@ func (s *Server) invitationRoutes() {
 		if err != nil {
 			return err
 		}
+
 		httpx.OK(w, map[string]any{"success": true, "message": "Your participation has been cancelled."})
 		return nil
 	})
@@ -337,10 +364,12 @@ func (t *txn) sendInvitation(invitationID int64) error {
 	if !found {
 		return fmt.Errorf("invitation %d not found", invitationID)
 	}
+
 	invitedAt := t.now.UTC().Format(time.DateTime) // the format of datetime('now')
 	if _, err := t.q.Exec("UPDATE invitations SET email_sent = 1, status = 'invited', invited_at = ? WHERE id = ?", invitedAt, invitationID); err != nil {
 		return err
 	}
+
 	params := email.InvitationParams{
 		To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate, Token: inv.Token,
 		ClubName: clubName(t.q), Locale: emailLocale(t.q),
@@ -352,6 +381,7 @@ func (t *txn) sendInvitation(invitationID int64) error {
 			s.scheduleInvitationExpiry(invitationID, deadline)
 		}
 	})
+
 	return nil
 }
 
@@ -366,9 +396,11 @@ func (t *txn) adminCancelInvitation(invitationID int64) error {
 	if !found {
 		return fmt.Errorf("invitation %d not found", invitationID)
 	}
+
 	if _, err := t.q.Exec("UPDATE invitations SET status = 'admin_cancelled', responded_at = datetime('now') WHERE id = ?", inv.ID); err != nil {
 		return err
 	}
+
 	params := email.SessionParams{
 		To: inv.StudentEmail, StudentName: inv.StudentName, Date: inv.SessionDate,
 		StartTime: inv.StartTime, DisciplineName: inv.DisciplineName,
@@ -381,6 +413,7 @@ func (t *txn) adminCancelInvitation(invitationID int64) error {
 			s.mailer.SendAdminCancellation(params)
 		}
 	})
+
 	return nil
 }
 
@@ -391,9 +424,11 @@ func (t *txn) expireInvitation(invitationID int64) error {
 	if err != nil || !found || inv.Status != "invited" {
 		return err // nil: already handled (confirmed, declined, ...)
 	}
+
 	if st := inv.SessionStatus; st == "completed" || st == "cancelled" {
 		return nil
 	}
+
 	sessionID := inv.SessionID
 	start, ok := slotStart(inv.SessionDate, inv.StartTime, clubLocation(t.q))
 	slotStarted := ok && !t.now.Before(start)
@@ -401,9 +436,11 @@ func (t *txn) expireInvitation(invitationID int64) error {
 	if slotStarted {
 		newStatus = "invalidated"
 	}
+
 	if _, err := t.q.Exec("UPDATE invitations SET status = ?, responded_at = datetime('now') WHERE id = ?", newStatus, invitationID); err != nil {
 		return err
 	}
+
 	t.afterCommit(func(s *Server) {
 		s.broadcastSessionInvitation(sessionID, invitationID, map[string]any{"status": newStatus})
 		s.broadcastInvitation(inv.Token, newStatus)
@@ -416,5 +453,6 @@ func (t *txn) expireInvitation(invitationID int64) error {
 		_, err := t.findAndInviteReplacement(inv.vacated())
 		return err
 	}
+
 	return nil
 }

@@ -39,6 +39,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, channel string) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -60,6 +61,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, channel string) {
 			if _, err := w.Write(msg); err != nil {
 				return
 			}
+
 			flusher.Flush()
 		}
 	}
@@ -68,17 +70,20 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, channel string) {
 func (h *Hub) subscribe(channel string, c client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	set, ok := h.clients[channel]
 	if !ok {
 		set = make(map[client]struct{})
 		h.clients[channel] = set
 	}
+
 	set[c] = struct{}{}
 }
 
 func (h *Hub) unsubscribe(channel string, c client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	if set, ok := h.clients[channel]; ok {
 		delete(set, c)
 		if len(set) == 0 {
@@ -90,15 +95,18 @@ func (h *Hub) unsubscribe(channel string, c client) {
 func (h *Hub) Broadcast(channel, event string, data any) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	set := h.clients[channel]
 	if len(set) == 0 {
 		return
 	}
+
 	body, err := json.Marshal(data)
 	if err != nil {
 		log.Printf("sse: marshal %s/%s: %v", channel, event, err)
 		return
 	}
+
 	payload := fmt.Appendf(nil, "event: %s\ndata: %s\n\n", event, body)
 	for c := range set {
 		select {

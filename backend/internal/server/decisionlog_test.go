@@ -21,6 +21,7 @@ func TestPreferredDays(t *testing.T) {
 			t.Errorf("preferredDays(%q, %q) = %v, want %v", tc.student, tc.club, got, tc.want)
 			continue
 		}
+
 		for i := range got {
 			if got[i] != tc.want[i] {
 				t.Errorf("preferredDays(%q, %q) = %v, want %v", tc.student, tc.club, got, tc.want)

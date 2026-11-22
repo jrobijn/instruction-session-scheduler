@@ -33,12 +33,14 @@ func Open(path string) (*DB, error) {
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "busy_timeout(5000)")
+
 	// modernc registers as "sqlite", which sqlx does not know uses ? placeholders.
 	sqlx.BindDriver("sqlite", sqlx.QUESTION)
 	sqlDB, err := sqlx.Open("sqlite", "file:"+path+"?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
+
 	// A single connection serializes all statements, so read-modify-write handlers cannot
 	// interleave mid-statement.
 	// Never run a query on the *DB while holding a Tx from it, or it will deadlock.
@@ -47,6 +49,7 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, err
 	}
+
 	return &DB{DB: sqlDB, path: path}, nil
 }
 
@@ -71,14 +74,17 @@ func (d *DB) checkUpToDate() error {
 		if err != nil {
 			return err
 		}
+
 		for rows.Next() {
 			var name string
 			if err := rows.Scan(&name); err != nil {
 				rows.Close()
 				return err
 			}
+
 			existing[name] = true
 		}
+
 		rows.Close()
 		for _, c := range cols {
 			if !existing[c] {
@@ -86,13 +92,16 @@ func (d *DB) checkUpToDate() error {
 			}
 		}
 	}
+
 	var invSQL string
 	if err := d.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='invitations'").Scan(&invSQL); err != nil {
 		return err
 	}
+
 	if !strings.Contains(invSQL, "'invalidated'") {
 		return fmt.Errorf("database schema is outdated (invitations status constraint): run the last TypeScript release (git commit 75f9869) on it once to migrate it")
 	}
+
 	return nil
 }
 
@@ -104,6 +113,7 @@ func Many[T any](q Querier, query string, args ...any) ([]T, error) {
 	if err := sqlx.Select(q, &out, query, args...); err != nil {
 		return nil, err
 	}
+
 	return out, nil
 }
 
@@ -114,6 +124,7 @@ func One[T any](q Querier, query string, args ...any) (v T, found bool, err erro
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, false, nil
 	}
+
 	return v, err == nil, err
 }
 
@@ -130,6 +141,7 @@ func Setting(q Querier, key, def string) string {
 	if err := q.QueryRowx("SELECT value FROM settings WHERE key = ?", key).Scan(&v); err != nil || v == "" {
 		return def
 	}
+
 	return v
 }
 
@@ -150,5 +162,6 @@ func (d *DB) InTx(fn func(tx *sqlx.Tx) error) (err error) {
 			err = tx.Commit()
 		}
 	}()
+
 	return fn(tx)
 }
