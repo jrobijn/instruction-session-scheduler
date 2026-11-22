@@ -210,8 +210,11 @@ func TestChangeSessionTimetable(t *testing.T) {
 		t.Fatalf("timetable_id = %v after null, want none", got["timetable_id"])
 	}
 
-	// Same timetable again is not a change.
+	// Same timetable again is not a change, so it is accepted even once deactivated.
 	f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK)
+	f.exec("UPDATE timetables SET active = 0 WHERE id = ?", other)
+	f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK)
+	f.exec("UPDATE timetables SET active = 1 WHERE id = ?", other)
 	f.exec("UPDATE training_sessions SET status = 'invitations_sent'")
 	f.admin(http.MethodPut, path, map[string]any{"timetable_id": other}).status(http.StatusOK)
 	f.admin(http.MethodPut, path, map[string]any{"timetable_id": f.timetable}).
@@ -719,8 +722,15 @@ func TestSessionRoutesRejectBadInput(t *testing.T) {
 		return rejected{method, path, body, http.StatusBadRequest, msg}
 	}
 	invitations := p("/api/sessions/%d/invitations", se)
+	draftTT := e.insert("INSERT INTO timetables (name) VALUES ('Draft') RETURNING id")
+	inactiveTT, _ := e.timetable("12:00")
+	e.exec("UPDATE timetables SET active = 0 WHERE id = ?", inactiveTT)
 	e.wantRejected(
 		bad("POST", "/api/sessions", map[string]any{"date": "2030-06-10", "timetable_id": 999}, "Invalid timetable"),
+		bad("POST", "/api/sessions", map[string]any{"date": "2030-06-10", "timetable_id": draftTT}, "Invalid timetable"),
+		bad("POST", "/api/sessions", map[string]any{"date": "2030-06-10", "timetable_id": inactiveTT}, "Invalid timetable"),
+		bad("PUT", p("/api/sessions/%d/timetable", se), map[string]any{"timetable_id": draftTT}, "Invalid timetable"),
+		bad("PUT", p("/api/sessions/%d/timetable", se), map[string]any{"timetable_id": inactiveTT}, "Invalid timetable"),
 		bad("PUT", p("/api/sessions/%d/timetable", se), map[string]any{"timetable_id": 999}, "Invalid timetable"),
 		bad("PUT", p("/api/sessions/%d/timetable", se), map[string]any{"timetable_id": 0}, "Invalid timetable"),
 		bad("POST", invitations, map[string]any{"student_id": 999, "timeslot_id": slots[0], "instructor_id": in}, "Invalid student"),

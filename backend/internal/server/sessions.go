@@ -191,7 +191,7 @@ func (s *Server) sessionRoutes() {
 		}
 		var ttID *int64
 		if in.TimetableID != 0 {
-			if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ?", in.TimetableID); err != nil {
+			if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ? AND status = 'saved' AND active = 1", in.TimetableID); err != nil {
 				return err
 			} else if !found {
 				httpx.Error(w, http.StatusBadRequest, "Invalid timetable")
@@ -291,8 +291,10 @@ func (s *Server) sessionRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "Cannot change timetable after invitations have been sent")
 			return nil
 		}
-		if next != nil {
-			if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ?", *next); err != nil {
+		// Only a newly picked timetable must be usable: a session keeps its current one
+		// even after that timetable was deactivated.
+		if changed && next != nil {
+			if _, found, err := db.One[int](s.db, "SELECT 1 FROM timetables WHERE id = ? AND status = 'saved' AND active = 1", *next); err != nil {
 				return err
 			} else if !found {
 				httpx.Error(w, http.StatusBadRequest, "Invalid timetable")

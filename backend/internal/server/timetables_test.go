@@ -162,4 +162,16 @@ func TestTimetableRoutesRejectBadInput(t *testing.T) {
 		badJSON("PUT", p("/api/timetables/%d/groups/reorder", tt)),
 		badJSON("POST", p("/api/timetables/%d/timeslots", tt)),
 	)
+
+	g := e.group("Group")
+	badGroups := func(msg string, entries ...map[string]any) rejected {
+		return rejected{"PUT", p("/api/timetables/%d/groups", draft), map[string]any{"groups": entries}, http.StatusBadRequest, msg}
+	}
+	e.wantRejected(
+		badGroups("Group percentages must be between 0 and 100",
+			map[string]any{"group_id": g, "percentage": -50}, map[string]any{"group_id": e.group("Other"), "percentage": 150}),
+		badGroups("Each group can only be assigned once",
+			map[string]any{"group_id": g, "percentage": 50}, map[string]any{"group_id": g, "percentage": 50}),
+		badGroups("Invalid group", map[string]any{"group_id": 999, "percentage": 100}),
+	)
 }

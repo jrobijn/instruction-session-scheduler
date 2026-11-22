@@ -269,26 +269,20 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
 		}
-		t, found, err := s.getTimetable(id)
+		// Deactivating clears the default flag. The right-hand sides see the
+		// pre-update row, so `active = 1` in the CASE means "being deactivated".
+		newActive, found, err := db.One[int64](s.db, `
+			UPDATE timetables
+			SET active = 1 - active,
+			    is_default = CASE WHEN active = 1 THEN 0 ELSE is_default END
+			WHERE id = ?
+			RETURNING active`, id)
 		if err != nil {
 			return err
 		}
 		if !found {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
 			return nil
-		}
-		newActive := int64(1)
-		if t.Active != 0 {
-			newActive = 0
-		}
-		if _, err := s.db.Exec("UPDATE timetables SET active = ? WHERE id = ?", newActive, id); err != nil {
-			return err
-		}
-		// Deactivating the default timetable clears the default flag.
-		if newActive == 0 && t.IsDefault != 0 {
-			if _, err := s.db.Exec("UPDATE timetables SET is_default = 0 WHERE id = ?", id); err != nil {
-				return err
-			}
 		}
 		httpx.OK(w, map[string]any{"success": true, "active": newActive})
 		return nil
@@ -320,22 +314,17 @@ func (s *Server) timetableRoutes() {
 		}
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			// Reset scheduled sessions that use this timetable back to draft.
-			scheduled, err := db.Many[int64](tx, "SELECT id FROM training_sessions WHERE timetable_id = ? AND status = 'scheduled'", id)
-			if err != nil {
+			if _, err := tx.Exec(`
+				DELETE FROM invitations WHERE session_id IN (
+					SELECT id FROM training_sessions WHERE timetable_id = ? AND status = 'scheduled'
+				)`, id); err != nil {
 				return err
 			}
-			for _, sessionID := range scheduled {
-				if _, err := tx.Exec("DELETE FROM invitations WHERE session_id = ?", sessionID); err != nil {
-					return err
-				}
-				if _, err := tx.Exec("UPDATE training_sessions SET status = 'draft', timetable_id = NULL WHERE id = ?", sessionID); err != nil {
-					return err
-				}
-			}
-			if _, err := tx.Exec("UPDATE training_sessions SET timetable_id = NULL WHERE timetable_id = ? AND status = 'draft'", id); err != nil {
+			if _, err := tx.Exec("UPDATE training_sessions SET status = 'draft' WHERE timetable_id = ? AND status = 'scheduled'", id); err != nil {
 				return err
 			}
-			// Deleting the timetable cascades to its timeslots.
+			// Deleting the timetable cascades to its timeslots and nulls
+			// training_sessions.timetable_id (ON DELETE SET NULL).
 			_, err = tx.Exec("DELETE FROM timetables WHERE id = ?", id)
 			return err
 		})
@@ -362,6 +351,18 @@ func (s *Server) timetableRoutes() {
 			httpx.Error(w, http.StatusBadRequest, "groups array is required")
 			return nil
 		}
+		seen := map[int64]bool{}
+		for _, g := range in.Groups {
+			if g.Percentage < 0 || g.Percentage > 100 {
+				httpx.Error(w, http.StatusBadRequest, "Group percentages must be between 0 and 100")
+				return nil
+			}
+			if seen[g.GroupID] {
+				httpx.Error(w, http.StatusBadRequest, "Each group can only be assigned once")
+				return nil
+			}
+			seen[g.GroupID] = true
+		}
 		id, ok := pathID(r, "id")
 		if !ok {
 			httpx.Error(w, http.StatusNotFound, "Timetable not found")
@@ -378,6 +379,14 @@ func (s *Server) timetableRoutes() {
 		if t.Status != "draft" {
 			httpx.Error(w, http.StatusBadRequest, "Cannot modify groups of a saved timetable")
 			return nil
+		}
+		for _, g := range in.Groups {
+			if _, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", g.GroupID); err != nil {
+				return err
+			} else if !found {
+				httpx.Error(w, http.StatusBadRequest, "Invalid group")
+				return nil
+			}
 		}
 		err = s.db.InTx(func(tx *sqlx.Tx) error {
 			if _, err := tx.Exec("DELETE FROM timetable_groups WHERE timetable_id = ?", id); err != nil {
