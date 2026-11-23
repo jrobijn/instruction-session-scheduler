@@ -1,17 +1,19 @@
 ---
-description: "Design system rules for the frontend (Range Technical). Use when creating or editing any React page, component or CSS in frontend/."
-applyTo: "frontend/src/**"
+name: frontend-design
+description: Design system rules ("Range Technical") for the React frontends. Use when creating, editing or restyling any React page, component or CSS in a frontend.
 ---
 
 # Frontend design system — "Range Technical"
 
-Visual identity for a shooting association: steel/gunmetal neutrals, one club-blue accent (official colour `#165b92`), precise and dense like an instrument panel. Reference implementations: [SessionsPage.tsx](../../frontend/src/pages/SessionsPage.tsx) (list page), [SessionDetailPage.tsx](../../frontend/src/pages/SessionDetailPage.tsx) (detail page).
+Visual identity for a shooting association: steel/gunmetal neutrals, one club-blue accent (official colour `#165b92`), precise and dense like an instrument panel.
+
+Paths below (`src/ui`, `src/styles`, …) are relative to the root of the frontend you are working in, e.g. `frontend/`. Reference implementations: [SessionsPage.tsx](../../../frontend/src/pages/SessionsPage.tsx) (list page), [SessionDetailPage.tsx](../../../frontend/src/pages/SessionDetailPage.tsx) (detail page).
 
 ## Hard rules
 
-- Build UI from primitives in `frontend/src/ui` (import from `'../ui'`). There are no global component classes; don't add any.
+- Build UI from primitives in `src/ui` (import from `'../ui'`). There are no global component classes; don't add any.
 - No `style={{…}}` except truly dynamic values (computed widths, user-chosen group/buddy colours, CSS variables such as `--buddy`).
-- No raw colours, font sizes, font families, radii or shadows outside `frontend/src/styles/tokens.css`. Use `var(--…)` tokens. Layout-only dimensions (min-width, grid templates) may be raw in a page module.
+- No raw colours, font sizes, font families, radii or shadows outside `src/styles/tokens.css`. Use `var(--…)` tokens. Layout-only dimensions (min-width, grid templates) may be raw in a page module.
 - Page-specific styling goes in a co-located `PageName.module.css`, using tokens only. Keep it small; if a pattern repeats on 2+ pages, make it a primitive (`ui/`) or shared component (`components/`).
 - Icons: `lucide-react` only. No inline `<svg>` paths, no emoji or unicode glyphs as icons (`×`, `⇄`, `→`, `⋯`, `+`).
 - Never put icons or symbols in i18n strings; pass them via the component's `icon` prop.
@@ -20,7 +22,7 @@ Visual identity for a shooting association: steel/gunmetal neutrals, one club-bl
 - No `window.confirm()` / `alert()`: use `useConfirm()` and `useToast()`.
 - Dates follow the UI language: `getLocale() === 'nl' ? 'nl-NL' : 'en-GB'`.
 
-## Primitives (`frontend/src/ui`)
+## Primitives (`src/ui`)
 
 | Need | Use |
 |---|---|
@@ -43,7 +45,7 @@ Visual identity for a shooting association: steel/gunmetal neutrals, one club-bl
 | Floating panels | `Popover` (`trigger`, or `anchor` + controlled `open` when opened from elsewhere; `flush`, `align`); `Tooltip` (`content`) — replaces `title=` on interactive hints |
 | Tabs | `Tabs`, `TabList`, `Tab`, `TabPanel` (Radix) |
 
-Shared app components (`frontend/src/components`): `SessionStatusBadge` / `InvitationStatusBadge` / `GroupLabel` (`StatusBadges.tsx`), `AllocationBar`, `StudentSearchResults`, `NotificationItem`, `DecisionLog`, `Logo`, and `BuddyRows.module.css` for buddy-group rows.
+Shared app components (`src/components`): `SessionStatusBadge` / `InvitationStatusBadge` / `GroupLabel` (`StatusBadges.tsx`), `AllocationBar`, `StudentSearchResults`, `NotificationItem`, `DecisionLog`, `Logo`, and `BuddyRows.module.css` for buddy-group rows.
 
 Missing something? Add a new primitive in `ui/` (Radix primitive from `radix-ui` if it involves focus, overlay or keyboard behaviour) with its own `.module.css`, export it from `ui/index.ts`, and add it to this table.
 
@@ -60,4 +62,4 @@ Missing something? Add a new primitive in `ui/` (Radix primitive from `radix-ui`
 
 ## Third-party styling
 
-Global overrides for third-party widgets live in `frontend/src/styles/` (e.g. `datepicker.css` for react-datepicker), tokens only.
+Global overrides for third-party widgets live in `src/styles/` (e.g. `datepicker.css` for react-datepicker), tokens only.
