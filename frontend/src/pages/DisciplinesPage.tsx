@@ -5,7 +5,6 @@ import {
   ActionMenu, Alert, Badge, Button, Dialog, EmptyState, Field, Input,
   Page, PageHeader, SortHeader, Stack, Table, Text, useConfirm, useToast,
 } from '../ui';
-import { CsvActions, ImportResultAlert, type ImportResult } from '../components/CsvActions';
 import { useT } from '../i18n';
 
 interface Discipline {
@@ -25,7 +24,6 @@ export default function DisciplinesPage() {
   const [form, setForm] = useState({ name: '', abbreviation: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [sortCol, setSortCol] = useState<keyof Discipline>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -111,20 +109,8 @@ export default function DisciplinesPage() {
     <Page>
       <PageHeader
         title={t.disciplinesTitle(disciplines.length)}
-        actions={
-          <>
-            <CsvActions
-              filename="disciplines.csv"
-              exportCsv={api.exportDisciplinesCsv}
-              importCsv={api.importDisciplinesCsv}
-              onImported={result => { setImportResult(result); load(); }}
-            />
-            <Button variant="primary" icon={<Plus />} onClick={openCreate}>{t.addDiscipline}</Button>
-          </>
-        }
+        actions={<Button variant="primary" icon={<Plus />} onClick={openCreate}>{t.addDiscipline}</Button>}
       />
-
-      {importResult && <ImportResultAlert result={importResult} onDismiss={() => setImportResult(null)} />}
 
       {disciplines.length === 0 ? (
         <EmptyState icon={<Target />} title={t.noDisciplinesYet} description={t.noDisciplinesHint} />

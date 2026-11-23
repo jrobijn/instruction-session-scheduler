@@ -18,18 +18,6 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
   return data;
 }
 
-async function requestCsv(path: string): Promise<string> {
-  const res = await fetch(`${API_BASE}${path}`);
-  if (res.status === 401) {
-    authErrorCallback?.();
-  }
-  if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || 'Request failed');
-  }
-  return res.text();
-}
-
 export const api = {
   // Auth
   login: (password: string) => request('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
@@ -42,8 +30,6 @@ export const api = {
   createStudent: (data: { first_name: string; last_name: string; email: string }) => request('/students', { method: 'POST', body: JSON.stringify(data) }),
   updateStudent: (id: number, data: Record<string, unknown>) => request(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteStudent: (id: number) => request(`/students/${id}`, { method: 'DELETE' }),
-  exportStudentsCsv: () => requestCsv('/students/export'),
-  importStudentsCsv: (csv: string) => request('/students/import', { method: 'POST', body: JSON.stringify({ csv }) }),
   getStudentPreferredTimeslots: (id: number) => request(`/students/${id}/preferred-timeslots`),
   getStudentInvitations: (id: number) => request(`/students/${id}/invitations`),
   getStudentInvitationHistory: (id: number) => request(`/students/${id}/invitation-history`),
@@ -57,8 +43,6 @@ export const api = {
   createInstructor: (data: { first_name: string; last_name: string; email: string }) => request('/instructors', { method: 'POST', body: JSON.stringify(data) }),
   updateInstructor: (id: number, data: Record<string, unknown>) => request(`/instructors/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteInstructor: (id: number) => request(`/instructors/${id}`, { method: 'DELETE' }),
-  exportInstructorsCsv: () => requestCsv('/instructors/export'),
-  importInstructorsCsv: (csv: string) => request('/instructors/import', { method: 'POST', body: JSON.stringify({ csv }) }),
 
   // Sessions
   getSessions: () => request('/sessions'),
@@ -103,8 +87,6 @@ export const api = {
   createDiscipline: (data: { name: string }) => request('/disciplines', { method: 'POST', body: JSON.stringify(data) }),
   updateDiscipline: (id: number, data: Record<string, unknown>) => request(`/disciplines/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteDiscipline: (id: number) => request(`/disciplines/${id}`, { method: 'DELETE' }),
-  exportDisciplinesCsv: () => requestCsv('/disciplines/export'),
-  importDisciplinesCsv: (csv: string) => request('/disciplines/import', { method: 'POST', body: JSON.stringify({ csv }) }),
   setDisciplineGroups: (id: number, groupIds: number[]) => request(`/disciplines/${id}/groups`, { method: 'PUT', body: JSON.stringify({ group_ids: groupIds }) }),
   getDisciplineGroups: (id: number) => request(`/disciplines/${id}/groups`),
   addDisciplineGroup: (disciplineId: number, groupId: number) => request(`/disciplines/${disciplineId}/groups/${groupId}`, { method: 'POST' }),
@@ -117,8 +99,6 @@ export const api = {
   deleteGroup: (id: number) => request(`/groups/${id}`, { method: 'DELETE' }),
   setDefaultGroup: (id: number) => request(`/groups/${id}/set-default`, { method: 'POST' }),
   unsetDefaultGroup: (id: number) => request(`/groups/${id}/unset-default`, { method: 'POST' }),
-  exportGroupsCsv: () => requestCsv('/groups/export'),
-  importGroupsCsv: (csv: string) => request('/groups/import', { method: 'POST', body: JSON.stringify({ csv }) }),
   getGroupMembers: (id: number) => request(`/groups/${id}/members`),
   addGroupMember: (groupId: number, studentId: number) => request(`/groups/${groupId}/members`, { method: 'POST', body: JSON.stringify({ student_id: studentId }) }),
   removeGroupMember: (groupId: number, studentId: number) => request(`/groups/${groupId}/members/${studentId}`, { method: 'DELETE' }),

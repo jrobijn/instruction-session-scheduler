@@ -4,8 +4,8 @@ A web application for scheduling instruction sessions at a sports club. Features
 
 ## Features
 
-- **Student Management**: Add, edit, activate/deactivate students; CSV import/export; preferred days and timeslot preferences; cooldown periods; membership IDs
-- **Instructor Management**: Add, edit, activate/deactivate instructors; CSV import/export
+- **Student Management**: Add, edit, activate/deactivate students; preferred days and timeslot preferences; cooldown periods; membership IDs
+- **Instructor Management**: Add, edit, activate/deactivate instructors
 - **Groups**: Organize students into groups with color coding. Each student belongs to one group. A default group can auto-assign new students.
 - **Disciplines**: Define disciplines (e.g. swimming, tennis) with abbreviations. Control which groups have access to which disciplines.
 - **Timetables**: Create reusable timetable templates with configurable timeslots and group percentage allocations (e.g. Group A: 60%, Group B: 40%). Mark a timetable as default for new sessions.
@@ -41,6 +41,18 @@ npm run dev              # Starts on http://localhost:5173, proxies /api to the 
 ### 3. Login
 
 Open http://localhost:5173 and log in with the password set in `backend/.env` (default: `changeme`).
+
+### 4. Dummy data (optional)
+
+`data/` holds SQL scripts with dummy disciplines, instructors and students for local development. Load them into the development database:
+
+```bash
+cd backend
+go run . -migrate                    # creates data.db with the current schema, if needed
+cat ../data/*.sql | sqlite3 data.db
+```
+
+The scripts skip rows whose name or email is already taken, so running them again changes nothing.
 
 ## Configuration
 

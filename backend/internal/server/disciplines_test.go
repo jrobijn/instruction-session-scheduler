@@ -50,23 +50,6 @@ func TestDisciplineCRUD(t *testing.T) {
 	}
 }
 
-func TestDisciplineImportExport(t *testing.T) {
-	e := newTestEnv(t)
-	e.discipline("Kayak")
-	csv := "name,abbreviation\nKayak,KY\nCanoe,C\n,X"
-	res := e.admin(http.MethodPost, "/api/disciplines/import", map[string]any{"csv": csv}).status(http.StatusOK).object()
-
-	// Updating an existing discipline counts as imported.
-	if res["imported"] != 2.0 || res["skipped"] != 1.0 {
-		t.Fatalf("import = %v", res)
-	}
-
-	body := string(e.admin(http.MethodGet, "/api/disciplines/export", nil).status(http.StatusOK).Body)
-	if want := "name,abbreviation,active\nCanoe,C,1\nKayak,KY,1\n"; body != want {
-		t.Fatalf("export = %q", body)
-	}
-}
-
 func TestDisciplineRoutesRejectBadInput(t *testing.T) {
 	e := newTestEnv(t)
 	g := e.group("Group")
@@ -82,7 +65,6 @@ func TestDisciplineRoutesRejectBadInput(t *testing.T) {
 		notFound("DELETE", p("/api/disciplines/x/groups/%d", g), nil, "Discipline not found"),
 		notFound("DELETE", p("/api/disciplines/%d/groups/x", d), nil, "Group not found"),
 		notFound("DELETE", "/api/disciplines/x", nil, "Discipline not found"),
-		badJSON("POST", "/api/disciplines/import"),
 		badJSON("POST", "/api/disciplines"),
 		badJSON("PUT", p("/api/disciplines/%d", d)),
 		badJSON("PUT", p("/api/disciplines/%d/groups", d)),

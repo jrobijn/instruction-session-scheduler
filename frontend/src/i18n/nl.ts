@@ -24,13 +24,9 @@ const nl: Translations = {
   membershipId: 'Lidnummer',
   default: 'Standaard',
   defaultSuffix: '(standaard)',
-  exportCsv: 'Exporteer CSV',
-  importCsv: 'Importeer CSV',
-  dismiss: 'Sluiten',
   close: 'Sluiten',
   previousPage: 'Vorige pagina',
   nextPage: 'Volgende pagina',
-  importResult: (imported: number, skipped: number) => `Geïmporteerd: ${imported}, Overgeslagen: ${skipped}`,
   noData: '—',
   saved: 'Opgeslagen',
 

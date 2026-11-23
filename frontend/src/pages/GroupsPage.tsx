@@ -6,7 +6,6 @@ import {
   ActionMenu, Alert, Badge, Button, ColorInput, Dialog, EmptyState, Field, Input,
   Page, PageHeader, Row, SortHeader, Stack, Table, Text, useConfirm, useToast,
 } from '../ui';
-import { CsvActions, ImportResultAlert, type ImportResult } from '../components/CsvActions';
 import { useT } from '../i18n';
 
 interface Group {
@@ -30,7 +29,6 @@ export default function GroupsPage() {
   const [form, setForm] = useState({ name: '', color: '#3b82f6' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [sortCol, setSortCol] = useState<keyof Group>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -129,20 +127,8 @@ export default function GroupsPage() {
     <Page>
       <PageHeader
         title={t.groupsTitle(groups.length)}
-        actions={
-          <>
-            <CsvActions
-              filename="groups.csv"
-              exportCsv={api.exportGroupsCsv}
-              importCsv={api.importGroupsCsv}
-              onImported={result => { setImportResult(result); load(); }}
-            />
-            <Button variant="primary" icon={<Plus />} onClick={openCreate}>{t.addGroupButton}</Button>
-          </>
-        }
+        actions={<Button variant="primary" icon={<Plus />} onClick={openCreate}>{t.addGroupButton}</Button>}
       />
-
-      {importResult && <ImportResultAlert result={importResult} onDismiss={() => setImportResult(null)} />}
 
       {groups.length === 0 ? (
         <EmptyState icon={<Users />} title={t.noGroupsYet} description={t.noGroupsHint} />

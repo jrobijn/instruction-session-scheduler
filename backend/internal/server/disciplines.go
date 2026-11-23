@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
@@ -21,11 +20,6 @@ func (s *Server) getDiscipline(id int64) (Discipline, bool, error) {
 	return db.One[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines WHERE id = ?", id)
 }
 
-// getDisciplines lists all disciplines by name.
-func (s *Server) getDisciplines() ([]Discipline, error) {
-	return db.Many[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines ORDER BY name ASC")
-}
-
 type DisciplineWithGroups struct {
 	Discipline
 	Groups []GroupRef `json:"groups"`
@@ -39,7 +33,7 @@ type DisciplineOption struct {
 
 func (s *Server) disciplineRoutes() {
 	s.adminRoute("GET /api/disciplines", func(w http.ResponseWriter, r *http.Request) error {
-		disciplines, err := s.getDisciplines()
+		disciplines, err := db.Many[Discipline](s.db, "SELECT id, name, abbreviation, active FROM disciplines ORDER BY name ASC")
 		if err != nil {
 			return err
 		}
@@ -74,71 +68,6 @@ func (s *Server) disciplineRoutes() {
 		}
 
 		httpx.OK(w, out)
-		return nil
-	})
-
-	s.adminRoute("GET /api/disciplines/export", func(w http.ResponseWriter, r *http.Request) error {
-		disciplines, err := s.getDisciplines()
-		if err != nil {
-			return err
-		}
-
-		rows := make([][]string, len(disciplines))
-		for i, d := range disciplines {
-			rows[i] = []string{d.Name, d.Abbreviation, strconv.FormatInt(d.Active, 10)}
-		}
-
-		return writeCSV(w, "disciplines.csv", []string{"name", "abbreviation", "active"}, rows)
-	})
-
-	s.adminRoute("POST /api/disciplines/import", func(w http.ResponseWriter, r *http.Request) error {
-		in, err := readCSVImport(r)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return nil
-		}
-
-		if !in.has("name") {
-			httpx.Error(w, http.StatusBadRequest, "CSV must contain a name column")
-			return nil
-		}
-
-		result := importResult{Errors: []string{}}
-		err = s.db.InTx(func(tx *sqlx.Tx) error {
-			for _, row := range in.rows {
-				name, abbr := row.get("name"), row.get("abbreviation")
-				if name == "" {
-					result.skip(row, "missing name")
-					continue
-				}
-
-				id, found, err := db.One[int64](tx, "SELECT id FROM disciplines WHERE name = ?", name)
-				if err != nil {
-					return err
-				}
-				if found {
-					_, err = tx.Exec("UPDATE disciplines SET abbreviation = ? WHERE id = ?", abbr, id)
-				} else {
-					_, err = tx.Exec("INSERT INTO disciplines (name, abbreviation) VALUES (?, ?)", name, abbr)
-				}
-
-				switch {
-				case isUniqueErr(err, "disciplines.name"):
-					result.skip(row, "A discipline with this name already exists")
-				case err != nil:
-					return err
-				default:
-					result.Imported++
-				}
-			}
-
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-
-		httpx.OK(w, result)
 		return nil
 	})
 

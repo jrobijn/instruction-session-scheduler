@@ -5,7 +5,6 @@ import {
   ActionMenu, Alert, Badge, Button, DescriptionList, Dialog, EmptyState, ExpandIcon, Field, Input,
   Page, PageHeader, Row, SortHeader, Stack, Table, Text, useConfirm, useToast,
 } from '../ui';
-import { CsvActions, ImportResultAlert, type ImportResult } from '../components/CsvActions';
 import { useT } from '../i18n';
 
 interface Instructor {
@@ -26,7 +25,6 @@ export default function InstructorsPage() {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [expandedInstructor, setExpandedInstructor] = useState<number | null>(null);
   const [sortCol, setSortCol] = useState<keyof Instructor>('last_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -113,20 +111,8 @@ export default function InstructorsPage() {
     <Page>
       <PageHeader
         title={t.instructorsTitle(instructors.length)}
-        actions={
-          <>
-            <CsvActions
-              filename="instructors.csv"
-              exportCsv={api.exportInstructorsCsv}
-              importCsv={api.importInstructorsCsv}
-              onImported={result => { setImportResult(result); load(); }}
-            />
-            <Button variant="primary" icon={<Plus />} onClick={openCreate}>{t.addInstructor}</Button>
-          </>
-        }
+        actions={<Button variant="primary" icon={<Plus />} onClick={openCreate}>{t.addInstructor}</Button>}
       />
-
-      {importResult && <ImportResultAlert result={importResult} onDismiss={() => setImportResult(null)} />}
 
       {instructors.length === 0 ? (
         <EmptyState icon={<UserRound />} title={t.noInstructorsYet} description={t.noInstructorsHint} />

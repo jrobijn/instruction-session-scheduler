@@ -2,7 +2,7 @@
 
 The Go HTTP server for the scheduler: the JSON API under `/api`, Server-Sent Events for live admin updates, invitation emails, expiry timers, and, in production, the built frontend.
 
-Direct dependencies are kept small: the pure-Go SQLite driver [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) (so the server builds without a C toolchain), [`sqlx`](https://pkg.go.dev/github.com/jmoiron/sqlx) for query helpers, [`goose`](https://pkg.go.dev/github.com/pressly/goose/v3) for migrations, and [`google/uuid`](https://pkg.go.dev/github.com/google/uuid). Routing, JWT, SMTP, SSE, CSV and `.env` handling all use the standard library.
+Direct dependencies are kept small: the pure-Go SQLite driver [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) (so the server builds without a C toolchain), [`sqlx`](https://pkg.go.dev/github.com/jmoiron/sqlx) for query helpers, [`goose`](https://pkg.go.dev/github.com/pressly/goose/v3) for migrations, and [`google/uuid`](https://pkg.go.dev/github.com/google/uuid). Routing, JWT, SMTP, SSE and `.env` handling all use the standard library.
 
 ## Running
 

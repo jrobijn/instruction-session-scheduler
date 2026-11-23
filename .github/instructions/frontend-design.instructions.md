@@ -43,7 +43,7 @@ Visual identity for a shooting association: steel/gunmetal neutrals, one club-bl
 | Floating panels | `Popover` (`trigger`, or `anchor` + controlled `open` when opened from elsewhere; `flush`, `align`); `Tooltip` (`content`) — replaces `title=` on interactive hints |
 | Tabs | `Tabs`, `TabList`, `Tab`, `TabPanel` (Radix) |
 
-Shared app components (`frontend/src/components`): `CsvActions` + `ImportResultAlert`, `SessionStatusBadge` / `InvitationStatusBadge` / `GroupLabel` (`StatusBadges.tsx`), `AllocationBar`, `StudentSearchResults`, `NotificationItem`, `DecisionLog`, `Logo`, and `BuddyRows.module.css` for buddy-group rows.
+Shared app components (`frontend/src/components`): `SessionStatusBadge` / `InvitationStatusBadge` / `GroupLabel` (`StatusBadges.tsx`), `AllocationBar`, `StudentSearchResults`, `NotificationItem`, `DecisionLog`, `Logo`, and `BuddyRows.module.css` for buddy-group rows.
 
 Missing something? Add a new primitive in `ui/` (Radix primitive from `radix-ui` if it involves focus, overlay or keyboard behaviour) with its own `.module.css`, export it from `ui/index.ts`, and add it to this table.
 

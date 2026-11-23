@@ -1,11 +1,9 @@
 package server
 
 import (
-	"fmt"
 	"math"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -36,16 +34,6 @@ func (s *Server) getStudent(id int64) (Student, bool, error) {
 		WHERE id = ? AND deleted_at IS NULL`, id)
 }
 
-// getStudents lists all (non-deleted) students by name.
-func (s *Server) getStudents() ([]Student, error) {
-	return db.Many[Student](s.db, `
-		SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
-			preferred_days, active, cooldown_until
-		FROM students
-		WHERE deleted_at IS NULL
-		ORDER BY last_name ASC, first_name ASC`)
-}
-
 // everyDay is the preferred_days value for a student available on every weekday; it matches
 // the students.preferred_days column default.
 const everyDay = "0|1|2|3|4|5|6"
@@ -73,7 +61,12 @@ type StudentRef struct {
 
 func (s *Server) studentRoutes() {
 	s.adminRoute("GET /api/students", func(w http.ResponseWriter, r *http.Request) error {
-		students, err := s.getStudents()
+		students, err := db.Many[Student](s.db, `
+			SELECT id, first_name, last_name, email, membership_id, attended_sessions, no_show_count,
+				preferred_days, active, cooldown_until
+			FROM students
+			WHERE deleted_at IS NULL
+			ORDER BY last_name ASC, first_name ASC`)
 		if err != nil {
 			return err
 		}
@@ -137,147 +130,6 @@ func (s *Server) studentRoutes() {
 		}
 
 		httpx.OK(w, out)
-		return nil
-	})
-
-	s.adminRoute("GET /api/students/export", func(w http.ResponseWriter, r *http.Request) error {
-		students, err := s.getStudents()
-		if err != nil {
-			return err
-		}
-
-		rows := make([][]string, len(students))
-		for i, st := range students {
-			rows[i] = []string{st.FirstName, st.LastName, st.Email, st.MembershipID,
-				strconv.FormatInt(st.AttendedSessions, 10), strconv.FormatInt(st.NoShowCount, 10), st.PreferredDays, strconv.FormatInt(st.Active, 10)}
-		}
-
-		header := []string{"first_name", "last_name", "email", "membership_id", "attended_sessions", "no_show_count", "preferred_days", "active"}
-		return writeCSV(w, "students.csv", header, rows)
-	})
-
-	s.adminRoute("POST /api/students/import", func(w http.ResponseWriter, r *http.Request) error {
-		in, err := readCSVImport(r)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return nil
-		}
-
-		if !in.has("first_name", "last_name", "email") {
-			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
-			return nil
-		}
-
-		result := importResult{Errors: []string{}}
-		err = s.db.InTx(func(tx *sqlx.Tx) error {
-			// 0 when there is no default group.
-			defaultGroup, _, err := db.One[int64](tx, "SELECT id FROM groups WHERE is_default = 1")
-			if err != nil {
-				return err
-			}
-
-			for _, row := range in.rows {
-				first, last, email := row.get("first_name"), row.get("last_name"), row.get("email")
-				if first == "" || last == "" || email == "" {
-					result.skip(row, "missing required fields")
-					continue
-				}
-
-				membershipID := row.get("membership_id")
-
-				// Optional columns stay nil when blank, which keeps the current value. A number
-				// column holding anything but a whole number makes the row an error.
-				var opt struct {
-					AttendedSessions, NoShowCount, Active *int
-					PreferredDays                         *string
-				}
-				invalid := ""
-				for _, f := range []struct {
-					col string
-					dst **int
-				}{
-					{"attended_sessions", &opt.AttendedSessions},
-					{"no_show_count", &opt.NoShowCount},
-					{"active", &opt.Active},
-				} {
-					v := row.get(f.col)
-					if v == "" {
-						continue
-					}
-
-					n, err := strconv.Atoi(v)
-					if err != nil {
-						invalid = fmt.Sprintf("%s must be a whole number, got %q", f.col, v)
-						break
-					}
-
-					*f.dst = &n
-				}
-				if invalid != "" {
-					result.skip(row, "%s", invalid)
-					continue
-				}
-
-				if d := row.get("preferred_days"); d != "" {
-					opt.PreferredDays = &d
-				}
-
-				// Update the student with this email, or insert a new one. Blank optional columns
-				// keep the existing student's value, or the column default for a new student.
-				existing, found, err := db.One[int64](tx, "SELECT id FROM students WHERE email = ? AND deleted_at IS NULL", email)
-				if err != nil {
-					return err
-				}
-
-				studentID := existing
-				if found {
-					_, err = tx.Exec(`
-						UPDATE students SET first_name = ?, last_name = ?, membership_id = ?,
-							attended_sessions = COALESCE(?, attended_sessions),
-							no_show_count = COALESCE(?, no_show_count),
-							active = COALESCE(?, active),
-							preferred_days = COALESCE(?, preferred_days)
-						WHERE id = ?`,
-						first, last, membershipID, opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, existing)
-				} else {
-					// The fallbacks match the students column defaults.
-					studentID, err = db.Get[int64](tx, `
-						INSERT INTO students (first_name, last_name, email, membership_id,
-							attended_sessions, no_show_count, active, preferred_days)
-						VALUES (?, ?, ?, ?, COALESCE(?, 0), COALESCE(?, 0), COALESCE(?, 1), COALESCE(?, ?))
-						RETURNING id`,
-						first, last, email, membershipID,
-						opt.AttendedSessions, opt.NoShowCount, opt.Active, opt.PreferredDays, everyDay)
-					if isUniqueErr(err, "students.email") { // the email belongs to a deleted student
-						result.skip(row, "A student with this email already exists")
-						continue
-					}
-				}
-				if err != nil {
-					return err
-				}
-
-				// Put the student in the default group (if any) when they have no group yet.
-				if defaultGroup != 0 {
-					if _, err := tx.Exec(`
-						INSERT INTO student_groups (student_id, group_id, joined_at)
-						SELECT ?, ?, datetime('now')
-						WHERE NOT EXISTS (SELECT 1 FROM student_groups WHERE student_id = ?)`,
-						studentID, defaultGroup, studentID); err != nil {
-						return err
-					}
-				}
-
-				result.Imported++
-			}
-
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-
-		httpx.OK(w, result)
 		return nil
 	})
 
