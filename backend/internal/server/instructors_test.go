@@ -150,38 +150,6 @@ func TestDeleteInstructorRollsBackOnFailure(t *testing.T) {
 	}
 }
 
-func TestInstructorImportExport(t *testing.T) {
-	e := newTestEnv(t)
-	e.exec("INSERT INTO instructors (first_name, last_name, email) VALUES ('Old', 'Name', 'old@example.test')")
-	csv := "first_name,last_name,email\nNew,Name,old@example.test\nBo,Ng,bo@example.test\nNo,Email,"
-	res := e.admin(http.MethodPost, "/api/instructors/import", map[string]any{"csv": csv}).status(http.StatusOK).object()
-	if res["imported"] != 2.0 || res["skipped"] != 1.0 {
-		t.Fatalf("import = %v", res)
-	}
-
-	body := string(e.admin(http.MethodGet, "/api/instructors/export", nil).status(http.StatusOK).Body)
-	if want := "first_name,last_name,email,active\nNew,Name,old@example.test,1\nBo,Ng,bo@example.test,1\n"; body != want {
-		t.Fatalf("export = %q", body)
-	}
-
-	e.admin(http.MethodPost, "/api/instructors/import", map[string]any{"csv": "name\nx"}).
-		wantError(http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
-}
-
-// A soft-deleted instructor's email stays taken; importing it again is a row error.
-func TestImportInstructorWithDeletedEmail(t *testing.T) {
-	e := newTestEnv(t)
-	id := e.instructor("Gone")
-	addr := e.row("SELECT email FROM instructors WHERE id = ?", id)["email"].(string)
-	e.admin(http.MethodDelete, fmt.Sprintf("/api/instructors/%d", id), nil).status(http.StatusOK)
-
-	res := e.admin(http.MethodPost, "/api/instructors/import", map[string]any{"csv": "first_name,last_name,email\nIda,Back," + addr + "\nNew,One,new@example.test"}).
-		status(http.StatusOK).object()
-	if res["imported"] != 1.0 || res["skipped"] != 1.0 || fmt.Sprint(res["errors"]) != "[Row 2: An instructor with this email already exists]" {
-		t.Fatalf("import = %v", res)
-	}
-}
-
 func TestInstructorRoutesRejectBadInput(t *testing.T) {
 	e := newTestEnv(t)
 	in := e.instructor("Instructor")
@@ -189,7 +157,6 @@ func TestInstructorRoutesRejectBadInput(t *testing.T) {
 		notFound("GET", "/api/instructors/x", nil, "Instructor not found"),
 		notFound("PUT", "/api/instructors/x", map[string]any{}, "Instructor not found"),
 		notFound("DELETE", "/api/instructors/x", nil, "Instructor not found"),
-		badJSON("POST", "/api/instructors/import"),
 		badJSON("POST", "/api/instructors"),
 		badJSON("PUT", fmt.Sprintf("/api/instructors/%d", in)),
 	)

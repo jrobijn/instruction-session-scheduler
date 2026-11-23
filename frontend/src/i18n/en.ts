@@ -22,13 +22,9 @@ const en = {
   membershipId: 'Membership ID',
   default: 'Default',
   defaultSuffix: '(default)',
-  exportCsv: 'Export CSV',
-  importCsv: 'Import CSV',
-  dismiss: 'Dismiss',
   close: 'Close',
   previousPage: 'Previous page',
   nextPage: 'Next page',
-  importResult: (imported: number, skipped: number) => `Imported: ${imported}, Skipped: ${skipped}`,
   noData: '—',
   saved: 'Saved',
 

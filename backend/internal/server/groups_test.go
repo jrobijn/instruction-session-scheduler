@@ -259,23 +259,6 @@ func TestGroupDisciplines(t *testing.T) {
 	e.admin(http.MethodDelete, groupPath(999, "disciplines", "1"), nil).wantError(http.StatusNotFound, "Group not found")
 }
 
-func TestGroupImportExport(t *testing.T) {
-	e := newTestEnv(t)
-	e.group("Existing")
-	res := e.admin(http.MethodPost, "/api/groups/import", map[string]any{"csv": "Name,color\nNew,red\nExisting,blue\n,x\n\"With, comma\""}).
-		status(http.StatusOK).object()
-	if res["imported"] != 2.0 || res["skipped"] != 2.0 || fmt.Sprint(res["errors"]) != "[Row 4: missing name]" {
-		t.Fatalf("import = %v", res)
-	}
-
-	e.admin(http.MethodPost, "/api/groups/import", map[string]any{"csv": "title\nx"}).wantError(http.StatusBadRequest, "CSV must contain a name column")
-
-	body := string(e.admin(http.MethodGet, "/api/groups/export", nil).status(http.StatusOK).Body)
-	if want := "name,is_default,active\nExisting,0,1\nNew,0,1\n\"With, comma\",0,1\n"; body != want {
-		t.Fatalf("export = %q, want %q", body, want)
-	}
-}
-
 func TestGroupRoutesRejectBadInput(t *testing.T) {
 	e := newTestEnv(t)
 	g := e.group("Group")
@@ -300,7 +283,6 @@ func TestGroupRoutesRejectBadInput(t *testing.T) {
 		notFound("POST", p("/api/groups/%d/disciplines/x", g), nil, "Discipline not found"),
 		notFound("DELETE", p("/api/groups/x/disciplines/%d", d), nil, "Group not found"),
 		notFound("DELETE", p("/api/groups/%d/disciplines/x", g), nil, "Discipline not found"),
-		badJSON("POST", "/api/groups/import"),
 		badJSON("POST", "/api/groups"),
 		badJSON("PUT", p("/api/groups/%d", g)),
 		badJSON("POST", p("/api/groups/%d/members", g)),

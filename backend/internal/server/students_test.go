@@ -188,10 +188,6 @@ func TestDeletedStudentEmailCannotBeReused(t *testing.T) {
 
 	e.admin(http.MethodPost, "/api/students", map[string]any{"first_name": "Ann", "last_name": "Test", "email": addr}).
 		wantError(http.StatusConflict, "A student with this email already exists")
-	res := e.admin(http.MethodPost, "/api/students/import", map[string]any{"csv": "first_name,last_name,email\nAnn,Test," + addr}).status(http.StatusOK).object()
-	if res["imported"] != 0.0 || res["errors"].([]any)[0] != "Row 2: A student with this email already exists" {
-		t.Fatalf("import = %v", res)
-	}
 }
 
 func TestStudentInvitationLists(t *testing.T) {
@@ -365,71 +361,6 @@ func TestStudentCooldown(t *testing.T) {
 	e.admin(http.MethodPut, path, map[string]any{"days": 1}).wantError(http.StatusNotFound, "Student not found")
 }
 
-func TestImportStudents(t *testing.T) {
-	e := newTestEnv(t)
-	def := e.group("Default")
-	e.exec("UPDATE groups SET is_default = 1 WHERE id = ?", def)
-	other := e.group("Other")
-	existing := e.student("Old", other)
-	addr := e.studentEmail(existing)
-
-	csv := strings.Join([]string{
-		`"First_Name",last_name,email,membership_id,attended_sessions,active,preferred_days`,
-		`"Smith, Jr.",Ann,ann@example.test,M-1,5,1,1|2`,
-		`New,Name,` + addr + `,M-2,,0,`,
-		`,Missing,missing@example.test`,
-		`Bo,Ng,bo@example.test`,
-		`Cy,Ng,cy@example.test,,3.7,1,`,
-	}, "\n")
-	res := e.admin(http.MethodPost, "/api/students/import", map[string]any{"csv": csv}).status(http.StatusOK).object()
-	if res["imported"] != 3.0 || res["skipped"] != 2.0 ||
-		fmt.Sprint(res["errors"]) != `[Row 4: missing required fields Row 6: attended_sessions must be a whole number, got "3.7"]` {
-		t.Fatalf("import = %v", res)
-	}
-
-	ann := e.row("SELECT * FROM students WHERE email = 'ann@example.test'")
-	if ann["first_name"] != "Smith, Jr." || ann["membership_id"] != "M-1" || ann["attended_sessions"] != int64(5) || ann["preferred_days"] != "1|2" {
-		t.Errorf("ann = %v", ann)
-	}
-	if g := e.row("SELECT group_id FROM student_groups WHERE student_id = ?", ann["id"]); toInt64(g["group_id"]) != def {
-		t.Errorf("new student group = %v, want default", g)
-	}
-
-	// The existing student is updated by email; blank numbers are left as they are and their group kept.
-	old := e.row("SELECT * FROM students WHERE id = ?", existing)
-	if old["first_name"] != "New" || old["membership_id"] != "M-2" || old["attended_sessions"] != int64(0) || old["active"] != int64(0) {
-		t.Errorf("updated = %v", old)
-	}
-	if g := e.row("SELECT group_id FROM student_groups WHERE student_id = ?", existing); toInt64(g["group_id"]) != other {
-		t.Errorf("existing student moved to group %v", g)
-	}
-
-	// A new student's blank columns get the same values as the schema's column defaults.
-	e.exec("INSERT INTO students (first_name, last_name, email) VALUES ('Raw', 'Ng', 'raw@example.test')")
-	const optional = "SELECT membership_id, attended_sessions, no_show_count, active, preferred_days FROM students WHERE email = ?"
-	if bo, raw := e.row(optional, "bo@example.test"), e.row(optional, "raw@example.test"); fmt.Sprint(bo) != fmt.Sprint(raw) {
-		t.Errorf("imported defaults = %v, column defaults = %v", bo, raw)
-	}
-
-	e.admin(http.MethodPost, "/api/students/import", map[string]any{"csv": "first_name,email\nA,a@example.test"}).
-		wantError(http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
-}
-
-func TestExportStudents(t *testing.T) {
-	e := newTestEnv(t)
-	s := e.student("Ann", e.group("Juniors"))
-	e.exec(`UPDATE students SET last_name = 'Lee, "Jr"' WHERE id = ?`, s)
-	gone := e.student("Gone", e.group("Other"))
-	e.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", gone)
-
-	body := string(e.admin(http.MethodGet, "/api/students/export", nil).status(http.StatusOK).Body)
-	want := "first_name,last_name,email,membership_id,attended_sessions,no_show_count,preferred_days,active\n" +
-		`Ann,"Lee, ""Jr""",` + e.studentEmail(s) + `,,0,0,0|1|2|3|4|5|6,1` + "\n"
-	if body != want {
-		t.Fatalf("export =\n%s\nwant\n%s", body, want)
-	}
-}
-
 func TestStudentRoutesRejectBadInput(t *testing.T) {
 	e := newTestEnv(t)
 	st := e.student("Student", e.group("Group"))
@@ -448,7 +379,6 @@ func TestStudentRoutesRejectBadInput(t *testing.T) {
 		notFound("PUT", "/api/students/x/groups", map[string]any{}, "Student not found"),
 		notFound("PUT", "/api/students/x/cooldown", map[string]any{"days": 1}, "Student not found"),
 		notFound("DELETE", "/api/students/x/cooldown", nil, "Student not found"),
-		badJSON("POST", "/api/students/import"),
 		badJSON("POST", "/api/students"),
 		badJSON("PUT", p("/api/students/%d", st)),
 		badJSON("PUT", p("/api/students/%d/preferred-timeslots/%d", st, tt)),

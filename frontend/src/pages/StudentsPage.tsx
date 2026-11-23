@@ -5,7 +5,6 @@ import {
   ActionMenu, Alert, Badge, Button, Checkbox, DescriptionList, Dialog, EmptyState, ExpandIcon, Field, Input,
   Page, PageHeader, Row, SortHeader, Stack, Table, Text, Tooltip, useConfirm, useToast,
 } from '../ui';
-import { CsvActions, ImportResultAlert, type ImportResult } from '../components/CsvActions';
 import { GroupLabel, InvitationStatusBadge } from '../components/StatusBadges';
 import { useT, getLocale } from '../i18n';
 import styles from './StudentsPage.module.css';
@@ -55,7 +54,6 @@ export default function StudentsPage() {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', membership_id: '', preferred_days: '0|1|2|3|4|5|6' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [timeslotPrefs, setTimeslotPrefs] = useState<Record<number, number[]>>({});
   const [sortCol, setSortCol] = useState<keyof Student>('last_name');
@@ -356,13 +354,6 @@ export default function StudentsPage() {
                 <Button icon={<Layers />} aria-label={groupBuddiesLabel} pressed={groupBuddies} onClick={toggleGroupBuddies} />
               </Tooltip>
             </div>
-            <CsvActions
-              filename="students.csv"
-              exportCsv={api.exportStudentsCsv}
-              importCsv={api.importStudentsCsv}
-              onImported={result => { setImportResult(result); load(); }}
-              disabled={buddyMode}
-            />
             <Button variant="primary" icon={<Plus />} onClick={openCreate} disabled={buddyMode}>{t.addStudent}</Button>
           </>
         }
@@ -380,8 +371,6 @@ export default function StudentsPage() {
           {t.buddyModeHint}
         </Alert>
       )}
-
-      {importResult && <ImportResultAlert result={importResult} onDismiss={() => setImportResult(null)} />}
 
       {students.length === 0 ? (
         <EmptyState icon={<GraduationCap />} title={t.noStudentsYet} description={t.noStudentsHint} />

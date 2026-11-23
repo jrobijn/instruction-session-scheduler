@@ -2,9 +2,7 @@ package server
 
 import (
 	"net/http"
-	"strconv"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
 )
@@ -25,88 +23,17 @@ func (s *Server) getInstructor(id int64) (Instructor, bool, error) {
 		WHERE id = ? AND deleted_at IS NULL`, id)
 }
 
-// getInstructors lists all (non-deleted) instructors by name.
-func (s *Server) getInstructors() ([]Instructor, error) {
-	return db.Many[Instructor](s.db, `
-		SELECT id, first_name, last_name, email, active FROM instructors
-		WHERE deleted_at IS NULL
-		ORDER BY last_name ASC, first_name ASC`)
-}
-
 func (s *Server) instructorRoutes() {
 	s.adminRoute("GET /api/instructors", func(w http.ResponseWriter, r *http.Request) error {
-		instructors, err := s.getInstructors()
+		instructors, err := db.Many[Instructor](s.db, `
+			SELECT id, first_name, last_name, email, active FROM instructors
+			WHERE deleted_at IS NULL
+			ORDER BY last_name ASC, first_name ASC`)
 		if err != nil {
 			return err
 		}
 
 		httpx.OK(w, instructors)
-		return nil
-	})
-
-	s.adminRoute("GET /api/instructors/export", func(w http.ResponseWriter, r *http.Request) error {
-		instructors, err := s.getInstructors()
-		if err != nil {
-			return err
-		}
-
-		rows := make([][]string, len(instructors))
-		for i, in := range instructors {
-			rows[i] = []string{in.FirstName, in.LastName, in.Email, strconv.FormatInt(in.Active, 10)}
-		}
-
-		return writeCSV(w, "instructors.csv", []string{"first_name", "last_name", "email", "active"}, rows)
-	})
-
-	s.adminRoute("POST /api/instructors/import", func(w http.ResponseWriter, r *http.Request) error {
-		in, err := readCSVImport(r)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return nil
-		}
-
-		if !in.has("first_name", "last_name", "email") {
-			httpx.Error(w, http.StatusBadRequest, "CSV must contain first_name, last_name, and email columns")
-			return nil
-		}
-
-		result := importResult{Errors: []string{}}
-		err = s.db.InTx(func(tx *sqlx.Tx) error {
-			for _, row := range in.rows {
-				first, last, email := row.get("first_name"), row.get("last_name"), row.get("email")
-				if first == "" || last == "" || email == "" {
-					result.skip(row, "missing required fields")
-					continue
-				}
-
-				id, found, err := db.One[int64](tx, "SELECT id FROM instructors WHERE email = ? AND deleted_at IS NULL", email)
-				if err != nil {
-					return err
-				}
-				if found {
-					_, err = tx.Exec("UPDATE instructors SET first_name = ?, last_name = ? WHERE id = ?", first, last, id)
-				} else {
-					_, err = tx.Exec("INSERT INTO instructors (first_name, last_name, email) VALUES (?, ?, ?)", first, last, email)
-				}
-
-				if isUniqueErr(err, "instructors.email") { // the email belongs to a deleted instructor
-					result.skip(row, "An instructor with this email already exists")
-					continue
-				}
-				if err != nil {
-					return err
-				}
-
-				result.Imported++
-			}
-
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-
-		httpx.OK(w, result)
 		return nil
 	})
 
