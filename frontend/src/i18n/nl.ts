@@ -287,6 +287,7 @@ const nl: Translations = {
   summaryExpired: (n: number) => `Verlopen: ${n}`,
   summaryInvalidated: (n: number) => `Vervallen: ${n}`,
   timeslot: 'Tijdslot',
+  slotNumber: 'Nr.',
   student: 'Leerling',
   discipline: 'Discipline',
   noShow: 'no-show',
@@ -379,6 +380,8 @@ const nl: Translations = {
   settingClubNameDesc: 'Naam van de sportclub, gebruikt in e-mails.',
   settingExpiryMinutes: 'Verloopduur uitnodiging (minuten)',
   settingExpiryMinutesDesc: 'Minuten voordat een onbeantwoorde uitnodiging verloopt en een vervanger wordt uitgenodigd. Stel in op 0 om uit te schakelen. Onbeantwoorde uitnodigingen vervallen altijd zodra het tijdslot begint.',
+  settingSlotNumberDigits: 'Cijfers in slotnummer',
+  settingSlotNumberDigitsDesc: 'Minimaal aantal cijfers van slotnummers op de sessiepagina en in de PDF-export. Kortere nummers krijgen voorloopnullen, bijvoorbeeld 3 toont 001. Binnen een sessie krijgen alle nummers evenveel cijfers als het hoogste slotnummer, als dat er meer zijn.',
   settingClubDays: 'Clubdagen',
   settingClubDaysDesc: 'Dagen van de week waarop de club actief is. Er moet minimaal één dag geselecteerd zijn.',
 
