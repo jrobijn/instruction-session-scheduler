@@ -53,7 +53,7 @@ Before applying migrations to a database that has data, the server writes a back
 
 To change the schema, add a new file `NNNNN_description.sql` with the next number, starting with `-- +goose Up`. Never edit a migration that has been released, because databases that already ran it won't run it again. To rebuild a table (needed to change a constraint or column type), turn foreign keys off with `PRAGMA foreign_keys` first. That pragma is ignored inside a transaction, so such a migration needs `-- +goose NO TRANSACTION`.
 
-`00001_init.sql` is the final schema of the TypeScript backend. Databases from before the switch to Go must have been migrated by the last TypeScript release (git commit `75f9869`). The server refuses to start on an older one and says which column is missing; run that release on it once to migrate it.
+The server refuses to start on a database that has tables but no `goose_db_version` history.
 
 ## Layout
 

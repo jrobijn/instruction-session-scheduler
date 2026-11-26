@@ -30,7 +30,7 @@ func migrations() fs.FS {
 
 // Migrate brings the database up to the newest embedded migration. Before applying anything
 // to a database that already has data, it writes a backup next to it (<path>.bak-v<version>).
-// It refuses to run on a database from before the last TypeScript release, and on one that a
+// It refuses to run on a database that has tables but no migration history, and on one that a
 // newer build of the server has migrated.
 func (d *DB) Migrate(ctx context.Context) error {
 	provider, err := goose.NewProvider(goose.DialectSQLite3, d.DB.DB, migrations())
@@ -57,11 +57,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 
 	if hasData {
 		if current == 0 {
-			// Created before goose: 00001_init must find the final TypeScript schema, which its
-			// IF NOT EXISTS statements then leave untouched.
-			if err := d.checkUpToDate(); err != nil {
-				return err
-			}
+			return fmt.Errorf("database has tables but no migration history: it was not created by this server")
 		}
 
 		if err := d.backup(current); err != nil {

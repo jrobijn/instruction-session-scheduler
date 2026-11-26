@@ -9,9 +9,7 @@ package db
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite"
@@ -51,58 +49,6 @@ func Open(path string) (*DB, error) {
 	}
 
 	return &DB{DB: sqlDB, path: path}, nil
-}
-
-// requiredColumns lists the most recently added columns per table; if any is missing, the
-// database predates the last TypeScript migrations (removed after commit 75f9869). Only
-// checked on databases created before goose, see Migrate.
-var requiredColumns = map[string][]string{
-	"students":         {"cooldown_until", "deleted_at", "membership_id"},
-	"instructors":      {"deleted_at"},
-	"invitations":      {"slot_id", "decision_log", "group_id"},
-	"student_groups":   {"joined_at", "reactivated_at", "invite_next_at"},
-	"groups":           {"new_member_priority", "reactivated_member_priority", "cooldown_member_priority"},
-	"timetable_groups": {"position"},
-	"notifications":    {"session_id"},
-	"session_slots":    {"removed"},
-}
-
-func (d *DB) checkUpToDate() error {
-	for table, cols := range requiredColumns {
-		existing := map[string]bool{}
-		rows, err := d.Query("SELECT name FROM pragma_table_info(?)", table)
-		if err != nil {
-			return err
-		}
-
-		for rows.Next() {
-			var name string
-			if err := rows.Scan(&name); err != nil {
-				rows.Close()
-				return err
-			}
-
-			existing[name] = true
-		}
-
-		rows.Close()
-		for _, c := range cols {
-			if !existing[c] {
-				return fmt.Errorf("database schema is outdated (%s.%s missing): run the last TypeScript release (git commit 75f9869) on it once to migrate it", table, c)
-			}
-		}
-	}
-
-	var invSQL string
-	if err := d.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='invitations'").Scan(&invSQL); err != nil {
-		return err
-	}
-
-	if !strings.Contains(invSQL, "'invalidated'") {
-		return fmt.Errorf("database schema is outdated (invitations status constraint): run the last TypeScript release (git commit 75f9869) on it once to migrate it")
-	}
-
-	return nil
 }
 
 // Many runs a query and scans every row into a T: a struct (by column name, see the package
