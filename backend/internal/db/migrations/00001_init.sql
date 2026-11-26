@@ -1,12 +1,7 @@
--- The end state of the former TypeScript backend's database.ts after all of its migrations
--- (last TypeScript commit 75f9869).
---
--- This is the only migration that uses IF NOT EXISTS / INSERT OR IGNORE: databases created
--- before goose already have this schema, and running it on them must change nothing.
--- Later migrations run exactly once, so they don't need these guards.
+-- The initial schema.
 
 -- +goose Up
-CREATE TABLE IF NOT EXISTS students (
+CREATE TABLE students (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   first_name TEXT NOT NULL,
   last_name TEXT NOT NULL,
@@ -21,7 +16,7 @@ CREATE TABLE IF NOT EXISTS students (
   deleted_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS instructors (
+CREATE TABLE instructors (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   first_name TEXT NOT NULL,
   last_name TEXT NOT NULL,
@@ -31,7 +26,7 @@ CREATE TABLE IF NOT EXISTS instructors (
   deleted_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS timetables (
+CREATE TABLE timetables (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','saved')),
@@ -40,7 +35,7 @@ CREATE TABLE IF NOT EXISTS timetables (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS training_sessions (
+CREATE TABLE training_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   date TEXT NOT NULL UNIQUE,
   day_of_week INTEGER NOT NULL DEFAULT 0,
@@ -50,7 +45,7 @@ CREATE TABLE IF NOT EXISTS training_sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS session_slots (
+CREATE TABLE session_slots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
   instructor_id INTEGER NOT NULL REFERENCES instructors(id) ON DELETE CASCADE,
@@ -58,7 +53,7 @@ CREATE TABLE IF NOT EXISTS session_slots (
   UNIQUE(session_id, instructor_id)
 );
 
-CREATE TABLE IF NOT EXISTS disciplines (
+CREATE TABLE disciplines (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   abbreviation TEXT NOT NULL DEFAULT '',
@@ -66,14 +61,14 @@ CREATE TABLE IF NOT EXISTS disciplines (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS timeslots (
+CREATE TABLE timeslots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   timetable_id INTEGER NOT NULL REFERENCES timetables(id) ON DELETE CASCADE,
   start_time TEXT NOT NULL,
   UNIQUE(timetable_id, start_time)
 );
 
-CREATE TABLE IF NOT EXISTS groups (
+CREATE TABLE groups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   color TEXT NOT NULL DEFAULT '#3b82f6',
@@ -85,7 +80,7 @@ CREATE TABLE IF NOT EXISTS groups (
   cooldown_member_priority TEXT NOT NULL DEFAULT 'back'
 );
 
-CREATE TABLE IF NOT EXISTS invitations (
+CREATE TABLE invitations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
   student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -102,14 +97,14 @@ CREATE TABLE IF NOT EXISTS invitations (
   decision_log TEXT
 );
 
-CREATE TABLE IF NOT EXISTS student_preferred_timeslots (
+CREATE TABLE student_preferred_timeslots (
   student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   timeslot_id INTEGER NOT NULL REFERENCES timeslots(id) ON DELETE CASCADE,
   timetable_id INTEGER NOT NULL REFERENCES timetables(id) ON DELETE CASCADE,
   PRIMARY KEY(student_id, timeslot_id)
 );
 
-CREATE TABLE IF NOT EXISTS student_groups (
+CREATE TABLE student_groups (
   student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   joined_at TEXT,
@@ -119,7 +114,7 @@ CREATE TABLE IF NOT EXISTS student_groups (
   UNIQUE(student_id)
 );
 
-CREATE TABLE IF NOT EXISTS timetable_groups (
+CREATE TABLE timetable_groups (
   timetable_id INTEGER NOT NULL REFERENCES timetables(id) ON DELETE CASCADE,
   group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   percentage INTEGER NOT NULL DEFAULT 100,
@@ -127,25 +122,25 @@ CREATE TABLE IF NOT EXISTS timetable_groups (
   PRIMARY KEY(timetable_id, group_id)
 );
 
-CREATE TABLE IF NOT EXISTS discipline_groups (
+CREATE TABLE discipline_groups (
   discipline_id INTEGER NOT NULL REFERENCES disciplines(id) ON DELETE CASCADE,
   group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   PRIMARY KEY(discipline_id, group_id)
 );
 
-CREATE TABLE IF NOT EXISTS buddy_groups (
+CREATE TABLE buddy_groups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS buddy_group_members (
+CREATE TABLE buddy_group_members (
   buddy_group_id INTEGER NOT NULL REFERENCES buddy_groups(id) ON DELETE CASCADE,
   student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   PRIMARY KEY(buddy_group_id, student_id),
   UNIQUE(student_id)
 );
 
-CREATE TABLE IF NOT EXISTS notifications (
+CREATE TABLE notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL CHECK(type IN ('invitation_confirmed','invitation_declined','invitation_expired','invitation_cancelled','session_full','session_no_longer_full')),
   invitation_id INTEGER REFERENCES invitations(id) ON DELETE CASCADE,
@@ -157,14 +152,14 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS settings (
+CREATE TABLE settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 
-INSERT OR IGNORE INTO settings (key, value) VALUES ('club_name', 'Sports Club');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('club_days', '0|1|2|3|4|5|6');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_expiry_minutes', '120');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('invitation_check_interval_minutes', '15');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('email_locale', 'en');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('timezone', 'Europe/Amsterdam');
+INSERT INTO settings (key, value) VALUES ('club_name', 'Sports Club');
+INSERT INTO settings (key, value) VALUES ('club_days', '0|1|2|3|4|5|6');
+INSERT INTO settings (key, value) VALUES ('invitation_expiry_minutes', '120');
+INSERT INTO settings (key, value) VALUES ('invitation_check_interval_minutes', '15');
+INSERT INTO settings (key, value) VALUES ('email_locale', 'en');
+INSERT INTO settings (key, value) VALUES ('timezone', 'Europe/Amsterdam');
