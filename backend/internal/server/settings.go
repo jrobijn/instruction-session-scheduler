@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
@@ -50,9 +51,15 @@ func (s *Server) settingsRoutes() {
 		}
 
 		key, value := r.PathValue("key"), *in.Value
-		if key == "timezone" {
+		switch key {
+		case "timezone":
 			if _, err := time.LoadLocation(value); err != nil {
 				httpx.Error(w, http.StatusBadRequest, "Invalid time zone")
+				return nil
+			}
+		case "slot_number_digits":
+			if n, err := strconv.Atoi(value); err != nil || n < 1 || n > 6 {
+				httpx.Error(w, http.StatusBadRequest, "Slot number digits must be a whole number from 1 to 6")
 				return nil
 			}
 		}

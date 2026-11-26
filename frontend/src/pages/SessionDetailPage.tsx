@@ -139,6 +139,7 @@ export default function SessionDetailPage() {
   const [allInstructors, setAllInstructors] = useState<Instructor[]>([]);
   const [allTimetables, setAllTimetables] = useState<TimetableInfo[]>([]);
   const [clubName, setClubName] = useState('');
+  const [slotDigits, setSlotDigits] = useState(1);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
@@ -178,6 +179,7 @@ export default function SessionDetailPage() {
       setSession(sess);
       setAllInstructors(instr);
       setClubName(settings.club_name || '');
+      setSlotDigits(Number(settings.slot_number_digits) || 1);
       // Only saved + active timetables for selection
       setAllTimetables(tts.filter((t: any) => t.status === 'saved' && t.active));
     } catch (err: any) {
@@ -470,6 +472,18 @@ export default function SessionDetailPage() {
 
   const canEdit = session.status === 'draft' || session.status === 'scheduled';
 
+  // Slot numbers count through the instructors of the first timeslot, then the next timeslot.
+  // Orphaned invitations (instructor removed from the session) have no slot and no number.
+  // All numbers in a session share one width: the configured minimum, or the digits of the
+  // highest slot number if that is longer (so 1 → 001 when a session has 100+ slots).
+  const slotNumberDigits = Math.max(slotDigits, String(session.timeslots.length * session.instructors.length).length);
+  const slotNumber = (timeslotId: number, instructorId: number) => {
+    const tsIdx = session.timeslots.findIndex(ts => ts.id === timeslotId);
+    const instrIdx = session.instructors.findIndex(i => i.id === instructorId);
+    if (tsIdx < 0 || instrIdx < 0) return '';
+    return String(tsIdx * session.instructors.length + instrIdx + 1).padStart(slotNumberDigits, '0');
+  };
+
   // Build unified slot list for invitations table: every timeslot×instructor gets rows for
   // existing invitations (including declined) plus an empty add-row if the slot is unoccupied
   type SlotEntry = { timeslotId: number; instructorId: number; startTime: string; instructorName: string; invitation: Invitation | null; empty: boolean };
@@ -556,39 +570,62 @@ export default function SessionDetailPage() {
     const generatedAt = new Date().toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
     const totalPagesPlaceholder = '{total_pages_count_string}';
 
+    // Each instructor's columns start with a vertical rule; ruleGap is the extra space on both
+    // sides of it. Student cells read: rule, checkbox, name.
+    const ruleGap = 1.5;
     const boxSize = 3.5;
-    const boxPad = 2;
+    const boxPad = 2 + ruleGap;
+    const nameLeft = boxPad + boxSize + 2.5;
+    // autotable centres the header's 0.3 bottom border on the edge and the next row's fill covers
+    // half of it, so the visible horizontal rules are 0.15 thick; the vertical rules match that.
+    const ruleWidth = 0.15;
 
     // Each instructor gets 2 columns: student (with checkbox + membership ID subtitle) and discipline abbreviation
-    const headerRow: any[] = [{ content: t.time, rowSpan: 2, styles: { cellPadding: 3, halign: 'left' } }];
+    const timePadding = { top: 3, right: 3 + ruleGap, bottom: 3, left: 3 };
+    const headerPadding = { top: 3, right: 3, bottom: 3, left: nameLeft };
+    const headerRow: any[] = [{ content: t.time, rowSpan: 2, styles: { cellPadding: timePadding, halign: 'left' } }];
     for (const instr of session.instructors) {
-      headerRow.push({ content: `${instr.first_name} ${instr.last_name}`, colSpan: 2, styles: { halign: 'left' } });
+      headerRow.push({ content: `${instr.first_name} ${instr.last_name}`, colSpan: 2, styles: { halign: 'left', cellPadding: headerPadding } });
     }
     const subHeaderRow: any[] = [];
     for (let i = 0; i < session.instructors.length; i++) {
-      subHeaderRow.push({ content: t.pdfStudentColumn, styles: { fontSize: 8, fontStyle: 'normal', textColor: PDF_COLORS.muted } });
+      subHeaderRow.push({ content: t.pdfStudentColumn, styles: { fontSize: 8, fontStyle: 'normal', textColor: PDF_COLORS.muted, cellPadding: headerPadding } });
       subHeaderRow.push({ content: t.pdfDisciplineColumn, styles: { fontSize: 8, fontStyle: 'normal', textColor: PDF_COLORS.muted } });
     }
 
     const subtitles: Record<string, string> = {};
+    const slotNumbers: Record<string, string> = {};
     const body = session.timeslots.map((ts, rowIdx) => {
       const row: string[] = [ts.start_time];
       session.instructors.forEach((instr, colIdx) => {
         const inv = scheduleGrid[ts.id]?.[instr.id];
+        const studentColIdx = 1 + colIdx * 2;
         row.push(inv ? inv.student_name : '');
         row.push(inv?.discipline_abbreviation || '');
+        slotNumbers[`${rowIdx}-${studentColIdx}`] = slotNumber(ts.id, instr.id);
         if (inv?.student_membership_id) {
-          const studentColIdx = 1 + colIdx * 2;
           subtitles[`${rowIdx}-${studentColIdx}`] = inv.student_membership_id;
         }
       });
       return row;
     });
 
-    // Build columnStyles: Time col monospace, discipline cols smaller width
-    const colStyles: Record<number, any> = { 0: { cellPadding: 3, halign: 'left', font: 'courier', fontStyle: 'bold' } };
+    // Slot numbers sit at the right edge of each student cell; the right padding reserves room
+    // for them, so long names wrap before reaching the number.
+    const slotNumberFontSize = 9;
+    doc.setFont('courier', 'bold');
+    doc.setFontSize(slotNumberFontSize);
+    const slotNumberWidth = Math.max(...Object.values(slotNumbers).map(n => doc.getTextWidth(n)), 0);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    // jspdf-autotable puts the first text baseline at padding-top + 0.85 × font size (10pt = 3.528mm)
+    const nameBaseline = 3 + 10 * 0.3528 * 0.85;
+
+    // Build columnStyles: Time col monospace, discipline cols smaller width, student cols with room for the slot number
+    const colStyles: Record<number, any> = { 0: { cellPadding: timePadding, halign: 'left', font: 'courier', fontStyle: 'bold' } };
     for (let i = 0; i < session.instructors.length; i++) {
-      colStyles[2 + i * 2] = { cellPadding: 3, cellWidth: 18, halign: 'center' };
+      colStyles[1 + i * 2] = { cellPadding: { top: 3, right: 3 + slotNumberWidth + 2, bottom: 6, left: nameLeft } };
+      colStyles[2 + i * 2] = { cellPadding: 3, cellWidth: 18 + 2 * ruleGap, halign: 'center' };
     }
 
     autoTable(doc, {
@@ -616,11 +653,26 @@ export default function SessionDetailPage() {
         doc.setTextColor(...PDF_COLORS.text);
       },
       didDrawCell: (data: any) => {
-        if (data.section !== 'body' || data.column.index === 0) return;
+        if (data.column.index === 0) return;
         // Only draw on student columns (odd indices: 1, 3, 5, ...)
         const isStudentCol = (data.column.index - 1) % 2 === 0;
         if (!isStudentCol) return;
+        // Vertical rule where each instructor's columns start, through header and body
+        doc.setDrawColor(...PDF_COLORS.rule);
+        doc.setLineWidth(ruleWidth);
+        doc.line(data.cell.x, data.cell.y, data.cell.x, data.cell.y + data.cell.height);
+        if (data.section !== 'body') return;
         const key = `${data.row.index}-${data.column.index}`;
+        // Draw slot number at the right edge of the cell, on the name's baseline
+        if (slotNumbers[key]) {
+          doc.setFont('courier', 'bold');
+          doc.setFontSize(slotNumberFontSize);
+          doc.setTextColor(...PDF_COLORS.muted);
+          doc.text(slotNumbers[key], data.cell.x + data.cell.width - 3, data.cell.y + nameBaseline, { align: 'right' });
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(...PDF_COLORS.text);
+          doc.setFontSize(10);
+        }
         // Draw checkbox
         if (data.cell.raw && String(data.cell.raw).trim()) {
           const x = data.cell.x + boxPad;
@@ -629,13 +681,16 @@ export default function SessionDetailPage() {
           doc.setLineWidth(0.3);
           doc.rect(x, y, boxSize, boxSize);
         }
-        // Draw membership ID subtitle
+        // Draw membership ID subtitle under the name's last line, so a wrapped name pushes it down
+        // (autotable grows the row for the extra lines, so it stays inside the cell)
         if (subtitles[key]) {
-          const nameBaselineY = data.cell.y + 3 + 10 * 0.3528;
+          const nameLines = Array.isArray(data.cell.text) ? Math.max(data.cell.text.length, 1) : 1;
+          const lineHeight = 10 * 0.3528 * doc.getLineHeightFactor();
+          const lastLineBaseline = data.cell.y + nameBaseline + (nameLines - 1) * lineHeight;
           doc.setFontSize(7);
           doc.setFont('helvetica', 'italic');
           doc.setTextColor(120, 120, 120);
-          doc.text(subtitles[key], data.cell.x + 8, nameBaselineY + 3);
+          doc.text(subtitles[key], data.cell.x + nameLeft, lastLineBaseline + 3.5);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(...PDF_COLORS.text);
           doc.setFontSize(10);
@@ -879,17 +934,20 @@ export default function SessionDetailPage() {
                     const inv = scheduleGrid[ts.id]?.[instr.id];
                     return (
                       <td key={instr.id}>
-                        {inv ? (
-                          <Stack gap={1}>
-                            <Row gap={2} wrap>
-                              {studentLabel(inv)}
-                              <InvitationStatusBadge status={inv.status} />
-                            </Row>
-                            {inv.discipline_name && <Text tone="muted" size="xs">{inv.discipline_name}</Text>}
-                          </Stack>
-                        ) : (
-                          <Text tone="subtle">{t.noData}</Text>
-                        )}
+                        <Row gap={3} align="baseline">
+                          <Text mono tone="muted" size="sm">{slotNumber(ts.id, instr.id)}</Text>
+                          {inv ? (
+                            <Stack gap={1}>
+                              <Row gap={2} wrap>
+                                {studentLabel(inv)}
+                                <InvitationStatusBadge status={inv.status} />
+                              </Row>
+                              {inv.discipline_name && <Text tone="muted" size="xs">{inv.discipline_name}</Text>}
+                            </Stack>
+                          ) : (
+                            <Text tone="subtle">{t.noData}</Text>
+                          )}
+                        </Row>
                       </td>
                     );
                   })}
@@ -917,6 +975,7 @@ export default function SessionDetailPage() {
           <Table embedded>
             <thead>
               <tr>
+                <th data-shrink>{t.slotNumber}</th>
                 <th>{t.timeslot}</th>
                 <th>{t.student}</th>
                 <th>{t.discipline}</th>
@@ -928,7 +987,12 @@ export default function SessionDetailPage() {
               {slotGroups.map((group, groupIdx) => group.entries.map((slot, idx) => {
                 const isFirstInGroup = idx === 0;
                 const rowClass = isFirstInGroup && groupIdx > 0 ? styles.slotStart : undefined;
-                const timeCell = <td>{isFirstInGroup && <Text mono weight="medium">{slot.startTime}</Text>}</td>;
+                const timeCell = (
+                  <>
+                    <td data-shrink>{isFirstInGroup && <Text mono tone="muted">{slotNumber(slot.timeslotId, slot.instructorId)}</Text>}</td>
+                    <td>{isFirstInGroup && <Text mono weight="medium">{slot.startTime}</Text>}</td>
+                  </>
+                );
                 const inv = slot.invitation;
 
                 if (inv) {

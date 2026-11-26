@@ -285,6 +285,7 @@ const en = {
   summaryExpired: (n: number) => `Expired: ${n}`,
   summaryInvalidated: (n: number) => `Invalidated: ${n}`,
   timeslot: 'Timeslot',
+  slotNumber: 'No.',
   student: 'Student',
   discipline: 'Discipline',
   noShow: 'no-show',
@@ -377,6 +378,8 @@ const en = {
   settingClubNameDesc: 'Name of the sports club, used in emails.',
   settingExpiryMinutes: 'Invitation Expiry (minutes)',
   settingExpiryMinutesDesc: 'Minutes before an unanswered invitation expires and a replacement is invited. Set to 0 to disable. Unanswered invitations are always invalidated when their time slot starts.',
+  settingSlotNumberDigits: 'Slot number digits',
+  settingSlotNumberDigitsDesc: 'Minimum number of digits for slot numbers on the session page and in the PDF export. Shorter numbers get leading zeros, e.g. 3 shows 001. Within a session all numbers have as many digits as its highest slot number, if that is more.',
   settingClubDays: 'Club Days',
   settingClubDaysDesc: 'Days of the week the club operates. At least one must be selected.',
 
