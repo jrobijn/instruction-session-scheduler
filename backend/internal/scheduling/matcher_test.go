@@ -54,3 +54,31 @@ func TestMatcherMovesBuddyLast(t *testing.T) {
 		t.Errorf("placed 1, 3 in %d, %d; want 1, 0", m.placed[1], m.placed[3])
 	}
 }
+
+func TestMatcherMakesRoomNearBuddy(t *testing.T) {
+	timeslots := []Timeslot{{ID: 10, Capacity: 2}, {ID: 20, Capacity: 1}, {ID: 30, Capacity: 1}}
+
+	// 1 (3's buddy) and 2 fill timeslot 10 while 20 has room: 2 moves to 20 so 3 joins 1.
+	m := newMatcher(timeslots, anyTimeslot, Buddies{1: {3}, 3: {1}})
+	m.place(1, -1)
+	m.place(2, -1)
+	if !m.place(3, m.placed[1]) || m.placed[2] != 1 || m.placed[3] != 0 {
+		t.Errorf("placed 2, 3 in %d, %d; want 1, 0", m.placed[2], m.placed[3])
+	}
+
+	// 2 may only take timeslot 10, so 3 takes the free room closest to 1.
+	m = newMatcher(timeslots, onlyIn(map[int64][]int64{2: {10}}), Buddies{1: {3}, 3: {1}})
+	m.place(1, -1)
+	m.place(2, -1)
+	if !m.place(3, m.placed[1]) || m.placed[2] != 0 || m.placed[3] != 1 {
+		t.Errorf("2 can't move: placed 2, 3 in %d, %d; want 0, 1", m.placed[2], m.placed[3])
+	}
+
+	// 2 has buddies of their own, so 2 isn't moved away from them either.
+	m = newMatcher(timeslots, anyTimeslot, Buddies{1: {3}, 3: {1}, 2: {4}, 4: {2}})
+	m.place(1, -1)
+	m.place(2, -1)
+	if !m.place(3, m.placed[1]) || m.placed[2] != 0 || m.placed[3] != 1 {
+		t.Errorf("2 has buddies: placed 2, 3 in %d, %d; want 0, 1", m.placed[2], m.placed[3])
+	}
+}

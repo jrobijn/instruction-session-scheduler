@@ -63,8 +63,43 @@ func (m *matcher) restricted(sid int64) bool {
 // place puts the student in an allowed timeslot, as close to timeslot near as possible (the
 // earliest if near is -1). It reports false if there is no room for them, even after moving
 // others.
+//
+// For a student with buddies placed near one, the closest timeslot wins even when it is full
+// but a student without buddies there can move elsewhere: that keeps buddies together, where
+// taking free room further away would split them.
 func (m *matcher) place(sid int64, near int) bool {
-	return m.tryPlace(sid, m.orderedTimeslots(sid, near), map[int]bool{})
+	order := m.orderedTimeslots(sid, near)
+	if near >= 0 && len(m.buddies[sid]) > 0 {
+		for _, ti := range order {
+			if m.placeIn(sid, ti) {
+				return true
+			}
+		}
+	}
+
+	return m.tryPlace(sid, order, map[int]bool{})
+}
+
+// placeIn puts the student in timeslot ti if it has room or one of its occupants without
+// buddies can move to another timeslot they allow.
+func (m *matcher) placeIn(sid int64, ti int) bool {
+	if len(m.occupants[ti]) < m.timeslots[ti].Capacity {
+		m.put(sid, ti)
+		return true
+	}
+
+	for _, other := range slices.Clone(m.occupants[ti]) {
+		if len(m.buddies[other]) > 0 {
+			continue
+		}
+
+		if m.tryPlace(other, m.orderedTimeslots(other, ti), map[int]bool{ti: true}) {
+			m.put(sid, ti)
+			return true
+		}
+	}
+
+	return false
 }
 
 // orderedTimeslots lists the student's allowed timeslots closest to near first, earliest

@@ -1,6 +1,7 @@
 package scheduling
 
 import (
+	"maps"
 	"slices"
 	"testing"
 
@@ -108,5 +109,25 @@ func TestGenerateBuddyPlacedNearBuddy(t *testing.T) {
 		if p.Timeslot != 1 {
 			t.Errorf("student %d in timeslot %d, want 1 (with their buddy)", p.Member.ID, p.Timeslot)
 		}
+	}
+}
+
+func TestGenerateMovesOthersForBuddy(t *testing.T) {
+	// In queue order 1 and 2 fill timeslot 10 and 3 goes to 20. 1's buddy 4 comes last: 2,
+	// who has no buddies, moves to 20 so 4 can join 1 instead of taking the free spot in 20.
+	got := Generate(Input{
+		Queue:     []queue.Member{member(1, 1), member(2, 1), member(3, 1), member(4, 1)},
+		Groups:    []Group{{ID: 1, Percentage: 100, Slots: 4}},
+		Timeslots: []Timeslot{{ID: 10, Capacity: 2}, {ID: 20, Capacity: 2}},
+		Allows:    anyTimeslot,
+		Buddies:   Buddies{1: {4}, 4: {1}},
+	})
+	timeslot := map[int64]int{}
+	for _, p := range got {
+		timeslot[p.Member.ID] = p.Timeslot
+	}
+	want := map[int64]int{1: 0, 2: 1, 3: 1, 4: 0}
+	if !maps.Equal(timeslot, want) {
+		t.Errorf("timeslots %v, want %v", timeslot, want)
 	}
 }
