@@ -122,6 +122,34 @@ func (s *Server) buddyGroupRoutes() {
 	})
 }
 
+// buddyGroupMembers lists the non-deleted members of every buddy group, by buddy group id,
+// with the group they are in. It is what pages show of buddy groups; the scheduler uses
+// loadBuddies.
+func buddyGroupMembers(q db.Querier) (map[int64][]Buddy, error) {
+	type buddyRow struct {
+		BuddyGroupID int64 `db:"buddy_group_id"`
+		Buddy
+	}
+
+	rows, err := db.Many[buddyRow](q, `
+		SELECT bgm.student_id AS id, bgm.buddy_group_id, s.first_name, s.last_name, sg.group_id, g.name AS group_name
+		FROM buddy_group_members bgm
+		JOIN students s ON s.id = bgm.student_id AND s.deleted_at IS NULL
+		LEFT JOIN student_groups sg ON sg.student_id = s.id
+		LEFT JOIN groups g ON g.id = sg.group_id
+		ORDER BY bgm.rowid`)
+	if err != nil {
+		return nil, err
+	}
+
+	out := map[int64][]Buddy{}
+	for _, r := range rows {
+		out[r.BuddyGroupID] = append(out[r.BuddyGroupID], r.Buddy)
+	}
+
+	return out, nil
+}
+
 // loadBuddies loads everyone's buddies, in the order they were added to their buddy group.
 func loadBuddies(q db.Querier) (scheduling.Buddies, error) {
 	type membership struct {

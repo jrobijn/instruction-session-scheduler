@@ -1,0 +1,8 @@
+.timeslots { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+
+/* Every timeslot badge as wide as the assigned one (icon + gap + "HH:MM"), so they line up
+   across rows. ch is the badge's own monospace digit width. */
+.timeslots > * {
+  width: calc(5ch + var(--icon-xs) + var(--space-1) + 2 * var(--space-2) + 2 * var(--border-width));
+  justify-content: center;
+}

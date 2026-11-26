@@ -61,6 +61,7 @@
   --dialog-w-sm: 400px;
   --dialog-w-md: 480px;
   --dialog-w-lg: 760px;
+  --dialog-w-xl: 1040px;
 
   /* Motion */
   --duration-fast: 120ms;

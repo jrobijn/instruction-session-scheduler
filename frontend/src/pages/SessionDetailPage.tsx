@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties, type ReactNode } from 
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeftRight, Ban, CircleCheck, ExternalLink, FileDown, Plus, RefreshCw, RotateCcw, Send,
-  Sparkles, Timer, UserCheck, UserPlus, UserX, Users, Wand2, X,
+  Eye, Sparkles, Timer, UserCheck, UserPlus, UserX, Users, Wand2, X,
 } from 'lucide-react';
 import { api, API_BASE } from '../api';
 import jsPDF from 'jspdf';
@@ -15,7 +15,8 @@ import {
 import Countdown from '../components/Countdown';
 import DecisionLog from '../components/DecisionLog';
 import { AllocationBar } from '../components/AllocationBar';
-import { InvitationStatusBadge, SessionStatusBadge } from '../components/StatusBadges';
+import { GroupDot, InvitationStatusBadge, SessionStatusBadge } from '../components/StatusBadges';
+import { SchedulePreviewDialog } from '../components/SchedulePreviewDialog';
 import { StudentSearchResults } from '../components/StudentSearchResults';
 import styles from './SessionDetailPage.module.css';
 import buddyStyles from '../components/BuddyRows.module.css';
@@ -154,6 +155,7 @@ export default function SessionDetailPage() {
   const [replacingInstructorId, setReplacingInstructorId] = useState<number | null>(null);
   const [instructorQuery, setInstructorQuery] = useState('');
   const [pendingInstructorId, setPendingInstructorId] = useState<number | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const focusInstructorAfterLoad = useRef<number | null>(null);
 
   useEffect(() => {
@@ -346,6 +348,7 @@ export default function SessionDetailPage() {
     setActionLoading('generating');
     try {
       await api.generateSchedule(Number(id));
+      setPreviewOpen(false);
       load();
     } catch (err: any) {
       toast(err.message);
@@ -713,12 +716,16 @@ export default function SessionDetailPage() {
       {busy('cancelling') ? t.cancelling : t.cancelSession}
     </Button>
   );
+  const previewButton = (
+    <Button variant="ghost" icon={<Eye />} onClick={() => setPreviewOpen(true)}>{t.previewSchedule}</Button>
+  );
   const headerActions = (() => {
     switch (session.status) {
       case 'draft':
         return draftReady && (
           <>
             {cancelButton}
+            {previewButton}
             <Button variant="primary" icon={<Sparkles />} onClick={generateSchedule} disabled={busy('generating')}>
               {busy('generating') ? t.generating : t.generateSchedule}
             </Button>
@@ -728,6 +735,7 @@ export default function SessionDetailPage() {
         return (
           <>
             {cancelButton}
+            {previewButton}
             <Button icon={<RefreshCw />} onClick={generateSchedule} disabled={busy('generating')}>
               {busy('generating') ? t.regenerating : t.regenerateSchedule}
             </Button>
@@ -758,9 +766,7 @@ export default function SessionDetailPage() {
 
   const studentLabel = (inv: Invitation) => (
     <Row gap={2}>
-      <Tooltip content={inv.group_name || t.noData}>
-        <span className={styles.groupDot} style={{ background: inv.group_color || undefined }} />
-      </Tooltip>
+      <GroupDot name={inv.group_name} color={inv.group_color} />
       <span>{inv.student_name}</span>
       {inv.buddy_group_id && buddyColorMap.has(inv.buddy_group_id) && (
         <Tooltip content={inv.buddy_group_name}>
@@ -1108,6 +1114,18 @@ export default function SessionDetailPage() {
             </tbody>
           </Table>
         </Card>
+      )}
+
+      {canEdit && session.timetable_id && (
+        <SchedulePreviewDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          sessionId={session.id}
+          sessionDate={session.date}
+          regenerate={session.status === 'scheduled'}
+          generating={busy('generating')}
+          onGenerate={generateSchedule}
+        />
       )}
     </Page>
   );

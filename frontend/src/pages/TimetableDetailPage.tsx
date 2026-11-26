@@ -8,6 +8,7 @@ import {
   useConfirm, useToast,
 } from '../ui';
 import { AllocationBar } from '../components/AllocationBar';
+import { TimetableQueues } from '../components/TimetableQueues';
 import styles from './TimetableDetailPage.module.css';
 
 interface Timeslot {
@@ -377,6 +378,13 @@ export default function TimetableDetailPage() {
           />
         )}
       </Card>
+
+      {!isDraft && timetable.groups.length > 0 && (
+        <TimetableQueues
+          timetableId={timetable.id}
+          groupsKey={timetable.groups.map(g => `${g.group_id}:${g.percentage}`).join(',')}
+        />
+      )}
     </Page>
   );
 }

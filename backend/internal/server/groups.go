@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
@@ -30,16 +29,15 @@ type GroupRef struct {
 	Name string `db:"name" json:"name"`
 }
 
-// GroupMember is a member in a group's queue, with what only the group page shows.
+// GroupMember is a member of a group, as the group page lists them. Their place in the queue
+// is shown per timetable (see queues.go).
 type GroupMember struct {
 	queue.Member
 	groupMemberExtras
 
 	// Computed from the member and the extras.
-	Position      *int64            `json:"queue_position"` // 1-based among active members; nil for inactive ones
-	InviteNext    bool              `json:"invite_next"`
-	QueueOverride *QueueOverride    `json:"queue_override"`
-	BuddyGroup    *MemberBuddyGroup `json:"buddy_group"`
+	InviteNext bool              `json:"invite_next"`
+	BuddyGroup *MemberBuddyGroup `json:"buddy_group"`
 }
 
 // groupMemberExtras is the per-student information only the group page needs.
@@ -47,12 +45,6 @@ type groupMemberExtras struct {
 	StudentID         int64  `db:"student_id" json:"-"`
 	ActiveInvitations int64  `db:"active_invitations" json:"active_invitations"`
 	BuddyGroupID      *int64 `db:"buddy_group_id" json:"-"`
-}
-
-// QueueOverride says which event placed a member at the back of the queue.
-type QueueOverride struct {
-	Reason string `json:"reason"` // joined, reactivated or cooldown
-	At     string `json:"at"`
 }
 
 type MemberBuddyGroup struct {
@@ -280,8 +272,7 @@ func (s *Server) groupRoutes() {
 		return nil
 	})
 
-	// List a group's members in queue order, with queue position, override reason and buddy
-	// group details.
+	// List a group's members by name, with their buddy group and "invite next" override.
 	s.adminRoute("GET /api/groups/{id}/members", func(w http.ResponseWriter, r *http.Request) error {
 		groupID, ok := pathID(r, "id")
 		if !ok {
@@ -321,60 +312,23 @@ func (s *Server) groupRoutes() {
 			extrasByID[x.StudentID] = x
 		}
 
-		// Active members first, in the order the scheduler uses: ties are broken with the next
-		// session still to be sent as the seed, so the overview shows that session's order (seed 0
-		// without one).
-		seed, _, err := db.One[int64](s.db, `
-			SELECT id FROM training_sessions
-			WHERE status IN ('draft', 'scheduled') AND date >= ?
-			ORDER BY date LIMIT 1`, s.now().In(clubLocation(s.db)).Format(time.DateOnly))
-		if err != nil {
-			return err
-		}
-
 		inGroup := slices.DeleteFunc(queueMembers, func(m queue.Member) bool { return m.GroupID != groupID })
-		queue.Sort(inGroup, seed)
+		slices.SortFunc(inGroup, func(a, b queue.Member) int {
+			return cmp.Or(cmp.Compare(a.LastName, b.LastName), cmp.Compare(a.FirstName, b.FirstName), cmp.Compare(a.ID, b.ID))
+		})
 		members := make([]GroupMember, len(inGroup))
 		for i, m := range inGroup {
 			members[i] = GroupMember{Member: m, groupMemberExtras: extrasByID[m.ID]}
 		}
 
-		slices.SortStableFunc(members, func(a, b GroupMember) int { return cmp.Compare(b.Active, a.Active) })
-
 		// Buddy group names are built from member first names (matches the students list).
-		type buddyRow struct {
-			BuddyGroupID int64 `db:"buddy_group_id"`
-			Buddy
-		}
-
-		buddies, err := db.Many[buddyRow](s.db, `
-			SELECT bgm.student_id AS id, bgm.buddy_group_id, s.first_name, s.last_name, sg.group_id, g.name AS group_name
-			FROM buddy_group_members bgm
-			JOIN students s ON s.id = bgm.student_id AND s.deleted_at IS NULL
-			LEFT JOIN student_groups sg ON sg.student_id = s.id
-			LEFT JOIN groups g ON g.id = sg.group_id`)
+		buddiesByGroup, err := buddyGroupMembers(s.db)
 		if err != nil {
 			return err
 		}
 
-		buddiesByGroup := map[int64][]Buddy{}
-		for _, b := range buddies {
-			buddiesByGroup[b.BuddyGroupID] = append(buddiesByGroup[b.BuddyGroupID], b.Buddy)
-		}
-
-		position := int64(0)
 		for i := range members {
 			m := &members[i]
-			if m.QueueReason != nil {
-				m.QueueOverride = &QueueOverride{Reason: *m.QueueReason, At: m.QueueAt}
-			}
-
-			if m.Active != 0 {
-				position++
-				p := position
-				m.Position = &p
-			}
-
 			m.InviteNext = m.InviteNextPendingSince != nil
 
 			if m.BuddyGroupID != nil {

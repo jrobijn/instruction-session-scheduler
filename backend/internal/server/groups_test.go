@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -125,7 +124,7 @@ func TestGroupMembersEndpoints(t *testing.T) {
 	e.admin(http.MethodDelete, groupPath(999, "members", fmt.Sprint(s)), nil).wantError(http.StatusNotFound, "Group not found")
 }
 
-func TestGroupMembersQueue(t *testing.T) {
+func TestGroupMembersList(t *testing.T) {
 	f := newScheduleFixture(t, []string{"18:00"}, 1)
 	g := f.groupIn("Juniors", 100)
 	a := f.student("A", g)
@@ -140,10 +139,10 @@ func TestGroupMembersQueue(t *testing.T) {
 	members := f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array()
 	var order []string
 	for _, m := range members {
-		order = append(order, fmt.Sprintf("%s:%v", m["first_name"], m["queue_position"]))
+		order = append(order, m["first_name"].(string))
 	}
-	if got := strings.Join(order, ","); got != "C:1,A:2,B:3,D:<nil>" {
-		t.Fatalf("queue = %s (invite-next first, inactive last without a position)", got)
+	if got := strings.Join(order, ","); got != "A,B,C,D" {
+		t.Fatalf("members = %s, want by name, inactive included", got)
 	}
 
 	byName := map[string]map[string]any{}
@@ -154,9 +153,6 @@ func TestGroupMembersQueue(t *testing.T) {
 	if byName["C"]["invite_next"] != true || byName["A"]["invite_next"] != false {
 		t.Error("invite_next flags")
 	}
-	if o, _ := byName["A"]["queue_override"].(map[string]any); o == nil || o["reason"] != "joined" {
-		t.Errorf("A queue_override = %v, want joined", byName["A"]["queue_override"])
-	}
 
 	bg, _ := byName["A"]["buddy_group"].(map[string]any)
 	if bg == nil || bg["name"] != "A & B" || len(bg["buddies"].([]any)) != 1 {
@@ -165,56 +161,14 @@ func TestGroupMembersQueue(t *testing.T) {
 	if byName["B"]["active_invitations"] != 1.0 || byName["A"]["active_invitations"] != 0.0 {
 		t.Error("active_invitations counts")
 	}
-	for _, k := range []string{"queue_at", "invite_next_pending_since", "joined_at", "new_policy", "buddy_group_id"} {
+	// The queue is shown per timetable, not here.
+	for _, k := range []string{"queue_position", "queue_override", "queue_at", "invite_next_pending_since", "joined_at", "new_policy", "buddy_group_id"} {
 		if _, leaked := byName["A"][k]; leaked {
 			t.Errorf("internal column %s leaked", k)
 		}
 	}
 
 	f.admin(http.MethodGet, groupPath(999, "members"), nil).wantError(http.StatusNotFound, "Group not found")
-}
-
-// Tied members are listed in the order the scheduler uses for the next session to be sent.
-func TestGroupMembersBreakTiesLikeNextSession(t *testing.T) {
-	f := newScheduleFixture(t, []string{"18:00"}, 1)
-	g := f.groupIn("Juniors", 100)
-	for _, name := range []string{"A", "B", "C", "D", "E", "F"} {
-		f.student(name, g)
-	}
-
-	f.exec("UPDATE student_groups SET joined_at = '2029-01-01 00:00:00'") // all tied
-
-	var overview []string
-	for _, m := range f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array() {
-		overview = append(overview, m["first_name"].(string))
-	}
-
-	eligible, err := eligibleQueue(f.db, clubLocation(f.srv.db), f.sessionID, sessionDate, f.timetable)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var scheduler []string
-	for _, c := range eligible {
-		scheduler = append(scheduler, c.FirstName)
-	}
-	if !slices.Equal(overview, scheduler) {
-		t.Fatalf("overview order %v, scheduler order %v", overview, scheduler)
-	}
-}
-
-func TestGroupMembersQueueOverrideOnlyWhenItPlacesMember(t *testing.T) {
-	// Had a turn after joining: the turn, not the join, sets the position.
-	f := newScheduleFixture(t, []string{"18:00"}, 1)
-	g := f.groupIn("Juniors", 100)
-	a := f.student("A", g)
-	prev := f.session("2029-06-01", f.timetable)
-	f.invitation(prev, a, f.timeslots[0], f.assign(prev, f.instructor("Prev")), g, "confirmed")
-
-	m := f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array()[0]
-	if m["queue_override"] != nil || m["last_turn_at"] != "2029-06-01 00:00:00" {
-		t.Fatalf("member = %v", m)
-	}
 }
 
 func TestGroupNonMembers(t *testing.T) {

@@ -1,0 +1,7 @@
+.flag { display: inline-flex; cursor: help; }
+.flag svg { width: var(--icon-sm); height: var(--icon-sm); }
+.warning { color: var(--color-warning); }
+.success { color: var(--color-success); }
+
+/* Listed, but not in the queue */
+.muted { background: color-mix(in srgb, var(--color-surface-sunken) 45%, transparent); }

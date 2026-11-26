@@ -32,16 +32,6 @@
 .replaceOption:focus-visible { outline-offset: -2px; }
 .replaceOption:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.groupDot {
-  display: inline-block;
-  width: var(--space-2);
-  height: var(--space-2);
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: transparent;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 20%, transparent);
-}
-
 .summary {
   padding: var(--space-3) var(--space-4);
   border-bottom: var(--border-width) solid var(--color-border);

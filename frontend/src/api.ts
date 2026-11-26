@@ -55,6 +55,7 @@ export const api = {
   removeInstructor: (sessionId: number, instructorId: number) => request(`/sessions/${sessionId}/instructors/${instructorId}`, { method: 'DELETE' }),
   replaceInstructor: (sessionId: number, oldInstructorId: number, newInstructorId: number) => request(`/sessions/${sessionId}/instructors/${oldInstructorId}/replace`, { method: 'POST', body: JSON.stringify({ new_instructor_id: newInstructorId }) }),
   generateSchedule: (sessionId: number) => request(`/sessions/${sessionId}/generate-schedule`, { method: 'POST' }),
+  getSchedulePreview: (sessionId: number) => request(`/sessions/${sessionId}/schedule-preview`),
   sendInvitations: (sessionId: number) => request(`/sessions/${sessionId}/send-invitations`, { method: 'POST' }),
   completeSession: (sessionId: number) => request(`/sessions/${sessionId}/complete`, { method: 'POST' }),
   toggleNoShow: (sessionId: number, invitationId: number) => request(`/sessions/${sessionId}/invitations/${invitationId}/toggle-no-show`, { method: 'POST' }),
@@ -69,6 +70,7 @@ export const api = {
   // Timetables
   getTimetables: () => request('/timetables'),
   getTimetable: (id: number) => request(`/timetables/${id}`),
+  getTimetableQueues: (id: number, day: number | null) => request(`/timetables/${id}/queues${day == null ? '' : `?day=${day}`}`),
   createTimetable: (data: { name: string }) => request('/timetables', { method: 'POST', body: JSON.stringify(data) }),
   updateTimetable: (id: number, data: Record<string, unknown>) => request(`/timetables/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   saveTimetable: (id: number) => request(`/timetables/${id}/save`, { method: 'POST' }),

@@ -29,6 +29,7 @@
 .sm { width: var(--dialog-w-sm); }
 .md { width: var(--dialog-w-md); }
 .lg { width: var(--dialog-w-lg); }
+.xl { width: var(--dialog-w-xl); }
 
 .header {
   display: flex;

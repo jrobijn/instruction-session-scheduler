@@ -59,12 +59,17 @@ func TestAllocateSlots(t *testing.T) {
 func TestGenerateReplacesUnplaceableStudent(t *testing.T) {
 	// Two students only fit timeslot 10, which has one spot. The second is replaced by the
 	// next in the group's queue, who takes the other timeslot.
-	got := Generate(Input{
+	res := Generate(Input{
 		Queue:     []queue.Member{member(1, 1), member(2, 1), member(3, 1)},
 		Groups:    []Group{{ID: 1, Percentage: 100, Slots: 2}},
 		Timeslots: []Timeslot{{ID: 10, Capacity: 1}, {ID: 20, Capacity: 1}},
 		Allows:    onlyIn(map[int64][]int64{1: {10}, 2: {10}}),
 	})
+	if len(res.Skipped) != 1 || res.Skipped[0].ID != 2 {
+		t.Errorf("skipped %+v, want student 2", res.Skipped)
+	}
+
+	got := res.Placements
 	if len(got) != 2 {
 		t.Fatalf("got %d placements, want 2: %+v", len(got), got)
 	}
@@ -76,6 +81,26 @@ func TestGenerateReplacesUnplaceableStudent(t *testing.T) {
 	}
 }
 
+func TestGenerateOverflowSkipsUnplaceable(t *testing.T) {
+	// The spare spot is in timeslot 20; overflow candidate 2 only allows timeslot 10, so 3 gets it.
+	res := Generate(Input{
+		Queue:     []queue.Member{member(1, 1), member(2, 1), member(3, 1)},
+		Groups:    []Group{{ID: 1, Percentage: 100, Slots: 1}},
+		Timeslots: []Timeslot{{ID: 10, Capacity: 1}, {ID: 20, Capacity: 1}},
+		Allows:    onlyIn(map[int64][]int64{1: {10}, 2: {10}}),
+	})
+	var ids []int64
+	for _, p := range res.Placements {
+		ids = append(ids, p.Member.ID)
+	}
+	if !slices.Equal(ids, []int64{1, 3}) {
+		t.Fatalf("placed %v, want [1 3]", ids)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].ID != 2 {
+		t.Errorf("skipped %+v, want student 2", res.Skipped)
+	}
+}
+
 func TestGenerateOverflow(t *testing.T) {
 	// Group 2 has nobody left for its spare spot, so it goes to group 1's next student.
 	got := Generate(Input{
@@ -83,7 +108,7 @@ func TestGenerateOverflow(t *testing.T) {
 		Groups:    []Group{{ID: 1, Percentage: 50, Slots: 1}, {ID: 2, Percentage: 50, Slots: 2}},
 		Timeslots: []Timeslot{{ID: 10, Capacity: 3}},
 		Allows:    anyTimeslot,
-	})
+	}).Placements
 	var ids []int64
 	for _, p := range got {
 		ids = append(ids, p.Member.ID)
@@ -104,7 +129,7 @@ func TestGenerateBuddyPlacedNearBuddy(t *testing.T) {
 		Timeslots: []Timeslot{{ID: 10, Capacity: 2}, {ID: 20, Capacity: 2}},
 		Allows:    onlyIn(map[int64][]int64{1: {20}}),
 		Buddies:   Buddies{1: {2}, 2: {1}},
-	})
+	}).Placements
 	for _, p := range got {
 		if p.Timeslot != 1 {
 			t.Errorf("student %d in timeslot %d, want 1 (with their buddy)", p.Member.ID, p.Timeslot)

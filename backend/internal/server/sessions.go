@@ -606,6 +606,7 @@ func (s *Server) sessionRoutes() {
 	})
 
 	s.adminRoute("POST /api/sessions/{id}/generate-schedule", s.handleGenerateSchedule)
+	s.adminRoute("GET /api/sessions/{id}/schedule-preview", s.handleSchedulePreview)
 
 	s.adminRoute("POST /api/sessions/{id}/send-invitations", func(w http.ResponseWriter, r *http.Request) error {
 		id, ok := pathID(r, "id")

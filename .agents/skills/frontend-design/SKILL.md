@@ -28,7 +28,7 @@ Paths below (`src/ui`, `src/styles`, …) are relative to the root of the fronte
 |---|---|
 | Page wrapper / title bar | `Page` (`wide` only for pages that need the full viewport; cap forms/text locally at ~40rem or use `Field split`), `PageHeader` (`title`, `back={{ label, onClick }}`, `meta` for badges, `actions` — primary last); `CenteredPage` for standalone screens (login, invitation) |
 | Buttons | `Button` — `variant`: `primary` (one per view, the main action) · `secondary` (default, metal) · `ghost` (toolbar/row actions) · `danger`; `size`: `md`/`sm`; `icon={<LucideIcon />}`; `pressed` for toggles; `fullWidth` |
-| Status / labels | `Badge` — `tone`: neutral/accent/success/warning/danger/info. Status tones get an icon automatically (colour is never the only signal). `mono` for counts/ratios |
+| Status / labels | `Badge` — `tone`: neutral/accent/success/warning/danger/info. Status tones get an icon automatically (colour is never the only signal). `mono` for counts/ratios/times; `faded` for options that don't apply |
 | Entity tags | `Chip` (`mono`, `swatch`, `actions=[{ icon, label, onClick }]`, `onRemove`) — timeslots, assigned instructors |
 | Text styling | `Text` — `tone`, `size`, `weight`, `mono` (dates, times, counts, IDs), `label` (small uppercase caption) |
 | Layout | `Stack` (vertical), `Row` (horizontal) with `gap` 0–8 on the token scale, `align`, `justify`, `wrap` |
@@ -36,7 +36,7 @@ Paths below (`src/ui`, `src/styles`, …) are relative to the root of the fronte
 | Data tables | `Table` (`interactive` for clickable rows, `embedded` inside a flush Card) with plain `thead/tbody/tr/th/td`; `data-numeric` / `data-actions` / `data-shrink` cell attributes; `SortHeader` (`numeric`, `shrink`) for sortable columns; expandable rows: `ExpandIcon` + `<tr data-expanded>` / `<tr data-detail>` |
 | Label/value details | `DescriptionList` (`items=[{ label, value }]`, `columns`; `inline` for one label-beside-value pair per row) |
 | Row menus | `ActionMenu` (`actions=[{ label, onClick, icon?, danger? }]`); safe inside clickable rows |
-| Modals | `Dialog` (`open`, `onOpenChange`, `title`, `description?`, `footer`, `size`) — primary button last in footer; forms use `<form id>` + `<Button type="submit" form="id">` |
+| Modals | `Dialog` (`open`, `onOpenChange`, `title`, `description?`, `footer`, `size`: `sm`/`md`/`lg`/`xl`) — primary button last in footer; forms use `<form id>` + `<Button type="submit" form="id">` |
 | Confirm / errors | `useConfirm()` → `await confirm({ title, message, confirmLabel?, danger? })`; `useToast()` → `toast(message, tone?)` |
 | Forms | `Field` (`label`, `htmlFor`, `hint`, `error`; `split` for settings rows: label/hint left, control right, stacks when narrow, consecutive rows get dividers; `split="wide"` when the control is large, e.g. `RadioCards`) wrapping `Input`, `Select`, `Textarea`, `DateInput`, `ColorInput`; `Checkbox` (`label`, `description`, `card`); `RadioCards`; `Slider` |
 | Few-option switch | `SegmentedControl` (`value`, `onValueChange`, `options=[{ value, label }]`, `aria-label`) — single choice among a handful of short options that users flip between (view filters); use `Select` for long lists |
