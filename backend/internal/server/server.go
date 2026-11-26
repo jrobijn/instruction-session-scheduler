@@ -71,7 +71,7 @@ func (s *Server) Stop() {
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return accessLog(s.mux)
 }
 
 func (s *Server) routes() {
