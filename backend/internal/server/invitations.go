@@ -189,6 +189,7 @@ func (s *Server) invitationRoutes() {
 			return err
 		}
 
+		log.Printf("invite: invitation %d confirmed: student %d, session %d", invID, inv.StudentID, sessionID)
 		s.cancelInvitationExpiry(invID)
 
 		s.broadcastSessionInvitation(sessionID, invID, map[string]any{
@@ -201,7 +202,7 @@ func (s *Server) invitationRoutes() {
 
 		// The confirmation is saved; a failed check only costs the "session full" notification.
 		if full, err := s.sessionFull(sessionID); err != nil {
-			log.Printf("session full %d: %v", sessionID, err)
+			log.Printf("notify: session full %d: %v", sessionID, err)
 		} else if full {
 			s.notifySession("session_full", sessionID, inv.SessionDate)
 		}
@@ -252,6 +253,7 @@ func (s *Server) invitationRoutes() {
 			}
 
 			t.afterCommit(func(s *Server) {
+				log.Printf("invite: invitation %d declined: student %d, session %d", invID, inv.StudentID, sessionID)
 				s.cancelInvitationExpiry(invID)
 				s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "declined"})
 				s.broadcastInvitation(inv.Token, "declined")
@@ -306,6 +308,7 @@ func (s *Server) invitationRoutes() {
 			}
 
 			t.afterCommit(func(s *Server) {
+				log.Printf("invite: invitation %d cancelled by the student: student %d, session %d", invID, inv.StudentID, sessionID)
 				s.broadcastSessionInvitation(sessionID, invID, map[string]any{"status": "cancelled"})
 				s.broadcastInvitation(inv.Token, "cancelled")
 				s.broadcastSessionCounts(sessionID)
@@ -421,11 +424,22 @@ func (t *txn) adminCancelInvitation(invitationID int64) error {
 // has started is invalidated; otherwise it expires and a replacement is invited.
 func (t *txn) expireInvitation(invitationID int64) error {
 	inv, found, err := invitationByID(t.q, invitationID)
-	if err != nil || !found || inv.Status != "invited" {
-		return err // nil: already handled (confirmed, declined, ...)
+	if err != nil {
+		return err
+	}
+	if !found {
+		t.afterCommit(func(*Server) { log.Printf("invite: invitation %d not expired: it no longer exists", invitationID) })
+		return nil
+	}
+
+	// Already handled: confirmed, declined, ...
+	if inv.Status != "invited" {
+		t.afterCommit(func(*Server) { log.Printf("invite: invitation %d not expired: it is %s", invitationID, inv.Status) })
+		return nil
 	}
 
 	if st := inv.SessionStatus; st == "completed" || st == "cancelled" {
+		t.afterCommit(func(*Server) { log.Printf("invite: invitation %d not expired: its session is %s", invitationID, st) })
 		return nil
 	}
 
@@ -442,6 +456,7 @@ func (t *txn) expireInvitation(invitationID int64) error {
 	}
 
 	t.afterCommit(func(s *Server) {
+		log.Printf("invite: invitation %d %s: student %d, session %d", invitationID, newStatus, inv.StudentID, sessionID)
 		s.broadcastSessionInvitation(sessionID, invitationID, map[string]any{"status": newStatus})
 		s.broadcastInvitation(inv.Token, newStatus)
 		s.broadcastSessionCounts(sessionID)

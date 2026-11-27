@@ -332,3 +332,65 @@ func TestCancelConfirmedInvitation(t *testing.T) {
 		t.Fatalf("replacement_reason = %v, want the status at cancel time", log["replacement_reason"])
 	}
 }
+
+// --- logging ----------------------------------------------------------------------------
+
+// wantLines asserts that got contains each line, in order.
+func wantLines(t *testing.T, got string, lines ...string) {
+	t.Helper()
+	rest := got
+	for _, l := range lines {
+		i := strings.Index(rest, l)
+		if i < 0 {
+			t.Fatalf("log is missing %q (or it is out of order); log:\n%s", l, got)
+		}
+
+		rest = rest[i+len(l):]
+	}
+}
+
+func TestInvitationChangesAreLogged(t *testing.T) {
+	f, _ := invitedPair(t)
+	a, b := f.invitationOf("A"), f.invitationOf("B")
+	logs := captureLog(t)
+
+	f.invitationAction("B", "confirm", map[string]any{}).status(http.StatusOK)
+	wantLines(t, logs.take(),
+		fmt.Sprintf("invite: invitation %d confirmed: student %d, session %d\n", b["id"], b["student_id"], f.sessionID),
+		"api: 192.0.2.1 POST /api/invitations/{token}/confirm 200 ",
+	)
+
+	// The replacement is logged after the change that vacated the spot.
+	f.invitationAction("A", "decline", nil).status(http.StatusOK)
+	c := f.invitationOf("C")
+	wantLines(t, logs.take(),
+		fmt.Sprintf("invite: invitation %d declined: student %d, session %d\n", a["id"], a["student_id"], f.sessionID),
+		fmt.Sprintf("invite: invitation %d invited as replacement for invitation %d (session %d timeslot %d slot %d): student %d, group %d\n",
+			c["id"], a["id"], f.sessionID, a["timeslot_id"], a["slot_id"], c["student_id"], c["group_id"]),
+		"api: 192.0.2.1 POST /api/invitations/{token}/decline 200 ",
+	)
+
+	f.invitationAction("B", "cancel", nil).status(http.StatusOK)
+	wantLines(t, logs.take(),
+		fmt.Sprintf("invite: invitation %d cancelled by the student: student %d, session %d\n", b["id"], b["student_id"], f.sessionID),
+		"invite: invitation ", // D replaces B
+		"api: 192.0.2.1 POST /api/invitations/{token}/cancel 200 ",
+	)
+
+	// Everyone has had a turn now, so declining leaves the spot empty.
+	f.invitationAction("C", "decline", nil).status(http.StatusOK)
+	wantLines(t, logs.take(),
+		fmt.Sprintf("invite: no replacement for invitation %d (session %d timeslot %d slot %d): no eligible student\n",
+			c["id"], f.sessionID, c["timeslot_id"], c["slot_id"]),
+	)
+}
+
+func TestSkippedExpiryIsLogged(t *testing.T) {
+	f, _ := invitedPair(t)
+	a := toInt64(f.invitationOf("A")["id"])
+	f.invitationAction("A", "confirm", map[string]any{}).status(http.StatusOK)
+	logs := captureLog(t)
+
+	f.expire(a)
+	wantLines(t, logs.take(), fmt.Sprintf("invite: invitation %d not expired: it is confirmed\n", a))
+}

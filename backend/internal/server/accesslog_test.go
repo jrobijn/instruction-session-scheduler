@@ -94,3 +94,40 @@ func TestAccessLog(t *testing.T) {
 		t.Fatalf("log = %q", got)
 	}
 }
+
+func TestAccessLogPathValues(t *testing.T) {
+	e := newTestEnv(t)
+	logs := captureLog(t)
+
+	e.admin(http.MethodDelete, "/api/groups/7/members/12", nil)
+	if got := logs.take(); !strings.HasPrefix(got, "api: 192.0.2.1 DELETE /api/groups/{id}/members/{studentId} id=7 studentId=12 404 ") {
+		t.Fatalf("log = %q", got)
+	}
+
+	// Values from the client that could break the line are quoted.
+	e.admin(http.MethodGet, "/api/students/1%0Aapi:%20forged", nil)
+	if got := logs.take(); !strings.HasPrefix(got, `api: 192.0.2.1 GET /api/students/{id} id="1\napi: forged" 404 `) {
+		t.Fatalf("log = %q", got)
+	}
+}
+
+func TestAccessLogPanic(t *testing.T) {
+	e := newTestEnv(t)
+	e.srv.mux.HandleFunc("GET /api/test-panic/{id}", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	logs := captureLog(t)
+
+	// net/http recovers the panic in a real server; here it reaches the test.
+	func() {
+		defer func() {
+			if p := recover(); p != "boom" {
+				t.Fatalf("recovered %v, want the handler's panic", p)
+			}
+		}()
+
+		e.public(http.MethodGet, "/api/test-panic/3", nil)
+	}()
+
+	if got := logs.take(); !strings.HasPrefix(got, "api: 192.0.2.1 GET /api/test-panic/{id} id=3 panic ") {
+		t.Fatalf("log = %q", got)
+	}
+}

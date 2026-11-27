@@ -1254,7 +1254,7 @@ func (s *Server) broadcastSessionCounts(sessionID int64) {
 			(SELECT COUNT(*) FROM invitations WHERE session_id = ? AND status = 'confirmed') AS confirmed`,
 		sessionID, sessionID)
 	if err != nil {
-		log.Printf("session counts %d: %v", sessionID, err)
+		log.Printf("server: session counts %d: %v", sessionID, err)
 		return
 	}
 

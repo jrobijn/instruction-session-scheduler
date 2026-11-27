@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"runtime/debug"
 	"time"
 
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
@@ -16,15 +17,27 @@ func (s *Server) scheduleInvitationExpiry(invitationID int64, at time.Time) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
+		// A panic here would end the process: unlike handlers, timer callbacks have no
+		// net/http to recover them. A panic before the commit rolls the expiry back, so the
+		// invitation is expired again on the next restart (see rehydrateTimers); one in a
+		// side effect after the commit loses the side effects not yet run.
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("timer: panic expiring invitation %d: %v\n%s", invitationID, p, debug.Stack())
+			}
+		}()
+
 		// Stop can't stop a callback that already fired, so skip if this timer was
 		// cancelled or rescheduled while waiting for the lock.
 		if s.timers[invitationID] != timer {
+			log.Printf("timer: invitation %d expiry fired after it was cancelled or rescheduled, skipped", invitationID)
 			return
 		}
 
 		delete(s.timers, invitationID)
+		log.Printf("timer: invitation %d expiry fired", invitationID)
 		if err := s.inTx(func(t *txn) error { return t.expireInvitation(invitationID) }); err != nil {
-			log.Printf("Error processing expiry for invitation %d: %v", invitationID, err)
+			log.Printf("timer: expire invitation %d failed, rolled back: %v", invitationID, err)
 		}
 	})
 
@@ -62,7 +75,7 @@ func (s *Server) rehydrateTimers() {
 		WHERE inv.status = 'invited'
 			AND ts.status NOT IN ('completed', 'cancelled')`)
 	if err != nil {
-		log.Printf("rehydrate timers: %v", err)
+		log.Printf("timer: rehydrate: %v", err)
 		return
 	}
 
@@ -72,5 +85,5 @@ func (s *Server) rehydrateTimers() {
 		}
 	}
 
-	log.Printf("Rehydrated %d invitation expiry timer(s)", len(pending))
+	log.Printf("timer: rehydrated %d invitation expiry timer(s)", len(pending))
 }

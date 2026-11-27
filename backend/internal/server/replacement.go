@@ -4,6 +4,8 @@ package server
 // to the next student in line.
 
 import (
+	"fmt"
+	"log"
 	mrand "math/rand/v2"
 
 	"github.com/google/uuid"
@@ -23,6 +25,16 @@ type vacatedSpot struct {
 	Status       string // why they left; "" if unknown (only for the decision log)
 }
 
+// String describes the spot for log lines.
+func (v vacatedSpot) String() string {
+	s := fmt.Sprintf("session %d timeslot %d slot %d", v.SessionID, v.TimeslotID, v.SlotID)
+	if v.InvitationID != 0 {
+		s = fmt.Sprintf("invitation %d (%s)", v.InvitationID, s)
+	}
+
+	return s
+}
+
 // random returns the random source for picking a replacement: seeded by the vacated
 // invitation and the spot, so a pick can be reproduced.
 func (v vacatedSpot) random() func() float64 {
@@ -36,8 +48,12 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 
 	// Without a timetable no group can be invited.
 	session, found, err := getSession(t.q, sessionID)
-	if err != nil || !found || session.TimetableID == nil {
+	if err != nil {
 		return false, err
+	}
+	if !found || session.TimetableID == nil {
+		t.afterCommit(func(*Server) { log.Printf("invite: no replacement for %s: the session has no timetable", vacated) })
+		return false, nil
 	}
 
 	timetableID := *session.TimetableID
@@ -88,6 +104,7 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 		Random:  vacated.random(),
 	})
 	if !found {
+		t.afterCommit(func(*Server) { log.Printf("invite: no replacement for %s: no eligible student", vacated) })
 		return false, nil
 	}
 
@@ -163,6 +180,7 @@ func (t *txn) findAndInviteReplacement(vacated vacatedSpot) (bool, error) {
 	}
 
 	t.afterCommit(func(s *Server) {
+		log.Printf("invite: invitation %d invited as replacement for %s: student %d, group %d", newID, vacated, replacement.ID, pick.GroupID)
 		s.broadcastSessionReload(sessionID)
 		s.broadcastSessionCounts(sessionID)
 	})
