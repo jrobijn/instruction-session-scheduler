@@ -35,6 +35,13 @@ The backend was ported from Express/TypeScript. Parity was a migration aid, not 
 - Put every read that can fail before the first write. A 500 after a committed write misleads the user (e.g. it skips the confirmation email and shows an error for an action that succeeded).
 - After the main write has committed, failures in side effects (broadcasts, notifications, "session full" checks) are logged with `log.Printf` and the handler carries on, like `broadcastSessionCounts`.
 
+## Logging
+
+- Every log line starts with a lowercase prefix for the part of the server that wrote it. In `backend/`: `api:`, `invite:`, `timer:`, `notify:`, `email:`, `db:`, `server:`, `sse:`, `httpx:`. Pick the prefix by what failed or changed, not by what triggered it. A new prefix goes in the Logs table of the README that documents the backend.
+- Never log secrets. Invitation and discipline tokens stay out: the access log (`accessLog`) writes the route pattern and leaves out `{token}`. Quote values that come from the client (`strconv.Quote`) so they can't break a line or forge another one.
+- Log a state change where it happens, so it is logged the same way whatever triggered it (request, timer, another change). Inside a txn, log it in `afterCommit`, so a rollback leaves no line. Include the IDs needed to find the rows (invitation, student, session). Reference: `expireInvitation`, `findAndInviteReplacement`.
+- A goroutine the server starts itself (timer callbacks, background sends) recovers panics and logs them with `debug.Stack()`: no net/http sits above it, so a panic would end the process. Reference: `scheduleInvitationExpiry`.
+
 ## SQL
 
 - Never pass a WHERE clause or other SQL fragment as a function parameter.
@@ -43,6 +50,8 @@ The backend was ported from Express/TypeScript. Parity was a migration aid, not 
 ## Server safeguards
 
 No reverse proxy sits in front of the backend servers. Each must enforce body limits, timeouts (`ReadHeaderTimeout` in `main.go`) and similar protections itself. Keep them, and flag missing ones.
+
+- The client IP is `r.RemoteAddr`. Ignore `X-Forwarded-For` and similar headers: without a proxy the client sets them.
 
 ## Blank-line spacing
 
