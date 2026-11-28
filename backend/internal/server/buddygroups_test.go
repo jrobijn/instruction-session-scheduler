@@ -37,6 +37,48 @@ func TestLoadBuddies(t *testing.T) {
 	}
 }
 
+// TestLoadBuddyGroups pins what pages build buddy groups from: members in the order they were
+// added (their names make the buddy group's name), deleted students left out, and each
+// member's group, if any.
+func TestLoadBuddyGroups(t *testing.T) {
+	e := newTestEnv(t)
+	g := e.group("G")
+	a, b, c := e.student("A", g), e.student("B", g), e.student("C", g)
+	gone := e.student("Gone", g)
+	loose := e.insert("INSERT INTO students (first_name, last_name, email) VALUES ('Loose', 'X', 'loose@example.com') RETURNING id")
+	e.student("Alone", g)
+	bg := e.buddies(c, gone, a, loose) // added out of id order
+	other := e.buddies(b)
+	e.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", gone)
+
+	got, err := loadBuddyGroups(e.srv.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("loadBuddyGroups has %d buddy groups, want 2: %v", len(got), got)
+	}
+
+	var members []string
+	for _, m := range got[bg] {
+		group := "none"
+		if m.GroupName != nil {
+			group = *m.GroupName
+		}
+
+		members = append(members, m.FirstName+":"+group)
+	}
+
+	if want := []string{"C:G", "A:G", "Loose:none"}; !reflect.DeepEqual(members, want) {
+		t.Errorf("members = %v, want %v (in the order added, deleted Gone left out)", members, want)
+	}
+
+	if len(got[other]) != 1 || got[other][0].ID != b {
+		t.Errorf("other buddy group = %v, want just B", got[other])
+	}
+}
+
 func TestBuddyGroups(t *testing.T) {
 	e := newTestEnv(t)
 	g := e.group("G")
