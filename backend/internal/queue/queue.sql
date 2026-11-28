@@ -43,9 +43,9 @@ queue_events AS (
     CASE WHEN g.new_member_priority = 'back' THEN datetime(sg.joined_at) END AS joined_back_at,
     CASE WHEN g.reactivated_member_priority = 'back' THEN datetime(sg.reactivated_at) END AS reactivated_back_at,
     CASE WHEN g.cooldown_member_priority = 'back' THEN datetime(s.cooldown_until) END AS cooldown_back_at,
-    CASE WHEN sg.invite_next_at IS NOT NULL
-      AND (t.last_invited_at IS NULL OR t.last_invited_at < datetime(sg.invite_next_at))
-      THEN datetime(sg.invite_next_at) END AS invite_next_pending_since
+    CASE WHEN s.invite_next_at IS NOT NULL
+      AND (t.last_invited_at IS NULL OR t.last_invited_at < datetime(s.invite_next_at))
+      THEN datetime(s.invite_next_at) END AS invite_next_pending_since
   FROM student_groups sg
   JOIN students s ON s.id = sg.student_id AND s.deleted_at IS NULL
   LEFT JOIN groups g ON g.id = sg.group_id

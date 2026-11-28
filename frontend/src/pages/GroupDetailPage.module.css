@@ -2,7 +2,7 @@
 
 .flag { display: inline-flex; cursor: help; }
 .flag svg { width: var(--icon-sm); height: var(--icon-sm); }
-.success { color: var(--color-success); }
+.warning { color: var(--color-warning); }
 
 .disciplineGrid {
   display: grid;

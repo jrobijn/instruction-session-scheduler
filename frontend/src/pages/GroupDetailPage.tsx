@@ -1,14 +1,13 @@
-import { Fragment, useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronsUp, Star, Target, Timer, Users } from 'lucide-react';
+import { Star, Target, Timer, Unlink, Users } from 'lucide-react';
 import { api } from '../api';
 import {
-  ActionMenu, Alert, Badge, Card, Checkbox, DescriptionList, EmptyState, ExpandIcon, Field, Input,
+  ActionMenu, Alert, Badge, Card, Checkbox, EmptyState, Field, Input,
   Page, PageHeader, RadioCards, Row, SortHeader, Stack, Tab, TabList, TabPanel, Table, Tabs, Text, Tooltip,
   useConfirm, useToast,
 } from '../ui';
 import { cx } from '../ui/cx';
-import { InvitationStatusBadge } from '../components/StatusBadges';
 import { StudentSearchResults } from '../components/StudentSearchResults';
 import { useT, getLocale } from '../i18n';
 import styles from './GroupDetailPage.module.css';
@@ -30,33 +29,14 @@ interface Member {
   id: number;
   first_name: string;
   last_name: string;
-  email: string;
   active: number;
-  last_turn_at: string | null;
-  invite_next: boolean;
   cooldown_until: string | null;
-  preferred_days: string;
-  active_invitations: number;
-  buddy_group?: {
+  buddy_group: {
     id: number;
     name: string;
-    buddies: Array<{ id: number; first_name: string; last_name: string; group_id: number | null; group_name: string | null }>;
+    /** Buddies not in this group, who are never invited together with this member. */
+    elsewhere: Array<{ id: number; first_name: string; last_name: string; group_name: string | null }>;
   } | null;
-}
-
-interface Timetable {
-  id: number;
-  name: string;
-  active: number;
-  status: string;
-  timeslots?: Array<{ id: number; start_time: string }>;
-}
-
-interface StudentInvitation {
-  id: number;
-  status: string;
-  session_date: string;
-  start_time: string;
 }
 
 interface SearchResult {
@@ -105,11 +85,9 @@ export default function GroupDetailPage() {
 
   const sortProps = (col: keyof Member) => ({ active: sortCol === col, direction: sortDir, onSort: () => toggleSort(col) });
 
-  const [clubDays, setClubDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
-
   const sortedMembers = [...members].sort((a, b) => {
     const av = a[sortCol], bv = b[sortCol];
-    // Empty values (e.g. never invited) always sort last
+    // Empty values always sort last
     if (av == null || bv == null) return av == null ? (bv == null ? 0 : 1) : -1;
     let cmp: number;
     if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
@@ -117,44 +95,13 @@ export default function GroupDetailPage() {
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
-  // Expandable member details
-  const [expandedMember, setExpandedMember] = useState<number | null>(null);
-  const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
-  const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
-  const [detailInvitations, setDetailInvitations] = useState<StudentInvitation[]>([]);
-
-  const openMemberDetails = async (memberId: number) => {
-    setExpandedMember(memberId);
-    try {
-      const allTt = await api.getTimetables();
-      const active = allTt.filter((tt: Timetable) => tt.active && tt.status === 'saved');
-      const withTs = await Promise.all(active.map(async (tt: Timetable) => {
-        const detail = await api.getTimetable(tt.id);
-        return { ...tt, timeslots: detail.timeslots };
-      }));
-      setDetailTimetables(withTs);
-      const [prefs, invitations] = await Promise.all([
-        api.getStudentPreferredTimeslots(memberId),
-        api.getStudentInvitations(memberId),
-      ]);
-      setDetailTimeslotPrefs(prefs);
-      setDetailInvitations(invitations);
-    } catch {
-      setDetailTimetables([]);
-      setDetailTimeslotPrefs({});
-      setDetailInvitations([]);
-    }
-  };
-
-
   const load = async () => {
     try {
-      const [groupsData, membersData, discData, allDiscData, settingsData] = await Promise.all([
+      const [groupsData, membersData, discData, allDiscData] = await Promise.all([
         api.getGroups(),
         api.getGroupMembers(Number(id)),
         api.getGroupDisciplines(Number(id)),
         api.getDisciplines(),
-        api.getSettings()
       ]);
       const g = groupsData.find((g: GroupDetail) => g.id === Number(id));
       if (!g) { setError(t.groupNotFound); return; }
@@ -162,7 +109,6 @@ export default function GroupDetailPage() {
       setMembers(membersData);
       setDisciplines(discData);
       setAllDisciplines(allDiscData.filter((d: DisciplineItem) => d.active));
-      setClubDays((settingsData.club_days || '0|1|2|3|4|5|6').split('|').map(Number));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -247,15 +193,6 @@ export default function GroupDetailPage() {
     return { days, date: until.toLocaleDateString(dateLocale) };
   };
 
-  const handleToggleInviteNext = async (m: Member) => {
-    try {
-      await api.setGroupMemberInviteNext(Number(id), m.id, !m.invite_next);
-      load();
-    } catch (err: any) {
-      toast(err.message);
-    }
-  };
-
   const handleChangeQueuePolicy = async (field: QueuePolicyField, value: 'front' | 'back') => {
     if (!group || group[field] === value) return;
     setGroup({ ...group, [field]: value });
@@ -273,7 +210,6 @@ export default function GroupDetailPage() {
   if (!group) return <Page><Text tone="muted">{t.groupNotFoundText}</Text></Page>;
 
   const assignedIds = new Set(disciplines.map(d => d.id));
-  const dateLocale = getLocale() === 'nl' ? 'nl-NL' : 'en-GB';
   const queueOptions = [
     { value: 'back' as const, label: t.queueBack, description: t.queueBackHint },
     { value: 'front' as const, label: t.queueFront, description: t.queueFrontHint },
@@ -329,111 +265,55 @@ export default function GroupDetailPage() {
             ) : (
               <>
                 <Text as="p" tone="muted" size="sm">{t.groupQueueOnTimetables}</Text>
-                <Table interactive>
+                <Table>
                   <thead>
                     <tr>
                       <SortHeader {...sortProps('last_name')}>{t.name}</SortHeader>
-                      <SortHeader {...sortProps('last_turn_at')}>{t.lastInvited}</SortHeader>
-                      <SortHeader numeric {...sortProps('active_invitations')}>{t.invitationsColumn}</SortHeader>
                       <SortHeader {...sortProps('active')}>{t.status}</SortHeader>
                       <th data-actions>{t.actions}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedMembers.map(m => {
-                      const isExpanded = expandedMember === m.id;
                       const cooldownInfo = getCooldownInfo(m);
-                      const preferredDays = m.preferred_days
-                        ? m.preferred_days.split('|').filter(d => clubDays.includes(Number(d))).map(d => t.days[Number(d)]).join(', ') || t.noData
-                        : t.noData;
                       return (
-                        <Fragment key={m.id}>
-                          <tr
-                            data-expanded={isExpanded || undefined}
-                            onClick={() => { if (isExpanded) setExpandedMember(null); else openMemberDetails(m.id); }}
-                          >
-                            <td>
-                              <Row gap={2}>
-                                <ExpandIcon expanded={isExpanded} />
-                                <Text weight="medium">{m.first_name} {m.last_name}</Text>
-                                {m.invite_next && (
-                                  <Tooltip content={t.inviteNextTooltip}>
-                                    <span className={cx(styles.flag, styles.success)}><ChevronsUp /></span>
-                                  </Tooltip>
-                                )}
-                                {m.buddy_group && (
-                                  <Tooltip content={t.buddyGroupLabel(m.buddy_group.name)}>
-                                    <span className={cx(styles.flag, buddyStyles.buddyIcon)} data-muted><Users /></span>
-                                  </Tooltip>
-                                )}
-                              </Row>
-                            </td>
-                            <td>
-                              {m.last_turn_at
-                                ? <Text mono>{new Date(m.last_turn_at.slice(0, 10) + 'T00:00:00').toLocaleDateString(dateLocale)}</Text>
-                                : <Text tone="subtle">{t.neverInvited}</Text>}
-                            </td>
-                            <td data-numeric>{m.active_invitations}</td>
-                            <td>
-                              {cooldownInfo ? (
-                                <Tooltip content={t.cooldownDetail(cooldownInfo.days, cooldownInfo.date)}>
-                                  <span><Badge tone="warning" icon={<Timer />}>{t.cooldown}</Badge></span>
+                        <tr key={m.id}>
+                          <td>
+                            <Row gap={2}>
+                              <Text weight="medium">{m.first_name} {m.last_name}</Text>
+                              {m.buddy_group && (
+                                <Tooltip content={
+                                  <Stack gap={1}>
+                                    <span>{t.buddyGroupLabel(m.buddy_group.name)}</span>
+                                    {m.buddy_group.elsewhere.map(b => (
+                                      <span key={b.id}>
+                                        {t.buddyNotTogether(`${b.first_name} ${b.last_name}`, b.group_name ? 'otherGroup' : 'noGroup', b.group_name ?? '')}
+                                      </span>
+                                    ))}
+                                  </Stack>
+                                }>
+                                  {m.buddy_group.elsewhere.length > 0
+                                    ? <span className={cx(styles.flag, styles.warning)}><Unlink /></span>
+                                    : <span className={cx(styles.flag, buddyStyles.buddyIcon)} data-muted><Users /></span>}
                                 </Tooltip>
-                              ) : (
-                                <Badge tone={m.active ? 'success' : 'neutral'}>{m.active ? t.active : t.inactive}</Badge>
                               )}
-                            </td>
-                            <td data-actions onClick={e => e.stopPropagation()}>
-                              <ActionMenu actions={[
-                                { label: m.invite_next ? t.cancelInviteNext : t.inviteNext, onClick: () => handleToggleInviteNext(m) },
-                                { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
-                              ]} />
-                            </td>
-                          </tr>
-                          {isExpanded && (
-                            <tr data-detail>
-                              <td colSpan={5}>
-                                <DescriptionList columns={3} items={[
-                                  { label: t.preferredDays, value: preferredDays },
-                                  ...(detailTimetables.length > 0 ? [{
-                                    label: t.preferredTimeslots,
-                                    value: (
-                                      <Stack gap={1}>
-                                        {detailTimetables.map(tt => {
-                                          const prefIds = detailTimeslotPrefs[tt.id];
-                                          const display = prefIds && prefIds.length > 0
-                                            ? (tt.timeslots || []).filter(sl => prefIds.includes(sl.id)).map(sl => sl.start_time.slice(0, 5)).join(', ')
-                                            : null;
-                                          return (
-                                            <span key={tt.id}>
-                                              <Text tone="muted">{tt.name}: </Text>
-                                              {display ? <Text mono>{display}</Text> : t.noData}
-                                            </span>
-                                          );
-                                        })}
-                                      </Stack>
-                                    ),
-                                  }] : []),
-                                  {
-                                    label: t.activeInvitations,
-                                    value: detailInvitations.length > 0 ? (
-                                      <Stack gap={1}>
-                                        {detailInvitations.map(inv => (
-                                          <Row key={inv.id} gap={2}>
-                                            <Text mono>
-                                              {new Date(inv.session_date + 'T00:00:00').toLocaleDateString(dateLocale)} {inv.start_time.slice(0, 5)}
-                                            </Text>
-                                            <InvitationStatusBadge status={inv.status} />
-                                          </Row>
-                                        ))}
-                                      </Stack>
-                                    ) : t.noData,
-                                  },
-                                ]} />
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
+                            </Row>
+                          </td>
+                          <td>
+                            {cooldownInfo ? (
+                              <Tooltip content={t.cooldownDetail(cooldownInfo.days, cooldownInfo.date)}>
+                                <span><Badge tone="warning" icon={<Timer />}>{t.cooldown}</Badge></span>
+                              </Tooltip>
+                            ) : (
+                              <Badge tone={m.active ? 'success' : 'neutral'}>{m.active ? t.active : t.inactive}</Badge>
+                            )}
+                          </td>
+                          <td data-actions>
+                            <ActionMenu actions={[
+                              { label: t.remove, onClick: () => handleRemoveMember(m.id), danger: true },
+                            ]} />
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>

@@ -2,7 +2,9 @@ package server
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -99,23 +101,6 @@ func TestGroupMembersEndpoints(t *testing.T) {
 		t.Fatalf("memberships = %v", m)
 	}
 
-	path := groupPath(b, "members", fmt.Sprint(s), "invite-next")
-	e.admin(http.MethodPut, path, map[string]any{}).wantError(http.StatusBadRequest, "enabled (boolean) is required")
-	e.admin(http.MethodPut, path, map[string]any{"enabled": "yes"}).wantError(http.StatusBadRequest, "Invalid JSON body")
-	e.admin(http.MethodPut, groupPath(a, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
-		wantError(http.StatusNotFound, "Member not found")
-	e.admin(http.MethodPut, groupPath(999, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
-		wantError(http.StatusNotFound, "Group not found")
-	e.admin(http.MethodPut, path, map[string]any{"enabled": true}).status(http.StatusOK)
-	if e.row("SELECT invite_next_at FROM student_groups WHERE student_id = ?", s)["invite_next_at"] == nil {
-		t.Fatal("invite-next not set")
-	}
-
-	e.admin(http.MethodPut, path, map[string]any{"enabled": false}).status(http.StatusOK)
-	if e.row("SELECT invite_next_at FROM student_groups WHERE student_id = ?", s)["invite_next_at"] != nil {
-		t.Fatal("invite-next not cleared")
-	}
-
 	e.admin(http.MethodDelete, groupPath(b, "members", fmt.Sprint(s)), nil).status(http.StatusOK)
 	if e.row("SELECT 1 FROM student_groups WHERE student_id = ?", s) != nil {
 		t.Fatal("member not removed")
@@ -131,9 +116,15 @@ func TestGroupMembersList(t *testing.T) {
 	b := f.student("B", g)
 	c := f.student("C", g)
 	d := f.student("D", g)
-	f.exec("UPDATE students SET active = 0 WHERE id = ?", d)
-	f.exec("UPDATE student_groups SET invite_next_at = '2029-12-01 00:00:00' WHERE student_id = ?", c)
+	f.exec("UPDATE students SET active = 0, cooldown_until = '2030-02-01 00:00:00' WHERE id = ?", d)
+	gone := f.student("Gone", g)
+	f.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", gone)
 	f.buddies(a, b)
+
+	// C's buddies are in another group and in none: never invited together with C.
+	away := f.student("Away", f.group("Seniors"))
+	loose := f.insert("INSERT INTO students (first_name, last_name, email) VALUES ('Loose', 'X', 'loose@example.com') RETURNING id")
+	f.buddies(c, away, loose)
 	f.invitation(f.sessionID, b, f.timeslots[0], f.slots[0], g, "invited")
 
 	members := f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array()
@@ -142,7 +133,7 @@ func TestGroupMembersList(t *testing.T) {
 		order = append(order, m["first_name"].(string))
 	}
 	if got := strings.Join(order, ","); got != "A,B,C,D" {
-		t.Fatalf("members = %s, want by name, inactive included", got)
+		t.Fatalf("members = %s, want by name, inactive included and deleted left out", got)
 	}
 
 	byName := map[string]map[string]any{}
@@ -150,22 +141,29 @@ func TestGroupMembersList(t *testing.T) {
 		byName[m["first_name"].(string)] = m
 	}
 
-	if byName["C"]["invite_next"] != true || byName["A"]["invite_next"] != false {
-		t.Error("invite_next flags")
+	bg, _ := byName["A"]["buddy_group"].(map[string]any)
+	if bg == nil || bg["name"] != "A & B" || bg["buddies"] != nil || len(bg["elsewhere"].([]any)) != 0 {
+		t.Errorf("A buddy_group = %v, want A & B with nobody elsewhere", byName["A"]["buddy_group"])
 	}
 
-	bg, _ := byName["A"]["buddy_group"].(map[string]any)
-	if bg == nil || bg["name"] != "A & B" || len(bg["buddies"].([]any)) != 1 {
-		t.Errorf("A buddy_group = %v", byName["A"]["buddy_group"])
+	elsewhere := map[string]any{}
+	for _, raw := range byName["C"]["buddy_group"].(map[string]any)["elsewhere"].([]any) {
+		b := raw.(map[string]any)
+		elsewhere[b["first_name"].(string)] = b["group_name"]
 	}
-	if byName["B"]["active_invitations"] != 1.0 || byName["A"]["active_invitations"] != 0.0 {
-		t.Error("active_invitations counts")
+
+	if fmt.Sprint(elsewhere) != "map[Away:Seniors Loose:<nil>]" {
+		t.Errorf("C's buddies elsewhere = %v, want Away in Seniors and Loose in no group", elsewhere)
 	}
-	// The queue is shown per timetable, not here.
-	for _, k := range []string{"queue_position", "queue_override", "queue_at", "invite_next_pending_since", "joined_at", "new_policy", "buddy_group_id"} {
-		if _, leaked := byName["A"][k]; leaked {
-			t.Errorf("internal column %s leaked", k)
-		}
+
+	if m := byName["D"]; m["active"] != 0.0 || m["cooldown_until"] != "2030-02-01 00:00:00" {
+		t.Errorf("D = %v, want inactive with its cooldown", m)
+	}
+
+	// Membership only: the queue and invitations are shown per timetable and session.
+	keys := slices.Sorted(maps.Keys(byName["A"]))
+	if want := []string{"active", "buddy_group", "cooldown_until", "first_name", "id", "last_name"}; !slices.Equal(keys, want) {
+		t.Errorf("member fields = %v, want %v", keys, want)
 	}
 
 	f.admin(http.MethodGet, groupPath(999, "members"), nil).wantError(http.StatusNotFound, "Group not found")
@@ -227,8 +225,6 @@ func TestGroupRoutesRejectBadInput(t *testing.T) {
 		notFound("POST", "/api/groups/x/unset-default", nil, "Group not found"),
 		notFound("GET", "/api/groups/x/members", nil, "Group not found"),
 		notFound("POST", "/api/groups/x/members", map[string]any{"student_id": st}, "Group not found"),
-		notFound("PUT", p("/api/groups/x/members/%d/invite-next", st), map[string]any{"enabled": true}, "Group not found"),
-		notFound("PUT", p("/api/groups/%d/members/x/invite-next", g), map[string]any{"enabled": true}, "Member not found"),
 		notFound("DELETE", p("/api/groups/x/members/%d", st), nil, "Group not found"),
 		notFound("DELETE", p("/api/groups/%d/members/x", g), nil, "Member not found"),
 		notFound("GET", "/api/groups/x/non-members", nil, "Group not found"),
@@ -240,7 +236,6 @@ func TestGroupRoutesRejectBadInput(t *testing.T) {
 		badJSON("POST", "/api/groups"),
 		badJSON("PUT", p("/api/groups/%d", g)),
 		badJSON("POST", p("/api/groups/%d/members", g)),
-		badJSON("PUT", p("/api/groups/%d/members/%d/invite-next", g, st)),
 	)
 	if e.row("SELECT is_default FROM groups WHERE id = ?", g)["is_default"] != int64(0) {
 		t.Fatal("rejected set-default changed the default group")

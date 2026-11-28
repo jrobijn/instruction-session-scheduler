@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
+	"github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
 )
 
 type Student struct {
@@ -43,6 +44,10 @@ type StudentListItem struct {
 	Student
 	Group      *StudentGroup `json:"group"`
 	BuddyGroup *GroupRef     `json:"buddy_group"`
+
+	// InviteNext is set while an "invite next" override is pending (see queue.sql); only
+	// students in a group have a queue to jump.
+	InviteNext bool `json:"invite_next"`
 }
 
 type StudentGroup struct {
@@ -117,9 +122,20 @@ func (s *Server) studentRoutes() {
 			buddyByStudent[m.StudentID] = GroupRef{ID: m.BuddyGroupID, Name: strings.Join(namesByBuddyGroup[m.BuddyGroupID], " & ")}
 		}
 
+		queueMembers, err := queue.LoadMembers(s.db)
+		if err != nil {
+			return err
+		}
+
+		inviteNext := map[int64]bool{}
+		for _, m := range queueMembers {
+			inviteNext[m.ID] = m.InviteNextPendingSince != nil
+		}
+
 		out := make([]StudentListItem, len(students))
 		for i, st := range students {
 			out[i].Student = st
+			out[i].InviteNext = inviteNext[st.ID]
 			if g, ok := groupByStudent[st.ID]; ok {
 				out[i].Group = &g
 			}
@@ -693,6 +709,45 @@ func (s *Server) studentRoutes() {
 		}
 
 		httpx.OK(w, row)
+		return nil
+	})
+
+	// Toggle "invite next": the student jumps their group's queue until they get a counted
+	// invitation.
+	s.adminRoute("PUT /api/students/{id}/invite-next", func(w http.ResponseWriter, r *http.Request) error {
+		type request struct {
+			Enabled *bool `json:"enabled"`
+		}
+
+		in, err := decode[request](r)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return nil
+		}
+
+		if in.Enabled == nil {
+			httpx.Error(w, http.StatusBadRequest, "enabled (boolean) is required")
+			return nil
+		}
+
+		id, ok := pathID(r, "id")
+		if !ok {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+
+		res, err := s.db.Exec(`
+			UPDATE students SET invite_next_at = CASE WHEN ? THEN datetime('now') END
+			WHERE id = ? AND deleted_at IS NULL`, *in.Enabled, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			httpx.Error(w, http.StatusNotFound, "Student not found")
+			return nil
+		}
+
+		httpx.Success(w)
 		return nil
 	})
 }

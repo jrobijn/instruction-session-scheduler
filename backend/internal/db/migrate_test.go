@@ -120,3 +120,46 @@ func TestMigrateRefusesNewerDatabase(t *testing.T) {
 		t.Fatalf("err = %v, want newer-version error", err)
 	}
 }
+
+func TestMigrateMovesInviteNextToStudents(t *testing.T) {
+	d, _ := openTemp(t)
+	ctx := context.Background()
+	provider, err := goose.NewProvider(goose.DialectSQLite3, d.DB.DB, migrations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, q := range []string{
+		"INSERT INTO groups (id, name) VALUES (1, 'G')",
+		"INSERT INTO students (id, first_name, last_name, email) VALUES (1, 'A', 'X', 'a@example.com'), (2, 'B', 'X', 'b@example.com')",
+		"INSERT INTO student_groups (student_id, group_id, invite_next_at) VALUES (1, 1, '2026-01-01 00:00:00'), (2, 1, NULL)",
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := provider.UpTo(ctx, 3); err != nil {
+		t.Fatal(err)
+	}
+
+	var a, b *string
+	if err := d.QueryRow("SELECT (SELECT invite_next_at FROM students WHERE id = 1), (SELECT invite_next_at FROM students WHERE id = 2)").Scan(&a, &b); err != nil {
+		t.Fatal(err)
+	}
+	if a == nil || *a != "2026-01-01 00:00:00" || b != nil {
+		t.Fatalf("students.invite_next_at = %v, %v; want the membership's override copied, NULL kept", a, b)
+	}
+
+	// Down puts it back on the membership.
+	if _, err := provider.DownTo(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.QueryRow("SELECT invite_next_at FROM student_groups WHERE student_id = 1").Scan(&a); err != nil || a == nil || *a != "2026-01-01 00:00:00" {
+		t.Fatalf("after down, student_groups.invite_next_at = %v (%v)", a, err)
+	}
+}

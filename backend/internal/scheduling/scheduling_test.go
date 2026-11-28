@@ -146,7 +146,7 @@ func TestGenerateMovesOthersForBuddy(t *testing.T) {
 		Timeslots: []Timeslot{{ID: 10, Capacity: 2}, {ID: 20, Capacity: 2}},
 		Allows:    anyTimeslot,
 		Buddies:   Buddies{1: {4}, 4: {1}},
-	})
+	}).Placements
 	timeslot := map[int64]int{}
 	for _, p := range got {
 		timeslot[p.Member.ID] = p.Timeslot

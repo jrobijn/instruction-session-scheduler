@@ -55,9 +55,9 @@ export function TimetableQueues({ timetableId, groupsKey }: TimetableQueuesProps
 
   useEffect(() => { load(); }, [timetableId, day, groupsKey]);
 
-  const toggleInviteNext = async (group: GroupQueue, e: GroupQueueEntry) => {
+  const toggleInviteNext = async (e: GroupQueueEntry) => {
     try {
-      await api.setGroupMemberInviteNext(group.group_id, e.id, !e.invite_next);
+      await api.setStudentInviteNext(e.id, !e.invite_next);
       load();
     } catch (err: any) {
       toast(err.message);
@@ -98,7 +98,7 @@ export function TimetableQueues({ timetableId, groupsKey }: TimetableQueuesProps
             emptyHint={day == null ? t.timetableQueueEmpty : t.previewNoOneInGroup(dayName)}
             tabCount={g => g.queue.length}
             statusLabel={t.queueAvailability}
-            actions={(g, e) => [{ label: e.invite_next ? t.cancelInviteNext : t.inviteNext, onClick: () => toggleInviteNext(g, e) }]}
+            actions={(_, e) => [{ label: e.invite_next ? t.cancelInviteNext : t.inviteNext, onClick: () => toggleInviteNext(e) }]}
           />
         </Stack>
       )}

@@ -20,7 +20,7 @@ func TestTimetableQueues(t *testing.T) {
 	first := f.student("First", g)
 	f.student("Second", g)
 	last := f.student("Last", g)
-	f.exec("UPDATE student_groups SET invite_next_at = '2029-12-01 00:00:00' WHERE student_id = ?", last)
+	f.exec("UPDATE students SET invite_next_at = '2029-12-01 00:00:00' WHERE id = ?", last)
 	f.preferTimeslots(first, f.timetable, f.timeslots[1])
 
 	otherDay := f.student("OtherDay", g)

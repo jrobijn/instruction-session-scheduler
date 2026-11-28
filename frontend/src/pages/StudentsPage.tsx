@@ -5,10 +5,17 @@ import {
   ActionMenu, Alert, Badge, Button, Checkbox, DescriptionList, Dialog, EmptyState, ExpandIcon, Field, Input,
   Page, PageHeader, Row, SortHeader, Stack, Table, Text, Tooltip, useConfirm, useToast,
 } from '../ui';
-import { GroupLabel, InvitationStatusBadge } from '../components/StatusBadges';
+import { GroupLabel, InvitationStatusBadge, InviteNextFlag } from '../components/StatusBadges';
 import { useT, getLocale } from '../i18n';
 import styles from './StudentsPage.module.css';
 import buddyStyles from '../components/BuddyRows.module.css';
+
+interface StudentInvitation {
+  id: number;
+  status: string;
+  session_date: string;
+  start_time: string;
+}
 
 interface Student {
   id: number;
@@ -23,6 +30,8 @@ interface Student {
   cooldown_until: string | null;
   group?: { id: number; name: string; color: string | null } | null;
   buddy_group?: { id: number; name: string } | null;
+  /** A pending "invite next" override: they jump their group's queue until invited. */
+  invite_next: boolean;
 }
 
 interface Timetable {
@@ -63,6 +72,7 @@ export default function StudentsPage() {
   const [expandedStudent, setExpandedStudent] = useState<number | null>(null);
   const [detailTimetables, setDetailTimetables] = useState<Timetable[]>([]);
   const [detailTimeslotPrefs, setDetailTimeslotPrefs] = useState<Record<number, number[]>>({});
+  const [detailInvitations, setDetailInvitations] = useState<StudentInvitation[]>([]);
   const [historyModal, setHistoryModal] = useState<Student | null>(null);
   const [historyEntries, setHistoryEntries] = useState<InvitationHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -242,6 +252,15 @@ export default function StudentsPage() {
     }
   };
 
+  const toggleInviteNext = async (student: Student) => {
+    try {
+      await api.setStudentInviteNext(student.id, !student.invite_next);
+      load();
+    } catch (err: any) {
+      toast(err.message);
+    }
+  };
+
   const hasActiveCooldown = (s: Student) => s.cooldown_until && new Date(s.cooldown_until + 'Z') > new Date();
 
   const getCooldownInfo = (s: Student) => {
@@ -322,6 +341,7 @@ export default function StudentsPage() {
   const toggleExpanded = async (s: Student) => {
     if (expandedStudent === s.id) { setExpandedStudent(null); return; }
     setExpandedStudent(s.id);
+    setDetailInvitations([]);
     try {
       const allTt = await api.getTimetables();
       const active = allTt.filter((tt: Timetable) => tt.active && tt.status === 'saved');
@@ -330,8 +350,13 @@ export default function StudentsPage() {
         return { ...tt, timeslots: detail.timeslots };
       }));
       setDetailTimetables(withTs);
-      setDetailTimeslotPrefs(await api.getStudentPreferredTimeslots(s.id));
-    } catch { setDetailTimetables([]); setDetailTimeslotPrefs({}); }
+      const [prefs, invitations] = await Promise.all([
+        api.getStudentPreferredTimeslots(s.id),
+        api.getStudentInvitations(s.id),
+      ]);
+      setDetailTimeslotPrefs(prefs);
+      setDetailInvitations(invitations);
+    } catch { setDetailTimetables([]); setDetailTimeslotPrefs({}); setDetailInvitations([]); }
   };
 
   if (loading) return <Page><Text tone="muted">{t.loading}</Text></Page>;
@@ -422,6 +447,7 @@ export default function StudentsPage() {
                       <Row gap={2}>
                         {!buddyMode && <ExpandIcon expanded={isExpanded} />}
                         <Text weight="medium">{fullName}</Text>
+                        {s.invite_next && <InviteNextFlag />}
                         {s.buddy_group && (
                           <Tooltip content={s.buddy_group.name}>
                             <span className={buddyStyles.buddyIcon}><Users /></span>
@@ -482,6 +508,8 @@ export default function StudentsPage() {
                         <ActionMenu actions={[
                           { label: t.edit, onClick: () => openEdit(s) },
                           { label: s.active ? t.deactivate : t.activate, onClick: () => toggleActive(s) },
+                          // Without a group there is no queue to jump.
+                          ...(s.group ? [{ label: s.invite_next ? t.cancelInviteNext : t.inviteNext, onClick: () => toggleInviteNext(s) }] : []),
                           { label: t.delete, onClick: () => handleDelete(s.id), danger: true },
                         ]} />
                       </Row>
@@ -518,6 +546,21 @@ export default function StudentsPage() {
                             ),
                           }] : []),
                           { label: t.group, value: s.group ? <GroupLabel name={s.group.name} color={s.group.color} /> : t.noData },
+                          {
+                            label: t.activeInvitations,
+                            value: detailInvitations.length > 0 ? (
+                              <Stack gap={1}>
+                                {detailInvitations.map(inv => (
+                                  <Row key={inv.id} gap={2}>
+                                    <Text mono>
+                                      {new Date(inv.session_date + 'T00:00:00').toLocaleDateString(dateLocale)} {inv.start_time.slice(0, 5)}
+                                    </Text>
+                                    <InvitationStatusBadge status={inv.status} />
+                                  </Row>
+                                ))}
+                              </Stack>
+                            ) : t.noData,
+                          },
                           ...(cooldownInfo ? [{
                             label: t.cooldown,
                             value: <Text tone="danger">{t.cooldownDetail(cooldownInfo.days, cooldownInfo.date)}</Text>,

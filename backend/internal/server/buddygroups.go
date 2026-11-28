@@ -122,6 +122,15 @@ func (s *Server) buddyGroupRoutes() {
 	})
 }
 
+// Buddy is a member of a buddy group, with the group they are in (if any).
+type Buddy struct {
+	ID        int64   `db:"id" json:"id"`
+	FirstName string  `db:"first_name" json:"first_name"`
+	LastName  string  `db:"last_name" json:"last_name"`
+	GroupID   *int64  `db:"group_id" json:"group_id"`
+	GroupName *string `db:"group_name" json:"group_name"`
+}
+
 // buddyGroupMembers lists the non-deleted members of every buddy group, by buddy group id,
 // with the group they are in. It is what pages show of buddy groups; the scheduler uses
 // loadBuddies.

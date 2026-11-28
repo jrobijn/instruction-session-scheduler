@@ -1,8 +1,9 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { ChevronsDown, ChevronsUp, Link2, Users } from 'lucide-react';
+import { ChevronsDown, Link2, Users } from 'lucide-react';
 import { useT, getLocale } from '../i18n';
 import { ActionMenu, Row, Stack, Table, Text, Tooltip, type ActionMenuItem } from '../ui';
 import { cx } from '../ui/cx';
+import { InviteNextFlag } from './StatusBadges';
 import buddyStyles from './BuddyRows.module.css';
 import styles from './QueueTable.module.css';
 
@@ -107,11 +108,7 @@ export function QueueTable<E extends QueueEntry>({ entries, dayName, columns = [
                       <span className={cx(styles.flag, styles.warning)}><ChevronsDown /></span>
                     </Tooltip>
                   )}
-                  {e.invite_next && (
-                    <Tooltip content={t.inviteNextTooltip}>
-                      <span className={cx(styles.flag, styles.success)}><ChevronsUp /></span>
-                    </Tooltip>
-                  )}
+                  {e.invite_next && <InviteNextFlag />}
                   {leader && (
                     <Tooltip content={t.buddyFollowerTooltip(`${leader.first_name} ${leader.last_name}`, leader.queue_position!)}>
                       <span className={cx(styles.flag, buddyStyles.buddyIcon)}><Link2 /></span>
