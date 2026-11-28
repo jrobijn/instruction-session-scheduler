@@ -111,11 +111,11 @@ func Generate(in Input) []Placement {
 	place := func(sid int64) bool {
 		for _, buddy := range in.Buddies[sid] {
 			if ti, ok := m.placed[buddy]; ok {
-				return m.place(sid, ti)
+				return m.placeNearBuddy(sid, ti)
 			}
 		}
 
-		return m.place(sid, -1)
+		return m.place(sid)
 	}
 
 	// ----- Selection: per group, the first Slots students, with buddies pulled up -----
