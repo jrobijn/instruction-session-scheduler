@@ -29,6 +29,7 @@ interface Member {
   id: number;
   first_name: string;
   last_name: string;
+  membership_id: string;
   active: number;
   cooldown_until: string | null;
   buddy_group: {
@@ -269,6 +270,7 @@ export default function GroupDetailPage() {
                   <thead>
                     <tr>
                       <SortHeader {...sortProps('last_name')}>{t.name}</SortHeader>
+                      <SortHeader {...sortProps('membership_id')}>{t.membershipId}</SortHeader>
                       <SortHeader {...sortProps('active')}>{t.status}</SortHeader>
                       <th data-actions>{t.actions}</th>
                     </tr>
@@ -299,6 +301,7 @@ export default function GroupDetailPage() {
                               )}
                             </Row>
                           </td>
+                          <td><Text mono tone="muted">{m.membership_id}</Text></td>
                           <td>
                             {cooldownInfo ? (
                               <Tooltip content={t.cooldownDetail(cooldownInfo.days, cooldownInfo.date)}>

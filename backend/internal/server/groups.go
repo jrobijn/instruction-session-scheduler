@@ -269,13 +269,14 @@ func (s *Server) groupRoutes() {
 			ID            int64             `db:"id" json:"id"`
 			FirstName     string            `db:"first_name" json:"first_name"`
 			LastName      string            `db:"last_name" json:"last_name"`
+			MembershipID  string            `db:"membership_id" json:"membership_id"`
 			Active        int64             `db:"active" json:"active"`
 			CooldownUntil *string           `db:"cooldown_until" json:"cooldown_until"` // as stored
 			BuddyGroup    *memberBuddyGroup `db:"-" json:"buddy_group"`
 		}
 
 		members, err := db.Many[groupMember](s.db, `
-			SELECT s.id, s.first_name, s.last_name, s.active, s.cooldown_until
+			SELECT s.id, s.first_name, s.last_name, s.membership_id, s.active, s.cooldown_until
 			FROM student_groups sg
 			JOIN students s ON s.id = sg.student_id AND s.deleted_at IS NULL
 			WHERE sg.group_id = ?

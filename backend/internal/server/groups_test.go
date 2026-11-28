@@ -162,7 +162,7 @@ func TestGroupMembersList(t *testing.T) {
 
 	// Membership only: the queue and invitations are shown per timetable and session.
 	keys := slices.Sorted(maps.Keys(byName["A"]))
-	if want := []string{"active", "buddy_group", "cooldown_until", "first_name", "id", "last_name"}; !slices.Equal(keys, want) {
+	if want := []string{"active", "buddy_group", "cooldown_until", "first_name", "id", "last_name", "membership_id"}; !slices.Equal(keys, want) {
 		t.Errorf("member fields = %v, want %v", keys, want)
 	}
 
