@@ -131,10 +131,10 @@ type Buddy struct {
 	GroupName *string `db:"group_name" json:"group_name"`
 }
 
-// buddyGroupMembers lists the non-deleted members of every buddy group, by buddy group id,
-// with the group they are in. It is what pages show of buddy groups; the scheduler uses
-// loadBuddies.
-func buddyGroupMembers(q db.Querier) (map[int64][]Buddy, error) {
+// loadBuddyGroups loads every buddy group's non-deleted members, by buddy group id, in the
+// order they were added, with the group each is in. It is what pages show of buddy groups; the
+// scheduler uses loadBuddies.
+func loadBuddyGroups(q db.Querier) (map[int64][]Buddy, error) {
 	type buddyRow struct {
 		BuddyGroupID int64 `db:"buddy_group_id"`
 		Buddy

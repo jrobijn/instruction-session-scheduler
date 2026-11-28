@@ -285,7 +285,7 @@ func (s *Server) groupRoutes() {
 			return err
 		}
 
-		buddyGroups, err := buddyGroupMembers(s.db)
+		buddyGroups, err := loadBuddyGroups(s.db)
 		if err != nil {
 			return err
 		}

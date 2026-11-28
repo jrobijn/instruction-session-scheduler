@@ -108,7 +108,7 @@ func loadQueues(q db.Querier, elig *sessionEligibility, timetableID, seed int64)
 		return nil, nil, err
 	}
 
-	buddyGroups, err := buddyGroupMembers(q)
+	buddyGroups, err := loadBuddyGroups(q)
 	if err != nil {
 		return nil, nil, err
 	}
