@@ -290,22 +290,28 @@ func (s *Server) groupRoutes() {
 			return err
 		}
 
+		// The buddy groups with members in this group, by those members.
 		buddyGroupOf := map[int64]*memberBuddyGroup{}
 		for id, group := range buddyGroups {
+			var here []int64
 			names := make([]string, len(group))
+			elsewhere := []Buddy{}
 			for i, b := range group {
 				names[i] = b.FirstName
-			}
-
-			bg := &memberBuddyGroup{ID: id, Name: strings.Join(names, " & "), Elsewhere: []Buddy{}}
-			for _, b := range group {
-				if b.GroupID == nil || *b.GroupID != groupID {
-					bg.Elsewhere = append(bg.Elsewhere, b)
+				if b.GroupID != nil && *b.GroupID == groupID {
+					here = append(here, b.ID)
+				} else {
+					elsewhere = append(elsewhere, b)
 				}
 			}
 
-			for _, b := range group {
-				buddyGroupOf[b.ID] = bg
+			if len(here) == 0 {
+				continue
+			}
+
+			bg := &memberBuddyGroup{ID: id, Name: strings.Join(names, " & "), Elsewhere: elsewhere}
+			for _, sid := range here {
+				buddyGroupOf[sid] = bg
 			}
 		}
 
