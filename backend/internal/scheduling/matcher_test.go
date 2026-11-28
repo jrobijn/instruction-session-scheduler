@@ -81,3 +81,21 @@ func TestMatcherMakesRoomNearBuddy(t *testing.T) {
 		t.Errorf("2 has buddies: placed 2, 3 in %d, %d; want 0, 1", m.placed[2], m.placed[3])
 	}
 }
+
+func TestMatcherDoesNotSplitBuddiesForCloseness(t *testing.T) {
+	timeslots := []Timeslot{{ID: 10, Capacity: 2}, {ID: 20, Capacity: 2}, {ID: 30, Capacity: 1}}
+
+	// 3 wants to join buddy 1 in timeslot 10. Making room there would take 2 to 20 and push
+	// one of the buddies 4 and 5 from 20 into 30, so 3 takes the free spot in 30 instead.
+	m := newMatcher(timeslots, onlyIn(map[int64][]int64{2: {10, 20}}), Buddies{1: {3}, 3: {1}, 4: {5}, 5: {4}})
+	m.place(1)
+	m.place(2)
+	m.place(4)
+	m.placeNearBuddy(5, m.placed[4])
+	if !m.placeNearBuddy(3, m.placed[1]) {
+		t.Fatalf("3 not placed")
+	}
+	if m.placed[2] != 0 || m.placed[3] != 2 || m.placed[4] != 1 || m.placed[5] != 1 {
+		t.Errorf("placed 2, 3, 4, 5 in %d, %d, %d, %d; want 0, 2, 1, 1", m.placed[2], m.placed[3], m.placed[4], m.placed[5])
+	}
+}
