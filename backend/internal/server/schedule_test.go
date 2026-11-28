@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -243,7 +244,7 @@ func TestGenerateScheduleInviteNextJumpsQueue(t *testing.T) {
 	f.student("First", g)
 	f.student("Second", g)
 	last := f.student("Last", g)
-	f.exec("UPDATE student_groups SET invite_next_at = '2029-12-01 00:00:00' WHERE student_id = ?", last)
+	f.exec("UPDATE students SET invite_next_at = '2029-12-01 00:00:00' WHERE id = ?", last)
 
 	f.generate().status(http.StatusOK)
 	wantInvited(t, f.placements(), "Last")
@@ -555,6 +556,261 @@ func TestGenerateScheduleFailedRegenerationKeepsSchedule(t *testing.T) {
 	if st := f.sessionStatus(f.sessionID); st != "scheduled" {
 		t.Fatalf("session status = %s", st)
 	}
+}
+
+// --- preview ----------------------------------------------------------------------------
+
+func (f *scheduleFixture) preview() *response {
+	f.t.Helper()
+	return f.admin(http.MethodGet, fmt.Sprintf("/api/sessions/%d/schedule-preview", f.sessionID), nil)
+}
+
+// previewQueue lists a preview group's queue, by group name, as first names; invited ones
+// get a "+" suffix.
+func previewQueue(t *testing.T, res map[string]any, group string) []string {
+	t.Helper()
+	for _, raw := range res["groups"].([]any) {
+		g := raw.(map[string]any)
+		if g["group_name"] != group {
+			continue
+		}
+
+		out := []string{}
+		for i, rawEntry := range g["queue"].([]any) {
+			e := rawEntry.(map[string]any)
+			if e["queue_position"] != float64(i+1) {
+				t.Fatalf("%s: position %v at index %d", e["first_name"], e["queue_position"], i)
+			}
+
+			name := e["first_name"].(string)
+			if scheduled(e)["invited"] == true {
+				name += "+"
+			}
+
+			out = append(out, name)
+		}
+
+		return out
+	}
+
+	t.Fatalf("no group %s in preview", group)
+	return nil
+}
+
+// scheduled returns what a preview entry says generating would do with the student.
+func scheduled(e map[string]any) map[string]any {
+	s, _ := e["schedule"].(map[string]any)
+	return s
+}
+
+// previewEntry finds a student in a preview by first name.
+func previewEntry(t *testing.T, res map[string]any, firstName string) map[string]any {
+	t.Helper()
+	for _, raw := range res["groups"].([]any) {
+		for _, rawEntry := range raw.(map[string]any)["queue"].([]any) {
+			if e := rawEntry.(map[string]any); e["first_name"] == firstName {
+				return e
+			}
+		}
+	}
+
+	t.Fatalf("%s not in preview", firstName)
+	return nil
+}
+
+func TestSchedulePreviewMatchesGenerate(t *testing.T) {
+	// Ties, two groups, overflow and a buddy: everything that decides who is invited.
+	f := newScheduleFixture(t, []string{"18:00", "19:00", "20:00"}, 2)
+	a := f.groupIn("A", 60)
+	b := f.groupIn("B", 40)
+	var ids []int64
+	for i := range 7 {
+		ids = append(ids, f.student(fmt.Sprintf("A%d", i), a))
+	}
+
+	f.student("B0", b) // B's quota is 2: one spot overflows
+
+	f.exec("UPDATE student_groups SET joined_at = NULL")
+	f.buddies(ids[0], ids[6])
+
+	res := f.preview().status(http.StatusOK).object()
+	if rows := f.invitationRows(); len(rows) != 0 {
+		t.Fatalf("preview wrote %d invitations", len(rows))
+	}
+	if st := f.sessionStatus(f.sessionID); st != "draft" {
+		t.Fatalf("session status after preview = %s, want draft", st)
+	}
+
+	var previewed []string
+	for _, g := range []string{"A", "B"} {
+		for _, name := range previewQueue(t, res, g) {
+			if n, ok := strings.CutSuffix(name, "+"); ok {
+				previewed = append(previewed, n)
+			}
+		}
+	}
+
+	gen := f.generate().status(http.StatusOK).object()
+	wantInvited(t, f.placements(), previewed...)
+	if res["total_slots"] != gen["total_slots"] || res["students_invited"] != gen["students_invited"] {
+		t.Fatalf("preview counts %v/%v, generated %v/%v", res["total_slots"], res["students_invited"], gen["total_slots"], gen["students_invited"])
+	}
+
+	for _, raw := range res["groups"].([]any) {
+		g := raw.(map[string]any)
+		if g["group_name"] == "A" && g["slots"] != 4.0 {
+			t.Fatalf("A has %v slots, want 4", g["slots"])
+		}
+	}
+
+	if e := scheduled(previewEntry(t, res, "B0")); e["invited"] != true || e["overflow"] != false {
+		t.Fatalf("B0 = %v, want invited within quota", e)
+	}
+
+	overflow := 0
+	for _, raw := range res["groups"].([]any) {
+		for _, rawEntry := range raw.(map[string]any)["queue"].([]any) {
+			if scheduled(rawEntry.(map[string]any))["overflow"] == true {
+				overflow++
+			}
+		}
+	}
+
+	if overflow != 1 {
+		t.Fatalf("%d overflow invitations, want 1", overflow)
+	}
+}
+
+func TestSchedulePreviewQueue(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	first := f.student("First", g)
+	f.student("Second", g)
+	last := f.student("Last", g)
+	f.exec("UPDATE students SET invite_next_at = '2029-12-01 00:00:00' WHERE id = ?", last)
+
+	// Not available for this session: they are listed apart, with the reason.
+	otherDay := f.student("OtherDay", g)
+	f.exec("UPDATE students SET preferred_days = '0|2' WHERE id = ?", otherDay)
+	cooling := f.student("Cooling", g)
+	f.exec("UPDATE students SET cooldown_until = '2030-01-08 09:00:00' WHERE id = ?", cooling)
+	inactive := f.student("Inactive", g)
+	f.exec("UPDATE students SET active = 0 WHERE id = ?", inactive)
+
+	// Buddies: one in the queue, the others away for a reason.
+	other := f.group("Elsewhere")
+	away := f.student("Away", other)
+	f.buddies(first, otherDay, cooling, away)
+
+	res := f.preview().status(http.StatusOK).object()
+	if got, want := previewQueue(t, res, "Juniors"), []string{"Last+", "First", "Second"}; !slices.Equal(got, want) {
+		t.Fatalf("queue = %v, want %v", got, want)
+	}
+
+	if e := previewEntry(t, res, "Last"); e["invite_next"] != true {
+		t.Fatalf("Last: invite_next = %v", e["invite_next"])
+	}
+
+	apart := map[string]any{}
+	for _, raw := range previewEntry(t, res, "First")["buddies"].([]any) {
+		b := raw.(map[string]any)
+		apart[b["first_name"].(string)] = b["apart"]
+	}
+
+	want := map[string]any{"OtherDay": "otherDay", "Cooling": "cooldown", "Away": "otherGroup"}
+	if !maps.Equal(apart, want) {
+		t.Fatalf("buddies of First = %v, want %v", apart, want)
+	}
+
+	unavailable := map[string]any{}
+	for _, raw := range res["groups"].([]any) {
+		for _, rawEntry := range raw.(map[string]any)["unavailable"].([]any) {
+			e := rawEntry.(map[string]any)
+			if e["queue_position"] != nil || e["schedule"] != nil {
+				t.Fatalf("unavailable %s: position %v, schedule %v", e["first_name"], e["queue_position"], e["schedule"])
+			}
+
+			unavailable[e["first_name"].(string)] = e["unavailable"]
+		}
+	}
+
+	wantUnavailable := map[string]any{"OtherDay": "otherDay", "Cooling": "cooldown", "Inactive": "inactive"}
+	if !maps.Equal(unavailable, wantUnavailable) {
+		t.Fatalf("unavailable = %v, want %v", unavailable, wantUnavailable)
+	}
+}
+
+func TestSchedulePreviewTimeslotPreferences(t *testing.T) {
+	// First and Second both only want 18:00, which has one spot: Second is skipped and Third
+	// takes their spot at 19:00.
+	f := newScheduleFixture(t, []string{"18:00", "19:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	first := f.student("First", g)
+	second := f.student("Second", g)
+	f.student("Third", g)
+	f.preferTimeslots(first, f.timetable, f.timeslots[0])
+	f.preferTimeslots(second, f.timetable, f.timeslots[0])
+
+	res := f.preview().status(http.StatusOK).object()
+	var starts []string
+	for _, raw := range res["timeslots"].([]any) {
+		starts = append(starts, raw.(map[string]any)["start_time"].(string))
+	}
+
+	if !slices.Equal(starts, []string{"18:00", "19:00"}) {
+		t.Fatalf("timeslots = %v, want the timetable's [18:00 19:00]", starts)
+	}
+
+	if got := previewQueue(t, res, "Juniors"); !slices.Equal(got, []string{"First+", "Second", "Third+"}) {
+		t.Fatalf("queue = %v, want [First+ Second Third+]", got)
+	}
+
+	e := previewEntry(t, res, "First")
+	if scheduled(e)["start_time"] != "18:00" || fmt.Sprint(e["preferred_timeslots"]) != "[18:00]" || scheduled(e)["skipped"] != false {
+		t.Fatalf("First = %v, want invited at 18:00 with preference [18:00]", e)
+	}
+
+	e = previewEntry(t, res, "Second")
+	if scheduled(e)["skipped"] != true || scheduled(e)["start_time"] != nil {
+		t.Fatalf("Second = %v, want skipped", e)
+	}
+
+	e = previewEntry(t, res, "Third")
+	if scheduled(e)["start_time"] != "19:00" || e["preferred_timeslots"] != nil {
+		t.Fatalf("Third = %v, want at 19:00 without preference", e)
+	}
+}
+
+func TestSchedulePreviewOfScheduledSession(t *testing.T) {
+	// Students on the current schedule are not "already invited" in the preview, as
+	// regenerating replaces their invitations; and the schedule itself stays.
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	g := f.groupIn("Juniors", 100)
+	f.student("A", g)
+	f.student("B", g)
+	f.generate().status(http.StatusOK)
+	before := f.invitationRows()
+
+	if got := previewQueue(t, f.preview().status(http.StatusOK).object(), "Juniors"); !slices.Equal(got, []string{"A+", "B"}) {
+		t.Fatalf("queue = %v, want [A+ B]", got)
+	}
+
+	after := f.invitationRows()
+	if len(after) != 1 || after[0]["token"] != before[0]["token"] {
+		t.Fatalf("schedule after preview = %v, want it unchanged", after)
+	}
+}
+
+func TestSchedulePreviewValidation(t *testing.T) {
+	f := newScheduleFixture(t, []string{"18:00"}, 1)
+	f.public(http.MethodGet, fmt.Sprintf("/api/sessions/%d/schedule-preview", f.sessionID), nil).
+		wantError(http.StatusUnauthorized, "Authentication required")
+	f.admin(http.MethodGet, "/api/sessions/999/schedule-preview", nil).
+		wantError(http.StatusNotFound, "Training session not found")
+	f.preview().wantError(http.StatusBadRequest, "No groups assigned to this timetable")
+
+	f.exec("UPDATE training_sessions SET status = 'invitations_sent'")
+	f.preview().wantError(http.StatusBadRequest, "A schedule can only be generated before invitations are sent")
 }
 
 func TestGenerateScheduleRefusedAfterInvitationsSent(t *testing.T) {

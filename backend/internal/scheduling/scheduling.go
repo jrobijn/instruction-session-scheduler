@@ -102,9 +102,19 @@ func AllocateSlots(available int, groups []Group) []Group {
 	return out
 }
 
-// Generate places students in timeslots; see the package documentation. The placements are
-// in the order they were made.
-func Generate(in Input) []Placement {
+// Result is what Generate decided.
+type Result struct {
+	// Placements are in the order they were made.
+	Placements []Placement
+
+	// Skipped are the students who were up for a spot (selected, or tried in overflow) but
+	// could not be placed: none of the timeslots they allow had room, even after moving others.
+	// They are in the order they were tried.
+	Skipped []queue.Member
+}
+
+// Generate places students in timeslots; see the package documentation.
+func Generate(in Input) Result {
 	m := newMatcher(in.Timeslots, in.Allows, in.Buddies)
 
 	// A student goes in or near the timeslot of their first buddy who is placed already.
@@ -167,6 +177,7 @@ func Generate(in Input) []Placement {
 
 	// Placing more students never frees room, so a student who failed once can't be placed later.
 	unplaceable := map[int64]bool{}
+	var skipped []queue.Member
 
 	// Phase 1: students with timeslot preferences; an unplaceable one is replaced by the next
 	// candidate of their group.
@@ -179,6 +190,7 @@ func Generate(in Input) []Placement {
 		}
 
 		unplaceable[st.ID] = true
+		skipped = append(skipped, st)
 		gid := chosen[st.ID].GroupID
 		delete(chosen, st.ID)
 		rest := remaining[gid]
@@ -205,6 +217,7 @@ func Generate(in Input) []Placement {
 		} else {
 			delete(chosen, st.ID)
 			unplaceable[st.ID] = true
+			skipped = append(skipped, st)
 		}
 	}
 
@@ -230,6 +243,7 @@ func Generate(in Input) []Placement {
 		st := overflow.pop(picked)
 		overflowRank++
 		if !place(st.ID) {
+			skipped = append(skipped, st)
 			continue
 		}
 
@@ -244,5 +258,5 @@ func Generate(in Input) []Placement {
 		out[i].Timeslot = m.placed[st.ID]
 	}
 
-	return out
+	return Result{Placements: out, Skipped: skipped}
 }

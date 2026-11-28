@@ -71,9 +71,9 @@ func (q *queueDB) group(name, newMemberPriority string) int64 {
 
 // member adds a student to group; joinedAt and inviteNextAt may be nil.
 func (q *queueDB) member(name string, group int64, joinedAt, inviteNextAt any) int64 {
-	id := q.insert("INSERT INTO students (first_name, last_name, email) VALUES (?, 'Test', ?) RETURNING id", name, name+"@test")
-	q.exec("INSERT INTO student_groups (student_id, group_id, joined_at, invite_next_at) VALUES (?, ?, ?, ?)",
-		id, group, joinedAt, inviteNextAt)
+	id := q.insert("INSERT INTO students (first_name, last_name, email, invite_next_at) VALUES (?, 'Test', ?, ?) RETURNING id",
+		name, name+"@test", inviteNextAt)
+	q.exec("INSERT INTO student_groups (student_id, group_id, joined_at) VALUES (?, ?, ?)", id, group, joinedAt)
 	return id
 }
 

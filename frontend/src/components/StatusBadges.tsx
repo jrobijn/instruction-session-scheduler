@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { CalendarClock, Clock, Send, Timer } from 'lucide-react';
+import { CalendarClock, ChevronsUp, Clock, Send, Timer } from 'lucide-react';
 import { useT } from '../i18n';
-import { Badge, Row, type Tone } from '../ui';
+import { Badge, Row, Tooltip, type Tone } from '../ui';
 import styles from './StatusBadges.module.css';
 
 const sessionStatus: Record<string, { tone: Tone; icon?: ReactNode }> = {
@@ -42,5 +42,25 @@ export function GroupLabel({ name, color }: { name: string; color?: string | nul
       <span className={styles.swatch} style={{ background: color || undefined }} />
       <span>{name}</span>
     </Row>
+  );
+}
+
+/** A student's group as a coloured dot, named in a tooltip. */
+export function GroupDot({ name, color }: { name: string | null | undefined; color?: string | null }) {
+  const t = useT();
+  return (
+    <Tooltip content={name || t.noData}>
+      <span className={styles.dot} style={{ background: color || undefined }} />
+    </Tooltip>
+  );
+}
+
+/** Marks a student with a pending "invite next" override, explained in a tooltip. */
+export function InviteNextFlag() {
+  const t = useT();
+  return (
+    <Tooltip content={t.inviteNextTooltip}>
+      <span className={styles.inviteNext}><ChevronsUp /></span>
+    </Tooltip>
   );
 }

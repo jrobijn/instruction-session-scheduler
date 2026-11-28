@@ -3,7 +3,6 @@
 .flag { display: inline-flex; cursor: help; }
 .flag svg { width: var(--icon-sm); height: var(--icon-sm); }
 .warning { color: var(--color-warning); }
-.success { color: var(--color-success); }
 
 .disciplineGrid {
   display: grid;

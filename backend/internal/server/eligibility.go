@@ -15,28 +15,43 @@ type sessionEligibility struct {
 	date      string         // the session date, in the club's timezone
 	loc       *time.Location // the club's timezone
 	dayOfWeek string         // "" if the date is invalid: then nobody is eligible
+	anyDay    bool           // ignore preferred days (a queue for no weekday in particular)
 	groups    map[int64]bool // the timetable's groups that have an active discipline
 	invited   map[int64]bool // students with an invitation to this session, in any status
 }
 
 // allows reports whether m can be invited: they are active, in one of the timetable's groups
-// that has an active discipline, prefer the session's weekday, have no cooldown running past
-// the session date, and have no invitation to this session yet.
+// that has an active discipline, have no invitation to this session yet, prefer the session's
+// weekday, and have no cooldown running past the session date.
 func (e *sessionEligibility) allows(m queue.Member) bool {
+	return e.exclusion(m) == ""
+}
+
+// exclusion returns why m can't be invited (see allows), the first that applies of inactive,
+// group, invited, otherDay and cooldown; or "" if they can be.
+func (e *sessionEligibility) exclusion(m queue.Member) string {
+	switch {
+	case m.Active == 0:
+		return "inactive"
+	case !e.groups[m.GroupID]:
+		return "group"
+	case e.invited[m.ID]:
+		return "invited"
+	case !e.anyDay && (e.dayOfWeek == "" || !slices.Contains(strings.Split(m.PreferredDays, "|"), e.dayOfWeek)):
+		return "otherDay"
+	}
+
 	// cooldown_until is always stored as "YYYY-MM-DD HH:MM:SS" (UTC). A cooldown ending
 	// during the session day, in the club's timezone, is over by then; an unreadable value
 	// keeps it running.
-	cooldownOver := true
 	if m.CooldownUntil != nil {
 		end, err := time.Parse(time.DateTime, *m.CooldownUntil)
-		cooldownOver = err == nil && end.In(e.loc).Format(time.DateOnly) <= e.date
+		if err != nil || end.In(e.loc).Format(time.DateOnly) > e.date {
+			return "cooldown"
+		}
 	}
 
-	return m.Active != 0 &&
-		e.groups[m.GroupID] &&
-		!e.invited[m.ID] &&
-		e.dayOfWeek != "" && slices.Contains(strings.Split(m.PreferredDays, "|"), e.dayOfWeek) &&
-		cooldownOver
+	return ""
 }
 
 func loadEligibility(q db.Querier, loc *time.Location, sessionID int64, date string, timetableID int64) (*sessionEligibility, error) {

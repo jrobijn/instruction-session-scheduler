@@ -85,6 +85,7 @@ func (s *Server) routes() {
 	s.instructorRoutes()
 	s.disciplineRoutes()
 	s.timetableRoutes()
+	s.queueRoutes()
 	s.groupRoutes()
 	s.studentRoutes()
 	s.sessionRoutes()

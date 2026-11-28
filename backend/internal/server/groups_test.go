@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -100,23 +101,6 @@ func TestGroupMembersEndpoints(t *testing.T) {
 		t.Fatalf("memberships = %v", m)
 	}
 
-	path := groupPath(b, "members", fmt.Sprint(s), "invite-next")
-	e.admin(http.MethodPut, path, map[string]any{}).wantError(http.StatusBadRequest, "enabled (boolean) is required")
-	e.admin(http.MethodPut, path, map[string]any{"enabled": "yes"}).wantError(http.StatusBadRequest, "Invalid JSON body")
-	e.admin(http.MethodPut, groupPath(a, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
-		wantError(http.StatusNotFound, "Member not found")
-	e.admin(http.MethodPut, groupPath(999, "members", fmt.Sprint(s), "invite-next"), map[string]any{"enabled": true}).
-		wantError(http.StatusNotFound, "Group not found")
-	e.admin(http.MethodPut, path, map[string]any{"enabled": true}).status(http.StatusOK)
-	if e.row("SELECT invite_next_at FROM student_groups WHERE student_id = ?", s)["invite_next_at"] == nil {
-		t.Fatal("invite-next not set")
-	}
-
-	e.admin(http.MethodPut, path, map[string]any{"enabled": false}).status(http.StatusOK)
-	if e.row("SELECT invite_next_at FROM student_groups WHERE student_id = ?", s)["invite_next_at"] != nil {
-		t.Fatal("invite-next not cleared")
-	}
-
 	e.admin(http.MethodDelete, groupPath(b, "members", fmt.Sprint(s)), nil).status(http.StatusOK)
 	if e.row("SELECT 1 FROM student_groups WHERE student_id = ?", s) != nil {
 		t.Fatal("member not removed")
@@ -125,25 +109,31 @@ func TestGroupMembersEndpoints(t *testing.T) {
 	e.admin(http.MethodDelete, groupPath(999, "members", fmt.Sprint(s)), nil).wantError(http.StatusNotFound, "Group not found")
 }
 
-func TestGroupMembersQueue(t *testing.T) {
+func TestGroupMembersList(t *testing.T) {
 	f := newScheduleFixture(t, []string{"18:00"}, 1)
 	g := f.groupIn("Juniors", 100)
 	a := f.student("A", g)
 	b := f.student("B", g)
 	c := f.student("C", g)
 	d := f.student("D", g)
-	f.exec("UPDATE students SET active = 0 WHERE id = ?", d)
-	f.exec("UPDATE student_groups SET invite_next_at = '2029-12-01 00:00:00' WHERE student_id = ?", c)
+	f.exec("UPDATE students SET active = 0, cooldown_until = '2030-02-01 00:00:00' WHERE id = ?", d)
+	gone := f.student("Gone", g)
+	f.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", gone)
 	f.buddies(a, b)
+
+	// C's buddies are in another group and in none: never invited together with C.
+	away := f.student("Away", f.group("Seniors"))
+	loose := f.insert("INSERT INTO students (first_name, last_name, email) VALUES ('Loose', 'X', 'loose@example.com') RETURNING id")
+	f.buddies(c, away, loose)
 	f.invitation(f.sessionID, b, f.timeslots[0], f.slots[0], g, "invited")
 
 	members := f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array()
 	var order []string
 	for _, m := range members {
-		order = append(order, fmt.Sprintf("%s:%v", m["first_name"], m["queue_position"]))
+		order = append(order, m["first_name"].(string))
 	}
-	if got := strings.Join(order, ","); got != "C:1,A:2,B:3,D:<nil>" {
-		t.Fatalf("queue = %s (invite-next first, inactive last without a position)", got)
+	if got := strings.Join(order, ","); got != "A,B,C,D" {
+		t.Fatalf("members = %s, want by name, inactive included and deleted left out", got)
 	}
 
 	byName := map[string]map[string]any{}
@@ -151,70 +141,32 @@ func TestGroupMembersQueue(t *testing.T) {
 		byName[m["first_name"].(string)] = m
 	}
 
-	if byName["C"]["invite_next"] != true || byName["A"]["invite_next"] != false {
-		t.Error("invite_next flags")
-	}
-	if o, _ := byName["A"]["queue_override"].(map[string]any); o == nil || o["reason"] != "joined" {
-		t.Errorf("A queue_override = %v, want joined", byName["A"]["queue_override"])
+	bg, _ := byName["A"]["buddy_group"].(map[string]any)
+	if bg == nil || bg["name"] != "A & B" || bg["buddies"] != nil || len(bg["elsewhere"].([]any)) != 0 {
+		t.Errorf("A buddy_group = %v, want A & B with nobody elsewhere", byName["A"]["buddy_group"])
 	}
 
-	bg, _ := byName["A"]["buddy_group"].(map[string]any)
-	if bg == nil || bg["name"] != "A & B" || len(bg["buddies"].([]any)) != 1 {
-		t.Errorf("A buddy_group = %v", byName["A"]["buddy_group"])
+	elsewhere := map[string]any{}
+	for _, raw := range byName["C"]["buddy_group"].(map[string]any)["elsewhere"].([]any) {
+		b := raw.(map[string]any)
+		elsewhere[b["first_name"].(string)] = b["group_name"]
 	}
-	if byName["B"]["active_invitations"] != 1.0 || byName["A"]["active_invitations"] != 0.0 {
-		t.Error("active_invitations counts")
+
+	if fmt.Sprint(elsewhere) != "map[Away:Seniors Loose:<nil>]" {
+		t.Errorf("C's buddies elsewhere = %v, want Away in Seniors and Loose in no group", elsewhere)
 	}
-	for _, k := range []string{"queue_at", "invite_next_pending_since", "joined_at", "new_policy", "buddy_group_id"} {
-		if _, leaked := byName["A"][k]; leaked {
-			t.Errorf("internal column %s leaked", k)
-		}
+
+	if m := byName["D"]; m["active"] != 0.0 || m["cooldown_until"] != "2030-02-01 00:00:00" {
+		t.Errorf("D = %v, want inactive with its cooldown", m)
+	}
+
+	// Membership only: the queue and invitations are shown per timetable and session.
+	keys := slices.Sorted(maps.Keys(byName["A"]))
+	if want := []string{"active", "buddy_group", "cooldown_until", "first_name", "id", "last_name", "membership_id"}; !slices.Equal(keys, want) {
+		t.Errorf("member fields = %v, want %v", keys, want)
 	}
 
 	f.admin(http.MethodGet, groupPath(999, "members"), nil).wantError(http.StatusNotFound, "Group not found")
-}
-
-// Tied members are listed in the order the scheduler uses for the next session to be sent.
-func TestGroupMembersBreakTiesLikeNextSession(t *testing.T) {
-	f := newScheduleFixture(t, []string{"18:00"}, 1)
-	g := f.groupIn("Juniors", 100)
-	for _, name := range []string{"A", "B", "C", "D", "E", "F"} {
-		f.student(name, g)
-	}
-
-	f.exec("UPDATE student_groups SET joined_at = '2029-01-01 00:00:00'") // all tied
-
-	var overview []string
-	for _, m := range f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array() {
-		overview = append(overview, m["first_name"].(string))
-	}
-
-	eligible, err := eligibleQueue(f.db, clubLocation(f.srv.db), f.sessionID, sessionDate, f.timetable)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var scheduler []string
-	for _, c := range eligible {
-		scheduler = append(scheduler, c.FirstName)
-	}
-	if !slices.Equal(overview, scheduler) {
-		t.Fatalf("overview order %v, scheduler order %v", overview, scheduler)
-	}
-}
-
-func TestGroupMembersQueueOverrideOnlyWhenItPlacesMember(t *testing.T) {
-	// Had a turn after joining: the turn, not the join, sets the position.
-	f := newScheduleFixture(t, []string{"18:00"}, 1)
-	g := f.groupIn("Juniors", 100)
-	a := f.student("A", g)
-	prev := f.session("2029-06-01", f.timetable)
-	f.invitation(prev, a, f.timeslots[0], f.assign(prev, f.instructor("Prev")), g, "confirmed")
-
-	m := f.admin(http.MethodGet, groupPath(g, "members"), nil).status(http.StatusOK).array()[0]
-	if m["queue_override"] != nil || m["last_turn_at"] != "2029-06-01 00:00:00" {
-		t.Fatalf("member = %v", m)
-	}
 }
 
 func TestGroupNonMembers(t *testing.T) {
@@ -273,8 +225,6 @@ func TestGroupRoutesRejectBadInput(t *testing.T) {
 		notFound("POST", "/api/groups/x/unset-default", nil, "Group not found"),
 		notFound("GET", "/api/groups/x/members", nil, "Group not found"),
 		notFound("POST", "/api/groups/x/members", map[string]any{"student_id": st}, "Group not found"),
-		notFound("PUT", p("/api/groups/x/members/%d/invite-next", st), map[string]any{"enabled": true}, "Group not found"),
-		notFound("PUT", p("/api/groups/%d/members/x/invite-next", g), map[string]any{"enabled": true}, "Member not found"),
 		notFound("DELETE", p("/api/groups/x/members/%d", st), nil, "Group not found"),
 		notFound("DELETE", p("/api/groups/%d/members/x", g), nil, "Member not found"),
 		notFound("GET", "/api/groups/x/non-members", nil, "Group not found"),
@@ -286,7 +236,6 @@ func TestGroupRoutesRejectBadInput(t *testing.T) {
 		badJSON("POST", "/api/groups"),
 		badJSON("PUT", p("/api/groups/%d", g)),
 		badJSON("POST", p("/api/groups/%d/members", g)),
-		badJSON("PUT", p("/api/groups/%d/members/%d/invite-next", g, st)),
 	)
 	if e.row("SELECT is_default FROM groups WHERE id = ?", g)["is_default"] != int64(0) {
 		t.Fatal("rejected set-default changed the default group")

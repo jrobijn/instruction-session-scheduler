@@ -1,16 +1,12 @@
 package server
 
 import (
-	"cmp"
 	"net/http"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/db"
 	"github.com/jrobijn/instruction-session-scheduler/backend/internal/httpx"
-	"github.com/jrobijn/instruction-session-scheduler/backend/internal/queue"
 )
 
 type Group struct {
@@ -28,45 +24,6 @@ type Group struct {
 type GroupRef struct {
 	ID   int64  `db:"id" json:"id"`
 	Name string `db:"name" json:"name"`
-}
-
-// GroupMember is a member in a group's queue, with what only the group page shows.
-type GroupMember struct {
-	queue.Member
-	groupMemberExtras
-
-	// Computed from the member and the extras.
-	Position      *int64            `json:"queue_position"` // 1-based among active members; nil for inactive ones
-	InviteNext    bool              `json:"invite_next"`
-	QueueOverride *QueueOverride    `json:"queue_override"`
-	BuddyGroup    *MemberBuddyGroup `json:"buddy_group"`
-}
-
-// groupMemberExtras is the per-student information only the group page needs.
-type groupMemberExtras struct {
-	StudentID         int64  `db:"student_id" json:"-"`
-	ActiveInvitations int64  `db:"active_invitations" json:"active_invitations"`
-	BuddyGroupID      *int64 `db:"buddy_group_id" json:"-"`
-}
-
-// QueueOverride says which event placed a member at the back of the queue.
-type QueueOverride struct {
-	Reason string `json:"reason"` // joined, reactivated or cooldown
-	At     string `json:"at"`
-}
-
-type MemberBuddyGroup struct {
-	ID      int64   `json:"id"`
-	Name    string  `json:"name"`
-	Buddies []Buddy `json:"buddies"` // the other members
-}
-
-type Buddy struct {
-	ID        int64   `db:"id" json:"id"`
-	FirstName string  `db:"first_name" json:"first_name"`
-	LastName  string  `db:"last_name" json:"last_name"`
-	GroupID   *int64  `db:"group_id" json:"group_id"`
-	GroupName *string `db:"group_name" json:"group_name"`
 }
 
 func (s *Server) groupRoutes() {
@@ -280,8 +237,7 @@ func (s *Server) groupRoutes() {
 		return nil
 	})
 
-	// List a group's members in queue order, with queue position, override reason and buddy
-	// group details.
+	// List a group's members by name, with their buddy group.
 	s.adminRoute("GET /api/groups/{id}/members", func(w http.ResponseWriter, r *http.Request) error {
 		groupID, ok := pathID(r, "id")
 		if !ok {
@@ -298,98 +254,69 @@ func (s *Server) groupRoutes() {
 			return nil
 		}
 
-		queueMembers, err := queue.LoadMembers(s.db)
-		if err != nil {
-			return err
+		// memberBuddyGroup is the buddy group a member is in. Elsewhere are its members not in
+		// this group: they are never invited together, as buddies are only taken along from their
+		// own group's queue.
+		type memberBuddyGroup struct {
+			ID        int64   `json:"id"`
+			Name      string  `json:"name"` // the members' first names, as on the students list
+			Elsewhere []Buddy `json:"elsewhere"`
 		}
 
-		extras, err := db.Many[groupMemberExtras](s.db, `
-			SELECT sg.student_id, bgm.buddy_group_id,
-				(SELECT COUNT(*) FROM invitations i
-					JOIN training_sessions ts ON ts.id = i.session_id
-					WHERE i.student_id = sg.student_id AND i.status IN ('scheduled', 'invited', 'confirmed')
-						AND ts.status != 'completed') AS active_invitations
+		// groupMember is a member as the group page lists them. Their place in the queue is shown
+		// per timetable (see queues.go).
+		type groupMember struct {
+			ID            int64             `db:"id" json:"id"`
+			FirstName     string            `db:"first_name" json:"first_name"`
+			LastName      string            `db:"last_name" json:"last_name"`
+			MembershipID  string            `db:"membership_id" json:"membership_id"`
+			Active        int64             `db:"active" json:"active"`
+			CooldownUntil *string           `db:"cooldown_until" json:"cooldown_until"` // as stored
+			BuddyGroup    *memberBuddyGroup `db:"-" json:"buddy_group"`
+		}
+
+		members, err := db.Many[groupMember](s.db, `
+			SELECT s.id, s.first_name, s.last_name, s.membership_id, s.active, s.cooldown_until
 			FROM student_groups sg
-			LEFT JOIN buddy_group_members bgm ON bgm.student_id = sg.student_id
-			WHERE sg.group_id = ?`, groupID)
+			JOIN students s ON s.id = sg.student_id AND s.deleted_at IS NULL
+			WHERE sg.group_id = ?
+			ORDER BY s.last_name, s.first_name, s.id`, groupID)
 		if err != nil {
 			return err
 		}
 
-		extrasByID := map[int64]groupMemberExtras{}
-		for _, x := range extras {
-			extrasByID[x.StudentID] = x
-		}
-
-		// Active members first, in the order the scheduler uses: ties are broken with the next
-		// session still to be sent as the seed, so the overview shows that session's order (seed 0
-		// without one).
-		seed, _, err := db.One[int64](s.db, `
-			SELECT id FROM training_sessions
-			WHERE status IN ('draft', 'scheduled') AND date >= ?
-			ORDER BY date LIMIT 1`, s.now().In(clubLocation(s.db)).Format(time.DateOnly))
+		buddyGroups, err := loadBuddyGroups(s.db)
 		if err != nil {
 			return err
 		}
 
-		inGroup := slices.DeleteFunc(queueMembers, func(m queue.Member) bool { return m.GroupID != groupID })
-		queue.Sort(inGroup, seed)
-		members := make([]GroupMember, len(inGroup))
-		for i, m := range inGroup {
-			members[i] = GroupMember{Member: m, groupMemberExtras: extrasByID[m.ID]}
-		}
-
-		slices.SortStableFunc(members, func(a, b GroupMember) int { return cmp.Compare(b.Active, a.Active) })
-
-		// Buddy group names are built from member first names (matches the students list).
-		type buddyRow struct {
-			BuddyGroupID int64 `db:"buddy_group_id"`
-			Buddy
-		}
-
-		buddies, err := db.Many[buddyRow](s.db, `
-			SELECT bgm.student_id AS id, bgm.buddy_group_id, s.first_name, s.last_name, sg.group_id, g.name AS group_name
-			FROM buddy_group_members bgm
-			JOIN students s ON s.id = bgm.student_id AND s.deleted_at IS NULL
-			LEFT JOIN student_groups sg ON sg.student_id = s.id
-			LEFT JOIN groups g ON g.id = sg.group_id`)
-		if err != nil {
-			return err
-		}
-
-		buddiesByGroup := map[int64][]Buddy{}
-		for _, b := range buddies {
-			buddiesByGroup[b.BuddyGroupID] = append(buddiesByGroup[b.BuddyGroupID], b.Buddy)
-		}
-
-		position := int64(0)
-		for i := range members {
-			m := &members[i]
-			if m.QueueReason != nil {
-				m.QueueOverride = &QueueOverride{Reason: *m.QueueReason, At: m.QueueAt}
-			}
-
-			if m.Active != 0 {
-				position++
-				p := position
-				m.Position = &p
-			}
-
-			m.InviteNext = m.InviteNextPendingSince != nil
-
-			if m.BuddyGroupID != nil {
-				group := buddiesByGroup[*m.BuddyGroupID]
-				names := make([]string, len(group))
-				others := []Buddy{}
-				for j, b := range group {
-					names[j] = b.FirstName
-					if b.ID != m.ID {
-						others = append(others, b)
-					}
+		// The buddy groups with members in this group, by those members.
+		buddyGroupOf := map[int64]*memberBuddyGroup{}
+		for id, group := range buddyGroups {
+			var here []int64
+			names := make([]string, len(group))
+			elsewhere := []Buddy{}
+			for i, b := range group {
+				names[i] = b.FirstName
+				if b.GroupID != nil && *b.GroupID == groupID {
+					here = append(here, b.ID)
+				} else {
+					elsewhere = append(elsewhere, b)
 				}
-
-				m.BuddyGroup = &MemberBuddyGroup{ID: *m.BuddyGroupID, Name: strings.Join(names, " & "), Buddies: others}
 			}
+
+			if len(here) == 0 {
+				continue
+			}
+
+			bg := &memberBuddyGroup{ID: id, Name: strings.Join(names, " & "), Elsewhere: elsewhere}
+			for _, sid := range here {
+				buddyGroupOf[sid] = bg
+			}
+		}
+
+		for i := range members {
+			members[i].BuddyGroup = buddyGroupOf[members[i].ID]
 		}
 
 		httpx.OK(w, members)
@@ -445,63 +372,6 @@ func (s *Server) groupRoutes() {
 		})
 		if err != nil {
 			return err
-		}
-
-		httpx.Success(w)
-		return nil
-	})
-
-	// Toggle "invite next": the member jumps the queue until they get a counted invitation.
-	s.adminRoute("PUT /api/groups/{id}/members/{studentId}/invite-next", func(w http.ResponseWriter, r *http.Request) error {
-		type request struct {
-			Enabled *bool `json:"enabled"`
-		}
-
-		in, err := decode[request](r)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return nil
-		}
-
-		if in.Enabled == nil {
-			httpx.Error(w, http.StatusBadRequest, "enabled (boolean) is required")
-			return nil
-		}
-
-		id, ok := pathID(r, "id")
-		if !ok {
-			httpx.Error(w, http.StatusNotFound, "Group not found")
-			return nil
-		}
-
-		_, found, err := db.One[int](s.db, "SELECT 1 FROM groups WHERE id = ?", id)
-		if err != nil {
-			return err
-		}
-		if !found {
-			httpx.Error(w, http.StatusNotFound, "Group not found")
-			return nil
-		}
-
-		studentID, ok := pathID(r, "studentId")
-		if !ok {
-			httpx.Error(w, http.StatusNotFound, "Member not found")
-			return nil
-		}
-
-		value := "NULL"
-		if *in.Enabled {
-			value = "datetime('now')"
-		}
-
-		res, err := s.db.Exec("UPDATE student_groups SET invite_next_at = "+value+" WHERE group_id = ? AND student_id = ?",
-			id, studentID)
-		if err != nil {
-			return err
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			httpx.Error(w, http.StatusNotFound, "Member not found")
-			return nil
 		}
 
 		httpx.Success(w)

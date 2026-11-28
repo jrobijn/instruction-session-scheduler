@@ -13,7 +13,7 @@ export interface DialogProps {
   description?: ReactNode;
   /** Right-aligned action buttons; put the primary action last. */
   footer?: ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   children?: ReactNode;
 }
 

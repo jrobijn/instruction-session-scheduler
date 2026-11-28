@@ -18,14 +18,16 @@ export interface BadgeProps {
   icon?: ReactNode | false;
   /** Monospace, non-uppercase — for counts, ratios and times. */
   mono?: boolean;
+  /** De-emphasised: subtle text on a dashed outline, for options that don't apply. */
+  faded?: boolean;
   title?: string;
   children: ReactNode;
 }
 
-export function Badge({ tone = 'neutral', icon, mono, title, children }: BadgeProps) {
+export function Badge({ tone = 'neutral', icon, mono, faded, title, children }: BadgeProps) {
   const shownIcon = icon === false ? null : (icon ?? defaultIcons[tone]);
   return (
-    <span className={cx(styles.badge, styles[tone], mono && styles.mono)} title={title}>
+    <span className={cx(styles.badge, styles[tone], mono && styles.mono, faded && styles.faded)} title={title}>
       {shownIcon}
       {children}
     </span>

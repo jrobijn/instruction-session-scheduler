@@ -34,3 +34,9 @@
 .warning { --tone: var(--color-warning); }
 .danger { --tone: var(--color-danger); }
 .info { --tone: var(--color-info); }
+
+.faded {
+  --tone: var(--color-text-subtle);
+  border-style: dashed;
+  background: transparent;
+}

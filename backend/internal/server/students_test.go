@@ -361,6 +361,47 @@ func TestStudentCooldown(t *testing.T) {
 	e.admin(http.MethodPut, path, map[string]any{"days": 1}).wantError(http.StatusNotFound, "Student not found")
 }
 
+func TestStudentInviteNext(t *testing.T) {
+	e := newTestEnv(t)
+	a, b := e.group("A"), e.group("B")
+	s := e.student("Ann", a)
+	path := studentPath(s, "invite-next")
+	listed := func() any {
+		for _, st := range e.admin(http.MethodGet, "/api/students", nil).status(http.StatusOK).array() {
+			if toInt64(st["id"]) == s {
+				return st["invite_next"]
+			}
+		}
+
+		t.Fatal("student not listed")
+		return nil
+	}
+
+	e.admin(http.MethodPut, path, map[string]any{}).wantError(http.StatusBadRequest, "enabled (boolean) is required")
+	e.admin(http.MethodPut, path, map[string]any{"enabled": "yes"}).wantError(http.StatusBadRequest, "Invalid JSON body")
+	e.admin(http.MethodPut, studentPath(999, "invite-next"), map[string]any{"enabled": true}).
+		wantError(http.StatusNotFound, "Student not found")
+
+	e.admin(http.MethodPut, path, map[string]any{"enabled": true}).status(http.StatusOK)
+	if e.row("SELECT invite_next_at FROM students WHERE id = ?", s)["invite_next_at"] == nil || listed() != true {
+		t.Fatal("invite-next not set")
+	}
+
+	// It belongs to the student, so it survives a change of group.
+	e.admin(http.MethodPut, studentPath(s, "groups"), map[string]any{"group_id": b}).status(http.StatusOK)
+	if listed() != true {
+		t.Fatal("invite-next lost when moving to another group")
+	}
+
+	e.admin(http.MethodPut, path, map[string]any{"enabled": false}).status(http.StatusOK)
+	if e.row("SELECT invite_next_at FROM students WHERE id = ?", s)["invite_next_at"] != nil || listed() != false {
+		t.Fatal("invite-next not cleared")
+	}
+
+	e.exec("UPDATE students SET deleted_at = datetime('now') WHERE id = ?", s)
+	e.admin(http.MethodPut, path, map[string]any{"enabled": true}).wantError(http.StatusNotFound, "Student not found")
+}
+
 func TestStudentRoutesRejectBadInput(t *testing.T) {
 	e := newTestEnv(t)
 	st := e.student("Student", e.group("Group"))
@@ -379,10 +420,12 @@ func TestStudentRoutesRejectBadInput(t *testing.T) {
 		notFound("PUT", "/api/students/x/groups", map[string]any{}, "Student not found"),
 		notFound("PUT", "/api/students/x/cooldown", map[string]any{"days": 1}, "Student not found"),
 		notFound("DELETE", "/api/students/x/cooldown", nil, "Student not found"),
+		notFound("PUT", "/api/students/x/invite-next", map[string]any{"enabled": true}, "Student not found"),
 		badJSON("POST", "/api/students"),
 		badJSON("PUT", p("/api/students/%d", st)),
 		badJSON("PUT", p("/api/students/%d/preferred-timeslots/%d", st, tt)),
 		badJSON("PUT", p("/api/students/%d/groups", st)),
 		badJSON("PUT", p("/api/students/%d/cooldown", st)),
+		badJSON("PUT", p("/api/students/%d/invite-next", st)),
 	)
 }
