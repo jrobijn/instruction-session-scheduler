@@ -191,6 +191,7 @@ docker build -t session-scheduler .
 docker run -p 3000:3000 \
   -v scheduler-data:/data \
   -e ADMIN_PASSWORD=changeme \
+  --log-opt max-size=10m --log-opt max-file=5 \
   session-scheduler
 ```
 
@@ -213,6 +214,29 @@ To check the mail server's TLS settings without sending email, see [backend/READ
 | `SMTP_PASS` | SMTP password | — |
 | `SMTP_FROM` | From address for emails | `SMTP_USER` |
 | `FRONTEND_URL` | Base URL for links in emails; set it to the app's public URL, or invitation links point to localhost | `http://localhost:5173` |
+
+### Logs
+
+The server logs one line per API request with the client's IP address, the route, its path values (such as `id=42`), the status and the duration. Route patterns are logged instead of paths, and `{token}` values are left out, so invitation tokens never appear. Static files and `/api/health` are not logged. Read the logs with `docker logs <container>`.
+
+Every line starts with a prefix for the part of the server that wrote it, so `docker logs <container> 2>&1 | grep 'email:'` shows only email lines:
+
+| Prefix | Lines |
+|--------|-------|
+| `api:` | One line per API request |
+| `email:` | Emails sent, failed sends, recovered panics, and the console previews shown when SMTP is not configured |
+| `timer:` | Invitation expiry timers: restored at startup, each timer firing, failed expiries, recovered panics |
+| `invite:` | Invitation changes the request line can't identify: confirmed, declined and cancelled by students, expired, and the replacement invited for a vacated spot (or why there was none) |
+| `notify:` | Notifications that could not be created or pushed to open admin pages |
+| `db:` | Migrations and backups made before migrating |
+| `server:` | Startup, shutdown, internal errors (500s) and failed live updates to the sessions list |
+| `sse:`, `httpx:` | Failures encoding an event or a response |
+
+IP addresses can be personal data, so keep the logs bounded. Docker's default `json-file` log driver keeps logs for as long as the container exists, with no size limit. The `--log-opt` flags in the run command above cap them at 5 files of 10 MB each, and Docker deletes the oldest file when they are full. Log options take effect only when a container is created, so recreate an existing container to apply them. To cap every container on the host instead, set `log-opts` in `/etc/docker/daemon.json`:
+
+```json
+{ "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "5" } }
+```
 
 ### Data Persistence
 

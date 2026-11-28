@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -226,4 +227,61 @@ func TestSessionCancelClearsTimers(t *testing.T) {
 	if n := f.timerCount(); n != 0 {
 		t.Fatalf("%d timers after cancelling the session", n)
 	}
+}
+
+func TestExpiryTimerIsLogged(t *testing.T) {
+	f, _ := invitedPair(t)
+	a := f.invitationOf("A")
+	id := toInt64(a["id"])
+	logs := captureLog(t)
+
+	f.srv.mu.Lock()
+	f.srv.scheduleInvitationExpiry(id, time.Time{})
+	f.srv.mu.Unlock()
+
+	got := waitForLog(t, logs, fmt.Sprintf(" invited as replacement for invitation %d ", id))
+	wantLines(t, got,
+		fmt.Sprintf("timer: invitation %d expiry fired\n", id),
+		fmt.Sprintf("invite: invitation %d expired: student %d, session %d\n", id, a["student_id"], f.sessionID),
+		fmt.Sprintf("invite: invitation %d invited as replacement for invitation %d ", f.invitationOf("C")["id"], id),
+	)
+}
+
+// A panic in a timer callback is logged instead of ending the process.
+func TestExpiryTimerPanicIsRecovered(t *testing.T) {
+	f, _ := invitedPair(t)
+	id := toInt64(f.invitationOf("A")["id"])
+	logs := captureLog(t)
+
+	f.srv.mu.Lock()
+	now := f.srv.now
+	f.srv.now = nil // inTx calls it first
+	f.srv.scheduleInvitationExpiry(id, time.Time{})
+	f.srv.mu.Unlock()
+
+	waitForLog(t, logs, fmt.Sprintf("timer: panic expiring invitation %d: ", id))
+	f.srv.mu.Lock()
+	f.srv.now = now
+	f.srv.mu.Unlock()
+
+	if st := f.statusOf("A"); st != "invited" {
+		t.Fatalf("status = %s, want invited", st)
+	}
+}
+
+// waitForLog waits until the log contains want and returns what was logged.
+func waitForLog(t *testing.T, logs *syncBuffer, want string) string {
+	t.Helper()
+	var got string
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(got, want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("log is missing %q; log:\n%s", want, got)
+		}
+
+		time.Sleep(10 * time.Millisecond)
+		got += logs.take()
+	}
+
+	return got
 }

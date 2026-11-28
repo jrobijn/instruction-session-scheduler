@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +41,7 @@ type Mailer struct {
 func New(cfg Config) *Mailer {
 	m := &Mailer{cfg: cfg, enabled: cfg.Host != "" && cfg.User != ""}
 	if !m.enabled {
-		log.Println("⚠ SMTP not configured — emails will be logged to console instead of sent.")
+		log.Println("email: SMTP not configured, emails are logged to the console instead of sent")
 	}
 
 	return m
@@ -62,7 +63,7 @@ func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []stri
 
 	if !m.enabled {
 		for _, l := range previewLines {
-			log.Println(l)
+			log.Printf("email: %s", l)
 		}
 
 		if m.cfg.PreviewDir != "" {
@@ -70,7 +71,7 @@ func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []stri
 				name := fmt.Sprintf("%d-%s.html", time.Now().UnixMilli(), strings.ToLower(nonAlnum.ReplaceAllString(subject, "-")))
 				file := filepath.Join(m.cfg.PreviewDir, name)
 				if err := os.WriteFile(file, []byte(htmlBody), 0o644); err == nil {
-					log.Printf("   Saved preview: %s", file)
+					log.Printf("email: saved preview %s", file)
 				}
 			}
 		}
@@ -79,12 +80,19 @@ func (m *Mailer) deliver(to, subject, text, htmlBody string, previewLines []stri
 	}
 
 	go func() {
+		// A panic in this goroutine would end the process; nothing above it recovers.
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("email: panic sending to %s (%q): %v\n%s", to, subject, p, debug.Stack())
+			}
+		}()
+
 		if err := m.send(to, subject, text, htmlBody); err != nil {
-			log.Printf("email to %s (%q) failed: %v", to, subject, err)
+			log.Printf("email: send to %s (%q) failed: %v", to, subject, err)
 			return
 		}
 
-		log.Printf("Message sent to %s: %s", to, subject)
+		log.Printf("email: sent to %s: %s", to, subject)
 	}()
 }
 

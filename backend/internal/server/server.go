@@ -71,7 +71,7 @@ func (s *Server) Stop() {
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return accessLog(s.mux)
 }
 
 func (s *Server) routes() {
@@ -164,6 +164,6 @@ func (s *Server) publicRoute(pattern string, fn handlerFunc) {
 }
 
 func (s *Server) internalError(w http.ResponseWriter, err error) {
-	log.Printf("internal error: %v", err)
+	log.Printf("server: internal error: %v", err)
 	httpx.Error(w, http.StatusInternalServerError, "Internal server error")
 }

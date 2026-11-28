@@ -124,13 +124,13 @@ func (s *Server) createNotification(typ string, invitationID any, sessionID int6
 		RETURNING id, type, invitation_id, session_id, student_name, session_date, timeslot_start_time, read, created_at`,
 		typ, invitationID, sessionID, studentName, sessionDate, startTime)
 	if err != nil {
-		log.Printf("create notification %s for session %d: %v", typ, sessionID, err)
+		log.Printf("notify: create %s for session %d: %v", typ, sessionID, err)
 		return
 	}
 
 	count, err := s.unreadCount()
 	if err != nil {
-		log.Printf("count unread notifications: %v", err)
+		log.Printf("notify: count unread: %v", err)
 		return
 	}
 

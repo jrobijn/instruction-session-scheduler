@@ -48,7 +48,7 @@ func run() error {
 	}
 
 	if *migrateOnly {
-		log.Printf("database %s is up to date", cfg.DBPath)
+		log.Printf("db: %s is up to date", cfg.DBPath)
 		return nil
 	}
 
@@ -77,7 +77,7 @@ func run() error {
 
 	listenErr := make(chan error, 1)
 	go func() {
-		log.Printf("Server running on http://localhost:%s", cfg.Port)
+		log.Printf("server: listening on http://localhost:%s", cfg.Port)
 		listenErr <- srv.ListenAndServe()
 	}()
 
@@ -89,7 +89,7 @@ func run() error {
 
 	// Restore default signal handling so a second Ctrl+C kills a hanging shutdown.
 	stop()
-	log.Printf("shutting down")
+	log.Printf("server: shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

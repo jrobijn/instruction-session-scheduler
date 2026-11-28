@@ -67,7 +67,7 @@ func (d *DB) Migrate(ctx context.Context) error {
 
 	results, err := provider.Up(ctx)
 	for _, r := range results {
-		log.Printf("migration %s", r)
+		log.Printf("db: migration %s", r)
 	}
 
 	return err
@@ -95,6 +95,6 @@ func (d *DB) backup(version int64) error {
 		return fmt.Errorf("back up database before migrating: %w", err)
 	}
 
-	log.Printf("database backed up to %s", dest)
+	log.Printf("db: backed up to %s", dest)
 	return nil
 }
